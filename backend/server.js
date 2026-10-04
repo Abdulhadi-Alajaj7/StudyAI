@@ -6,7 +6,7 @@ import compression from "compression";
 
 import veritabaninaBaglan from "./config/db.js";
 import authRoutes from "./routes/authRoutes.js";
-
+import dersRoutes from "./routes/dersRoutes.js";
 const app = express();
 
 // MongoDB bağlantısı
@@ -28,6 +28,7 @@ app.use(cookieParser());
 
 // Routes
 app.use("/auth", authRoutes);
+app.use("/dersler", dersRoutes);
 
 // Ana route
 app.get("/", (req, res) => {
