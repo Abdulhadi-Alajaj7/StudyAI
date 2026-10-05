@@ -193,3 +193,19 @@ export const sifreDegistir = async (req, res, next) => {
     next(hata);
   }
 };
+
+/* =========================
+   Çıkış Yap
+========================= */
+export const cikisYap = async (req, res) => {
+  res.clearCookie("token", {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+  });
+
+  res.status(200).json({
+    basarili: true,
+    mesaj: "Çıkış başarıyla yapıldı",
+  });
+};

@@ -7,6 +7,7 @@ import {
     profilGetir,
     profilGuncelle,
     sifreDegistir,
+    cikisYap
 } from "../controllers/authControllers.js";
 
 import kimlikDogrula from "../middleware/auth.js";
@@ -51,6 +52,8 @@ const girisDogrulama = [
 router.post("/kayit", kayitDogrulama, kayitOl);
 
 router.post("/giris", girisDogrulama, girisYap);
+
+router.post("/cikis", cikisYap);
 
 /* =========================
    Korumalı Rotalar
