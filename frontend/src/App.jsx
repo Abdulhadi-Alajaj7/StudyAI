@@ -10,6 +10,8 @@ import Derslerim from "./pages/Derslerim.jsx";
 import CalismaPlani from "./pages/CalismaPlani.jsx";
 import Ilerleme from "./pages/Ilerleme.jsx";
 import Profil from "./pages/Profil.jsx";
+import Yanlislarim from "./pages/Yanlislarim";
+import Sinavlarim from "./pages/Sinavlarim";
 
 function App() {
     return (
@@ -28,6 +30,8 @@ function App() {
                     <Route index element={<KontrolPaneli />} />
                     <Route path="dersler" element={<Derslerim />} />
                     <Route path="calisma-plani" element={<CalismaPlani />} />
+                    <Route path="yanlislarim" element={<Yanlislarim />} />
+                    <Route path="sinavlarim" element={<Sinavlarim />} />
                     <Route path="ilerleme" element={<Ilerleme />} />
                     <Route path="profil" element={<Profil />} />
                 </Route>
