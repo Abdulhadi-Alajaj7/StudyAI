@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import axios from "axios";
 
@@ -36,8 +36,35 @@ function PanelLayout() {
     const [isDark, setIsDark] = useState(false);
     const [profilMenuAcik, setProfilMenuAcik] = useState(false);
     const [sidebarAcik, setSidebarAcik] = useState(true);
+    const [kullanici, setKullanici] = useState(null);
 
     const navigate = useNavigate();
+
+    useEffect(() => {
+        const profilGetir = async () => {
+            try {
+                const res = await axios.get("http://localhost:5000/auth/profil", {
+                    withCredentials: true,
+                });
+                setKullanici(res.data.kullanici || res.data);
+            } catch (err) {
+                console.error("Profil getirilemedi:", err);
+            }
+        };
+        profilGetir();
+    }, []);
+
+    const getInitials = (isim) => {
+        if (!isim) return "U";
+        const parts = isim.trim().split(" ");
+        if (parts.length >= 2) {
+            return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+        }
+        return isim.substring(0, 2).toUpperCase();
+    };
+
+    const gorunenIsim = kullanici?.kullaniciAdi || "Kullanıcı";
+    const basHarfler = getInitials(kullanici?.kullaniciAdi);
 
     const cikisYap = async () => {
         try {
@@ -494,7 +521,7 @@ function PanelLayout() {
                                         font-bold
                                     "
                                 >
-                                    AY
+                                    {basHarfler}
                                 </div>
 
 
@@ -511,7 +538,7 @@ function PanelLayout() {
                                             }
                                         `}
                                     >
-                                        Ahmet Yılmaz
+                                        {gorunenIsim}
                                     </p>
 
                                     <p
@@ -605,7 +632,7 @@ function PanelLayout() {
 
                 {/* Page Content */}
                 <div className="flex-1 px-4 sm:px-6 lg:px-10 py-8 pb-20">
-                    <Outlet context={{ isDark }} />
+                    <Outlet context={{ isDark, kullanici }} />
                 </div>
 
             </div>
