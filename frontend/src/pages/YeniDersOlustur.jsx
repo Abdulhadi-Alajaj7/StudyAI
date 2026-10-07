@@ -302,3 +302,5 @@ function YeniDersOlustur() {
         </div>
     );
 }
+
+export default YeniDersOlustur;
