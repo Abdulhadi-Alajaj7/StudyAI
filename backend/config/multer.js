@@ -1,8 +1,12 @@
 import multer from "multer";
 import path from "path";
 import fs from "fs";
+import { fileURLToPath } from "url";
 
-const uploadDir = path.join(process.cwd(), "uploads", "materyaller");
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const uploadDir = path.join(__dirname, "..", "uploads", "materyaller");
+
 if (!fs.existsSync(uploadDir)) {
     fs.mkdirSync(uploadDir, { recursive: true });
 }
@@ -19,22 +23,23 @@ const storage = multer.diskStorage({
 });
 
 const fileFilter = (req, file, cb) => {
-    const allowedTypes = [
-        "application/pdf",
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-        "text/plain"
-    ];
-    
-    // Check mime type or extension
     const ext = path.extname(file.originalname).toLowerCase();
-    const allowedExts = [".pdf", ".docx", ".pptx", ".txt"];
+    const mimetype = file.mimetype;
 
-    if (allowedTypes.includes(file.mimetype) || allowedExts.includes(ext)) {
-        cb(null, true);
-    } else {
-        cb(new Error("Sadece PDF, DOCX, PPTX ve TXT dosyaları desteklenir."), false);
+    if (ext === ".pdf" && mimetype === "application/pdf") {
+        return cb(null, true);
     }
+    if (ext === ".docx" && mimetype === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") {
+        return cb(null, true);
+    }
+    if (ext === ".pptx" && mimetype === "application/vnd.openxmlformats-officedocument.presentationml.presentation") {
+        return cb(null, true);
+    }
+    if (ext === ".txt" && mimetype === "text/plain") {
+        return cb(null, true);
+    }
+
+    cb(new Error("Sadece PDF, DOCX, PPTX ve TXT dosyaları desteklenir."), false);
 };
 
 const upload = multer({

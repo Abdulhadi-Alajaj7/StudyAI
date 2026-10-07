@@ -24,27 +24,37 @@ export const materyalYukle = async (req, res) => {
         }
 
         const yuklenenMateryaller = [];
+        const basariliIds = [];
 
-        for (const file of req.files) {
-            const ext = path.extname(file.originalname).substring(1).toLowerCase();
-            const dosyaTuru = ext === "docx" ? "docx" : ext === "pptx" ? "pptx" : ext === "txt" ? "txt" : "pdf";
+        try {
+            for (const file of req.files) {
+                const ext = path.extname(file.originalname).substring(1).toLowerCase();
+                const dosyaTuru = ext === "docx" ? "docx" : ext === "pptx" ? "pptx" : ext === "txt" ? "txt" : "pdf";
 
-            const yeniMateryal = await Materyal.create({
-                kullaniciId,
-                dersId,
-                dosyaAdi: file.filename,
-                orijinalDosyaAdi: file.originalname,
-                dosyaYolu: file.path,
-                dosyaTuru,
-                mimeTuru: file.mimetype,
-                dosyaBoyutu: file.size,
-                durum: "yuklendi"
-            });
+                const yeniMateryal = await Materyal.create({
+                    kullaniciId,
+                    dersId,
+                    dosyaAdi: file.filename,
+                    orijinalDosyaAdi: file.originalname,
+                    dosyaYolu: file.path,
+                    dosyaTuru,
+                    mimeTuru: file.mimetype,
+                    dosyaBoyutu: file.size,
+                    durum: "yuklendi"
+                });
 
-            yuklenenMateryaller.push(yeniMateryal);
+                basariliIds.push(yeniMateryal._id);
+                yuklenenMateryaller.push(yeniMateryal);
+            }
+
+            res.status(201).json({ mesaj: "Materyaller başarıyla yüklendi", materyaller: yuklenenMateryaller });
+        } catch (dbError) {
+            // DB kaydı sırasında hata olursa oluşturulanları geri al
+            if (basariliIds.length > 0) {
+                await Materyal.deleteMany({ _id: { $in: basariliIds } });
+            }
+            throw dbError; // Outer catch'e fırlat ki dosyalar da silinsin
         }
-
-        res.status(201).json({ mesaj: "Materyaller başarıyla yüklendi", materyaller: yuklenenMateryaller });
     } catch (error) {
         if (req.files) {
             req.files.forEach(file => {

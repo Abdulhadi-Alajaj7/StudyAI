@@ -11,8 +11,8 @@ function MateryalEkle() {
     const { dersId } = useParams();
     
     // Get created course and uiPrefs from state if available
-    const ders = location.state?.ders;
-    const uiPrefs = location.state?.uiPrefs;
+    const [ders, setDers] = useState(location.state?.ders || null);
+    const uiPrefs = location.state?.uiPrefs || { renk: "indigo", simge: "desktop", dersKodu: "" };
 
     const [materyaller, setMateryaller] = useState([]);
     const [yukleniyor, setYukleniyor] = useState(false);
@@ -26,7 +26,21 @@ function MateryalEkle() {
 
     useEffect(() => {
         materyalleriGetir();
+        if (!ders) {
+            dersGetir();
+        }
     }, [dersId]);
+
+    const dersGetir = async () => {
+        try {
+            const res = await axios.get(`http://localhost:5000/dersler/${dersId}`, { withCredentials: true });
+            if (res.data.ders) {
+                setDers(res.data.ders);
+            }
+        } catch (err) {
+            console.error("Ders bilgisi getirilemedi", err);
+        }
+    };
 
     const materyalleriGetir = async () => {
         try {
@@ -55,10 +69,7 @@ function MateryalEkle() {
 
         try {
             await axios.post(`http://localhost:5000/materyaller/ders/${dersId}`, formData, {
-                withCredentials: true,
-                headers: {
-                    "Content-Type": "multipart/form-data"
-                }
+                withCredentials: true
             });
             // Yukleme sonrasi dosyaları tekrar getir
             materyalleriGetir();
@@ -169,13 +180,13 @@ function MateryalEkle() {
                             <div className="w-10 h-10 rounded-lg bg-indigo-500/10 flex items-center justify-center shrink-0">
                                 <CpuChipIcon className="w-5 h-5 text-[#4F46E5]" />
                             </div>
-                            <h3 className={`text-[16px] md:text-[18px] font-bold ${textPrimary}`}>Yapay Zekâ Analiz Motoru Devrede</h3>
+                            <h3 className={`text-[16px] md:text-[18px] font-bold ${textPrimary}`}>İçerik Analizi</h3>
                         </div>
                         
                         <p className={`text-[13px] ${textSecondary} mb-6 leading-relaxed`}>
                             {materyaller.length > 0 
-                                ? "Materyaller yüklendi. İçerik işleme bir sonraki geliştirme aşamasında gerçekleştirilecek." 
-                                : "Materyaller hazırlanıyor: Dosyalarındaki içerikler çıkarılıyor ve ders analizi için hazırlanıyor."}
+                                ? "Materyaller yüklendi. Analiz sistemi sonraki aşamada etkinleştirilecek." 
+                                : "Materyaller hazırlanıyor: Dosyalarındaki içerikler analiz için hazırlanıyor."}
                         </p>
 
                         <div className="mb-6">
@@ -213,10 +224,10 @@ function MateryalEkle() {
 
                         <div className={`mt-6 pt-4 border-t flex items-center justify-between text-[11px] font-medium ${isDark ? 'border-[#26334A] text-[#7F8AA3]' : 'border-[#E7E5EF] text-[#94A3B8]'}`}>
                             <div className="flex items-center gap-1.5">
-                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-                                Sinir Ağı Motoru: Çevrimiçi
+                                <span className="w-1.5 h-1.5 rounded-full bg-gray-500"></span>
+                                Analiz sistemi sonraki aşamada etkinleştirilecek.
                             </div>
-                            <span>Gecikme: --ms</span>
+                            <span>Bekliyor</span>
                         </div>
                     </div>
                 </div>

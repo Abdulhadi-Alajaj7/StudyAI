@@ -11,6 +11,8 @@ function DersHazir() {
     const { dersId } = useParams();
     
     const [materyalSayisi, setMateryalSayisi] = useState(0);
+    const [ders, setDers] = useState(location.state?.ders || null);
+    const uiPrefs = location.state?.uiPrefs || { renk: "indigo", simge: "desktop", dersKodu: "" };
 
     useEffect(() => {
         const materyalleriGetir = async () => {
@@ -21,13 +23,23 @@ function DersHazir() {
                 console.error("Materyaller alınamadı", err);
             }
         };
+        const dersGetir = async () => {
+            try {
+                const res = await axios.get(`http://localhost:5000/dersler/${dersId}`, { withCredentials: true });
+                if (res.data.ders) {
+                    setDers(res.data.ders);
+                }
+            } catch (err) {
+                console.error("Ders bilgisi alınamadı", err);
+            }
+        };
         if (dersId) {
             materyalleriGetir();
+            if (!ders) {
+                dersGetir();
+            }
         }
     }, [dersId]);
-
-    const ders = location.state?.ders;
-    const uiPrefs = location.state?.uiPrefs || { renk: "indigo", simge: "desktop", dersKodu: "" };
 
     const cardBg = isDark ? "bg-[#162137] border-[#26334A]" : "bg-white border-[#E7E5EF]";
     const textPrimary = isDark ? "text-[#F8FAFC]" : "text-[#0F172A]";
