@@ -1,5 +1,6 @@
-import React from "react";
-import { useOutletContext, useNavigate, useLocation } from "react-router-dom";
+import React, { useState, useEffect } from "react";
+import { useOutletContext, useNavigate, useLocation, useParams } from "react-router-dom";
+import axios from "axios";
 import DersOlusturmaAdimlari from "../components/DersOlusturmaAdimlari";
 import { CheckBadgeIcon, ArrowRightIcon, BookOpenIcon, DocumentTextIcon, CheckIcon, CpuChipIcon, ListBulletIcon, ChatBubbleBottomCenterTextIcon, PuzzlePieceIcon, SparklesIcon, ComputerDesktopIcon, CodeBracketIcon, CircleStackIcon, CalculatorIcon, BeakerIcon } from "@heroicons/react/24/outline";
 
@@ -7,6 +8,24 @@ function DersHazir() {
     const { isDark } = useOutletContext();
     const navigate = useNavigate();
     const location = useLocation();
+    const { dersId } = useParams();
+    
+    const [materyalSayisi, setMateryalSayisi] = useState(0);
+
+    useEffect(() => {
+        const materyalleriGetir = async () => {
+            try {
+                const res = await axios.get(`http://localhost:5000/materyaller/ders/${dersId}`, { withCredentials: true });
+                setMateryalSayisi(res.data.materyaller?.length || 0);
+            } catch (err) {
+                console.error("Materyaller alınamadı", err);
+            }
+        };
+        if (dersId) {
+            materyalleriGetir();
+        }
+    }, [dersId]);
+
     const ders = location.state?.ders;
     const uiPrefs = location.state?.uiPrefs || { renk: "indigo", simge: "desktop", dersKodu: "" };
 
@@ -118,7 +137,7 @@ function DersHazir() {
                                     </div>
                                 </div>
                                 <div className={`px-2.5 py-1 rounded text-[11px] font-bold ${isDark ? 'bg-[#1B2942] text-[#7F8AA3]' : 'bg-[#E2E8F0] text-[#64748B]'}`}>
-                                    -- Materyal
+                                    {materyalSayisi} Materyal
                                 </div>
                             </div>
 
@@ -305,7 +324,9 @@ function DersHazir() {
                                     
                                     <div className={`flex items-center gap-2 px-3 py-2 rounded-lg border border-dashed mb-5 ${isDark ? 'border-[#26334A] bg-[#0B1120]' : 'border-[#E7E5EF] bg-[#F8F7FC]'}`}>
                                         <BookOpenIcon className={`w-4 h-4 ${textSecondary}`} />
-                                        <span className={`text-[12px] font-medium ${textSecondary}`}>Henüz materyal eklenmedi</span>
+                                        <span className={`text-[12px] font-medium ${textSecondary}`}>
+                                            {materyalSayisi > 0 ? `${materyalSayisi} Materyal eklendi` : "Henüz materyal eklenmedi"}
+                                        </span>
                                     </div>
                                     
                                     <div className="mb-4">

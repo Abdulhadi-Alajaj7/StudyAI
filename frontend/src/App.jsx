@@ -60,12 +60,12 @@ function App() {
                         />
                         
                         <Route
-                            path="dersler/yeni/materyal"
+                            path="dersler/:dersId/materyal"
                             element={<MateryalEkle />}
                         />
                         
                         <Route
-                            path="dersler/yeni/hazir"
+                            path="dersler/:dersId/hazir"
                             element={<DersHazir />}
                         />
 

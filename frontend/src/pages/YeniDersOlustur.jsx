@@ -59,7 +59,7 @@ function YeniDersOlustur() {
             const yeniDers = res.data.ders;
             
             // Seçilen renk ve simge (frontend state) de sonraki sayfaya aktarılabilir
-            navigate("/panel/dersler/yeni/materyal", { state: { ders: yeniDers, uiPrefs: { renk: form.renk, simge: form.simge, dersKodu: form.dersKodu } } });
+            navigate(`/panel/dersler/${yeniDers._id}/materyal`, { state: { ders: yeniDers, uiPrefs: { renk: form.renk, simge: form.simge, dersKodu: form.dersKodu } } });
         } catch (err) {
             setError(err.response?.data?.hata || "Ders oluşturulurken bir hata meydana geldi.");
         } finally {
