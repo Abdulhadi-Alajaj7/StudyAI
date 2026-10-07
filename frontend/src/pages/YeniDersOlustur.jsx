@@ -3,6 +3,7 @@ import { useOutletContext, useNavigate } from "react-router-dom";
 import axios from "axios";
 import DersOlusturmaAdimlari from "../components/DersOlusturmaAdimlari";
 import { ArrowRightIcon, Bars3BottomLeftIcon, BookOpenIcon, ComputerDesktopIcon, CodeBracketIcon, CircleStackIcon, CalculatorIcon, BeakerIcon } from "@heroicons/react/24/outline";
+import DersKarti from "../components/DersKarti";
 
 function YeniDersOlustur() {
     const { isDark } = useOutletContext();
@@ -52,7 +53,10 @@ function YeniDersOlustur() {
             const payload = {
                 dersAdi: form.dersAdi,
                 aciklama: form.aciklama,
-                donem: form.donem
+                donem: form.donem,
+                dersKodu: form.dersKodu,
+                renk: form.renk,
+                simge: form.simge
             };
             
             const res = await axios.post("http://localhost:5000/dersler", payload, { withCredentials: true });
@@ -236,58 +240,15 @@ function YeniDersOlustur() {
                             <p className={`text-[13px] ${textSecondary} mt-1`}>Ders kartının Derslerim sayfasındaki görünümü</p>
                         </div>
                         
-                        <div className={`p-5 rounded-2xl border ${cardBg}`}>
-                            {/* Fake Course Card */}
-                            <div className="flex flex-col">
-                                <div className="flex items-start justify-between mb-4">
-                                    <div className="flex items-center gap-3">
-                                        <div className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 ${renkler.find(r => r.id === form.renk)?.bg || 'bg-[#4F46E5]'} bg-opacity-10`}>
-                                            {(() => {
-                                                const Icon = simgeler.find(s => s.id === form.simge)?.icon || ComputerDesktopIcon;
-                                                const colorClass = isDark ? `text-${form.renk}-400` : `text-${form.renk}-600`;
-                                                return <Icon className={`w-6 h-6 ${colorClass}`} style={{ color: form.renk === 'indigo' ? '#4F46E5' : form.renk === 'cyan' ? '#06B6D4' : form.renk === 'emerald' ? '#10B981' : form.renk === 'amber' ? '#F59E0B' : '#F43F5E' }} />;
-                                            })()}
-                                        </div>
-                                        <div>
-                                            <div className="flex gap-1.5 mb-1">
-                                                {form.dersKodu && (
-                                                    <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${isDark ? 'bg-white/10 text-white' : 'bg-black/5 text-[#0F172A]'}`}>
-                                                        {form.dersKodu}
-                                                    </span>
-                                                )}
-                                                {form.donem && (
-                                                    <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${isDark ? 'bg-indigo-500/10 text-[#818CF8]' : 'bg-indigo-500/10 text-[#4F46E5]'}`}>
-                                                        {form.donem}
-                                                    </span>
-                                                )}
-                                            </div>
-                                            <h3 className={`text-[18px] font-bold line-clamp-1 ${textPrimary}`}>{form.dersAdi || "Ders Adı"}</h3>
-                                        </div>
-                                    </div>
-                                </div>
-                                
-                                <p className={`text-[13px] line-clamp-2 ${textSecondary} mb-5 h-10`}>
-                                    {form.aciklama || "Ders açıklaması burada görüntülenecek."}
-                                </p>
-                                
-                                <div className={`flex items-center gap-2 px-3 py-2 rounded-lg border border-dashed mb-5 ${isDark ? 'border-[#26334A] bg-[#0B1120]' : 'border-[#E7E5EF] bg-[#F8F7FC]'}`}>
-                                    <BookOpenIcon className={`w-4 h-4 ${textSecondary}`} />
-                                    <span className={`text-[12px] font-medium ${textSecondary}`}>Henüz materyal eklenmedi</span>
-                                </div>
-                                
-                                <div className="mb-4">
-                                    <div className="flex items-center justify-between text-[12px] font-medium mb-1.5">
-                                        <span className={textSecondary}>Müfredat İlerlemesi</span>
-                                        <span className={textPrimary}>%0</span>
-                                    </div>
-                                    <div className={`w-full h-1.5 rounded-full ${isDark ? 'bg-[#26334A]' : 'bg-[#E7E5EF]'}`}></div>
-                                </div>
-                                
-                                <button disabled className={`w-full py-2.5 rounded-xl text-[13px] font-medium border flex items-center justify-center gap-1.5 ${isDark ? 'border-[#26334A] text-[#7F8AA3] bg-[#0B1120]' : 'border-[#E7E5EF] text-[#94A3B8] bg-[#F8F7FC]'} opacity-70 cursor-not-allowed`}>
-                                    Derse Git <ArrowRightIcon className="w-3.5 h-3.5" />
-                                </button>
-                            </div>
-                        </div>
+                        <DersKarti 
+                            ders={form} 
+                            isDark={isDark} 
+                            isMenuOpen={false} 
+                            onToggleMenu={null}
+                            onEdit={null}
+                            onDelete={null}
+                            onClick={null}
+                        />
 
                         <div className={`mt-4 p-4 rounded-xl border flex items-start gap-3 ${isDark ? 'border-[#4F46E5]/30 bg-indigo-500/5' : 'border-[#4F46E5]/20 bg-indigo-500/5'}`}>
                             <div className="mt-0.5">💡</div>

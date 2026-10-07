@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { useOutletContext, useNavigate, useLocation, useParams } from "react-router-dom";
 import axios from "axios";
 import DersOlusturmaAdimlari from "../components/DersOlusturmaAdimlari";
-import { CloudArrowUpIcon, ArrowRightIcon, CpuChipIcon, DocumentIcon, TrashIcon } from "@heroicons/react/24/outline";
+import { CloudArrowUpIcon, ArrowRightIcon, CpuChipIcon, DocumentIcon, TrashIcon, ArrowPathIcon } from "@heroicons/react/24/outline";
 
 function MateryalEkle() {
     const { isDark } = useOutletContext();
@@ -18,6 +18,9 @@ function MateryalEkle() {
     const [yukleniyor, setYukleniyor] = useState(false);
     const [hata, setHata] = useState("");
     const fileInputRef = useRef(null);
+    const [metinModalAcik, setMetinModalAcik] = useState(false);
+    const [seciliMetin, setSeciliMetin] = useState("");
+    const [metinYukleniyor, setMetinYukleniyor] = useState(false);
 
     const cardBg = isDark ? "bg-[#162137] border-[#26334A]" : "bg-white border-[#E7E5EF]";
     const textPrimary = isDark ? "text-[#F8FAFC]" : "text-[#0F172A]";
@@ -30,6 +33,18 @@ function MateryalEkle() {
             dersGetir();
         }
     }, [dersId]);
+
+    // Polling for processing status
+    useEffect(() => {
+        let interval;
+        const hasProcessing = materyaller.some(m => m.durum === "isleniyor" || m.durum === "yuklendi");
+        if (hasProcessing) {
+            interval = setInterval(() => {
+                materyalleriGetir();
+            }, 3000);
+        }
+        return () => clearInterval(interval);
+    }, [materyaller]);
 
     const dersGetir = async () => {
         try {
@@ -89,6 +104,29 @@ function MateryalEkle() {
             setMateryaller(materyaller.filter(m => m._id !== id));
         } catch (err) {
             alert("Materyal silinirken bir hata oluştu.");
+        }
+    };
+
+    const handleMetinCikarYenidenDene = async (id) => {
+        try {
+            await axios.post(`http://localhost:5000/materyaller/${id}/metin-cikar`, {}, { withCredentials: true });
+            materyalleriGetir();
+        } catch (err) {
+            alert(err.response?.data?.hata || "Yeniden deneme başarısız.");
+        }
+    };
+
+    const handleMetinGor = async (id) => {
+        setMetinModalAcik(true);
+        setMetinYukleniyor(true);
+        setSeciliMetin("");
+        try {
+            const res = await axios.get(`http://localhost:5000/materyaller/${id}`, { withCredentials: true });
+            setSeciliMetin(res.data.materyal.cikarilanMetin || "Bu dosyadan metin çıkarılamamış veya boş.");
+        } catch (err) {
+            setSeciliMetin("Metin getirilirken hata oluştu.");
+        } finally {
+            setMetinYukleniyor(false);
         }
     };
 
@@ -200,34 +238,30 @@ function MateryalEkle() {
                         </div>
 
                         <div className="flex-1">
-                            <h4 className={`text-[11px] font-bold uppercase tracking-widest ${textSecondary} mb-3`}>İŞLEM AŞAMALARI</h4>
+                            <h4 className={`text-[11px] font-bold uppercase tracking-widest ${textSecondary} mb-3`}>İŞLEM DURUMLARI</h4>
                             
                             <div className="space-y-2">
-                                <div className={`flex items-center gap-3 p-3 rounded-lg border ${isDark ? 'border-[#26334A] bg-[#0B1120]' : 'border-[#E7E5EF] bg-white'}`}>
-                                    <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${isDark ? 'border-[#475569]' : 'border-[#CBD5E1]'}`}></div>
-                                    <span className={`text-[13px] font-medium ${isDark ? 'text-[#7F8AA3]' : 'text-[#94A3B8]'}`}>Dosyalar yüklenmesi bekleniyor</span>
+                                <div className={`flex items-center justify-between p-3 rounded-lg border ${isDark ? 'border-[#26334A] bg-[#0B1120]' : 'border-[#E7E5EF] bg-white'}`}>
+                                    <span className={`text-[13px] font-medium ${isDark ? 'text-[#7F8AA3]' : 'text-[#94A3B8]'}`}>İşleniyor / Yükleniyor</span>
+                                    <span className="font-bold text-[#4F46E5]">{materyaller.filter(m => m.durum === 'isleniyor' || m.durum === 'yuklendi').length}</span>
                                 </div>
-                                <div className={`flex items-center gap-3 p-3 rounded-lg border ${isDark ? 'border-[#26334A] bg-[#0B1120]' : 'border-[#E7E5EF] bg-white'}`}>
-                                    <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${isDark ? 'border-[#475569]' : 'border-[#CBD5E1]'}`}></div>
-                                    <span className={`text-[13px] font-medium ${isDark ? 'text-[#7F8AA3]' : 'text-[#94A3B8]'}`}>Metinler çıkarılıyor</span>
+                                <div className={`flex items-center justify-between p-3 rounded-lg border ${isDark ? 'border-[#26334A] bg-[#0B1120]' : 'border-[#E7E5EF] bg-white'}`}>
+                                    <span className={`text-[13px] font-medium ${isDark ? 'text-[#7F8AA3]' : 'text-[#94A3B8]'}`}>Hazır</span>
+                                    <span className="font-bold text-green-500">{materyaller.filter(m => m.durum === 'hazir').length}</span>
                                 </div>
-                                <div className={`flex items-center gap-3 p-3 rounded-lg border ${isDark ? 'border-[#26334A] bg-[#0B1120]' : 'border-[#E7E5EF] bg-white'}`}>
-                                    <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${isDark ? 'border-[#475569]' : 'border-[#CBD5E1]'}`}></div>
-                                    <span className={`text-[13px] font-medium ${isDark ? 'text-[#7F8AA3]' : 'text-[#94A3B8]'}`}>İçerikler analiz ediliyor</span>
-                                </div>
-                                <div className={`flex items-center gap-3 p-3 rounded-lg border ${isDark ? 'border-[#26334A] bg-[#0B1120]' : 'border-[#E7E5EF] bg-white'}`}>
-                                    <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${isDark ? 'border-[#475569]' : 'border-[#CBD5E1]'}`}></div>
-                                    <span className={`text-[13px] font-medium ${isDark ? 'text-[#7F8AA3]' : 'text-[#94A3B8]'}`}>Konu haritası hazırlanıyor</span>
+                                <div className={`flex items-center justify-between p-3 rounded-lg border ${isDark ? 'border-[#26334A] bg-[#0B1120]' : 'border-[#E7E5EF] bg-white'}`}>
+                                    <span className={`text-[13px] font-medium ${isDark ? 'text-[#7F8AA3]' : 'text-[#94A3B8]'}`}>Hata</span>
+                                    <span className="font-bold text-red-500">{materyaller.filter(m => m.durum === 'hata').length}</span>
                                 </div>
                             </div>
                         </div>
 
                         <div className={`mt-6 pt-4 border-t flex items-center justify-between text-[11px] font-medium ${isDark ? 'border-[#26334A] text-[#7F8AA3]' : 'border-[#E7E5EF] text-[#94A3B8]'}`}>
                             <div className="flex items-center gap-1.5">
-                                <span className="w-1.5 h-1.5 rounded-full bg-gray-500"></span>
-                                Analiz sistemi sonraki aşamada etkinleştirilecek.
+                                <span className={`w-1.5 h-1.5 rounded-full ${materyaller.some(m => m.durum === 'isleniyor' || m.durum === 'yuklendi') ? 'bg-[#4F46E5] animate-pulse' : 'bg-green-500'}`}></span>
+                                {materyaller.some(m => m.durum === 'isleniyor' || m.durum === 'yuklendi') ? 'İşlemler devam ediyor...' : 'Tüm işlemler tamamlandı.'}
                             </div>
-                            <span>Bekliyor</span>
+                            <span>{materyaller.some(m => m.durum === 'isleniyor' || m.durum === 'yuklendi') ? 'Aktif' : 'Beklemede'}</span>
                         </div>
                     </div>
                 </div>
@@ -263,17 +297,45 @@ function MateryalEkle() {
                                             <span>•</span>
                                             <span>{formatBytes(materyal.dosyaBoyutu)}</span>
                                             <span>•</span>
-                                            <span className="capitalize">{materyal.durum}</span>
+                                            <span className={`capitalize ${materyal.durum === 'hazir' ? 'text-green-500' : materyal.durum === 'hata' ? 'text-red-500' : 'text-yellow-500'}`}>
+                                                {materyal.durum === 'hazir' ? 'Hazır' : materyal.durum === 'isleniyor' ? 'İşleniyor' : materyal.durum === 'hata' ? 'Hata' : materyal.durum}
+                                            </span>
+                                            {materyal.durum === 'isleniyor' || materyal.durum === 'yuklendi' ? (
+                                                <ArrowPathIcon className="w-3 h-3 animate-spin text-yellow-500" />
+                                            ) : null}
                                         </div>
+                                        {materyal.durum === 'hata' && (
+                                            <div className="text-[11px] text-red-500 mt-1">
+                                                {materyal.islemeHatasi}
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
-                                <button 
-                                    onClick={() => materyalSil(materyal._id)}
-                                    className="p-2 rounded-lg hover:bg-red-500/10 text-red-500 transition-colors"
-                                    title="Sil"
-                                >
-                                    <TrashIcon className="w-5 h-5" />
-                                </button>
+                                <div className="flex items-center gap-2">
+                                    {materyal.durum === 'hazir' && (
+                                        <button 
+                                            onClick={() => handleMetinGor(materyal._id)}
+                                            className="px-3 py-1.5 rounded-lg border border-green-500 text-green-500 hover:bg-green-500/10 transition-colors text-[12px] font-medium"
+                                        >
+                                            Çıkarılan Metni Gör
+                                        </button>
+                                    )}
+                                    {materyal.durum === 'hata' && (
+                                        <button 
+                                            onClick={() => handleMetinCikarYenidenDene(materyal._id)}
+                                            className="px-3 py-1.5 rounded-lg border border-[#4F46E5] text-[#4F46E5] hover:bg-[#4F46E5]/10 transition-colors text-[12px] font-medium"
+                                        >
+                                            Yeniden Dene
+                                        </button>
+                                    )}
+                                    <button 
+                                        onClick={() => materyalSil(materyal._id)}
+                                        className="p-2 rounded-lg hover:bg-red-500/10 text-red-500 transition-colors"
+                                        title="Sil"
+                                    >
+                                        <TrashIcon className="w-5 h-5" />
+                                    </button>
+                                </div>
                             </div>
                         ))}
                     </div>
@@ -297,6 +359,31 @@ function MateryalEkle() {
                     </button>
                 </div>
             </div>
+
+            {/* Metin Görüntüleme Modalı */}
+            {metinModalAcik && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+                    <div className={`w-full max-w-2xl max-h-[80vh] flex flex-col rounded-2xl border shadow-xl overflow-hidden ${cardBg}`} onClick={e => e.stopPropagation()}>
+                        <div className={`px-6 py-4 flex items-center justify-between border-b ${isDark ? 'border-[#26334A]' : 'border-[#E7E5EF]'}`}>
+                            <h3 className={`text-[18px] font-bold ${textPrimary}`}>Çıkarılan Metin</h3>
+                            <button onClick={() => setMetinModalAcik(false)} className={`p-1 rounded-lg hover:bg-black/5 dark:hover:bg-white/5 ${textSecondary}`}>
+                                Kapat
+                            </button>
+                        </div>
+                        <div className="p-6 overflow-y-auto">
+                            {metinYukleniyor ? (
+                                <div className="py-10 flex justify-center">
+                                    <div className="w-8 h-8 border-4 border-[#4F46E5]/30 border-t-[#4F46E5] rounded-full animate-spin"></div>
+                                </div>
+                            ) : (
+                                <pre className={`whitespace-pre-wrap text-[13px] font-mono leading-relaxed ${textPrimary}`}>
+                                    {seciliMetin}
+                                </pre>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

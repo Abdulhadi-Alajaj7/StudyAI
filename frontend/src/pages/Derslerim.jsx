@@ -4,15 +4,13 @@ import axios from "axios";
 import { 
     PlusIcon, 
     MagnifyingGlassIcon, 
-    EllipsisVerticalIcon, 
     BookOpenIcon, 
     XMarkIcon,
     ChartPieIcon,
     CalendarDaysIcon,
-    PencilSquareIcon,
     TrashIcon,
-    ArrowRightIcon
 } from "@heroicons/react/24/outline";
+import DersKarti from "../components/DersKarti";
 
 function Derslerim() {
     const { isDark } = useOutletContext();
@@ -219,66 +217,16 @@ function Derslerim() {
             ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {filtreliDersler.map(ders => (
-                        <div key={ders._id} className={`flex flex-col p-6 rounded-2xl border ${cardBg} transition-colors relative`}>
-                            {/* Card Header */}
-                            <div className="flex items-start justify-between mb-4">
-                                <div className="flex items-center gap-3">
-                                    <div className="w-10 h-10 rounded-lg bg-indigo-500/10 flex items-center justify-center shrink-0">
-                                        <BookOpenIcon className="w-5 h-5 text-[#4F46E5]" />
-                                    </div>
-                                    <div>
-                                        {ders.donem && (
-                                            <span className="inline-block px-2 py-0.5 rounded text-[11px] font-medium bg-indigo-500/10 text-[#4F46E5] mb-1">
-                                                {ders.donem}
-                                            </span>
-                                        )}
-                                        <h3 className={`text-[18px] font-bold line-clamp-1 ${textPrimary}`}>{ders.dersAdi}</h3>
-                                    </div>
-                                </div>
-                                
-                                <div className="relative">
-                                    <button 
-                                        onClick={() => toggleMenu(ders._id)}
-                                        className={`p-1.5 rounded-lg hover:bg-black/5 dark:hover:bg-white/5 transition-colors ${textSecondary}`}
-                                    >
-                                        <EllipsisVerticalIcon className="w-5 h-5" />
-                                    </button>
-                                    
-                                    {aktifMenuId === ders._id && (
-                                        <div className={`absolute right-0 mt-1 w-36 rounded-xl border shadow-lg overflow-hidden z-10 ${cardBg}`}>
-                                            <button 
-                                                onClick={() => modalAc("duzenle", ders)}
-                                                className={`w-full flex items-center gap-2 px-4 py-2.5 text-sm text-left hover:bg-black/5 dark:hover:bg-white/5 transition-colors ${textPrimary}`}
-                                            >
-                                                <PencilSquareIcon className="w-4 h-4" />
-                                                Düzenle
-                                            </button>
-                                            <button 
-                                                onClick={() => silOnayAc(ders)}
-                                                className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-left text-red-500 hover:bg-red-500/10 transition-colors"
-                                            >
-                                                <TrashIcon className="w-4 h-4" />
-                                                Sil
-                                            </button>
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-                            
-                            {/* Description */}
-                            <div className="flex-1 mb-6">
-                                <p className={`text-[14px] line-clamp-2 ${textSecondary}`}>
-                                    {ders.aciklama || "Bu ders için açıklama eklenmemiş."}
-                                </p>
-                            </div>
-                            
-                            {/* Actions */}
-                            <div className={`pt-4 border-t ${isDark ? 'border-[#26334A]' : 'border-[#E7E5EF]'} flex items-center justify-end`}>
-                                <button className={`flex items-center gap-1.5 text-[14px] font-medium hover:text-[#4338CA] transition-colors text-[#4F46E5]`}>
-                                    Derse Git <ArrowRightIcon className="w-4 h-4" />
-                                </button>
-                            </div>
-                        </div>
+                        <DersKarti
+                            key={ders._id}
+                            ders={ders}
+                            isDark={isDark}
+                            isMenuOpen={aktifMenuId === ders._id}
+                            onToggleMenu={() => toggleMenu(ders._id)}
+                            onEdit={() => modalAc("duzenle", ders)}
+                            onDelete={() => silOnayAc(ders)}
+                            onClick={() => console.log("Derse git", ders._id)}
+                        />
                     ))}
                     {filtreliDersler.length === 0 && (
                         <div className={`col-span-full py-10 text-center ${textSecondary}`}>

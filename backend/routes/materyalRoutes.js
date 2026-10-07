@@ -5,7 +5,8 @@ import {
     materyalYukle,
     materyalleriGetir,
     materyalGetir,
-    materyalSil
+    materyalSil,
+    materyalMetinCikar
 } from "../controllers/materyalController.js";
 
 const router = express.Router();
@@ -25,5 +26,6 @@ router.post("/ders/:dersId", (req, res, next) => {
 router.get("/ders/:dersId", materyalleriGetir);
 router.get("/:id", materyalGetir);
 router.delete("/:id", materyalSil);
+router.post("/:id/metin-cikar", materyalMetinCikar);
 
 export default router;

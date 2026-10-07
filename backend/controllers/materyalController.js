@@ -2,6 +2,32 @@ import Materyal from "../models/Materyal.js";
 import Ders from "../models/Ders.js";
 import path from "path";
 import fs from "fs";
+import { metinCikar } from "../services/metinCikarmaService.js";
+
+const arkaPlandaMetinCikar = async (materyalIds) => {
+    for (const id of materyalIds) {
+        try {
+            const materyal = await Materyal.findById(id);
+            if (!materyal) continue;
+
+            materyal.durum = "isleniyor";
+            await materyal.save();
+
+            const cikarilanText = await metinCikar(materyal.dosyaYolu, materyal.mimeTuru);
+            
+            materyal.cikarilanMetin = cikarilanText;
+            materyal.durum = "hazir";
+            materyal.islemeHatasi = "";
+            await materyal.save();
+        } catch (error) {
+            console.error(`Metin çıkarma hatası (Materyal ID: ${id}):`, error);
+            await Materyal.findByIdAndUpdate(id, {
+                durum: "hata",
+                islemeHatasi: error.message
+            });
+        }
+    }
+};
 
 export const materyalYukle = async (req, res) => {
     try {
@@ -47,7 +73,10 @@ export const materyalYukle = async (req, res) => {
                 yuklenenMateryaller.push(yeniMateryal);
             }
 
-            res.status(201).json({ mesaj: "Materyaller başarıyla yüklendi", materyaller: yuklenenMateryaller });
+            // Arka planda extraction başlat (await kullanmıyoruz)
+            arkaPlandaMetinCikar(basariliIds);
+
+            res.status(201).json({ mesaj: "Materyaller başarıyla yüklendi ve işlemeye alındı", materyaller: yuklenenMateryaller });
         } catch (dbError) {
             // DB kaydı sırasında hata olursa oluşturulanları geri al
             if (basariliIds.length > 0) {
@@ -75,7 +104,7 @@ export const materyalleriGetir = async (req, res) => {
             return res.status(404).json({ hata: "Ders bulunamadı veya yetkiniz yok." });
         }
 
-        const materyaller = await Materyal.find({ dersId, kullaniciId }).sort({ createdAt: -1 });
+        const materyaller = await Materyal.find({ dersId, kullaniciId }).select('-cikarilanMetin').sort({ createdAt: -1 });
         res.status(200).json({ materyaller });
     } catch (error) {
         res.status(500).json({ hata: "Materyaller getirilirken hata oluştu." });
@@ -117,5 +146,36 @@ export const materyalSil = async (req, res) => {
         res.status(200).json({ mesaj: "Materyal başarıyla silindi." });
     } catch (error) {
         res.status(500).json({ hata: "Materyal silinirken hata oluştu." });
+    }
+};
+
+export const materyalMetinCikar = async (req, res) => {
+    try {
+        const materyalId = req.params.id;
+        const kullaniciId = req.user._id;
+
+        const materyal = await Materyal.findOne({ _id: materyalId, kullaniciId });
+        if (!materyal) {
+            return res.status(404).json({ hata: "Materyal bulunamadı veya yetkiniz yok." });
+        }
+
+        materyal.durum = "isleniyor";
+        materyal.islemeHatasi = "";
+        await materyal.save();
+        
+        try {
+            const cikarilanText = await metinCikar(materyal.dosyaYolu, materyal.mimeTuru);
+            materyal.cikarilanMetin = cikarilanText;
+            materyal.durum = "hazir";
+            await materyal.save();
+            return res.status(200).json({ mesaj: "Metin başarıyla çıkarıldı.", materyal });
+        } catch (err) {
+            materyal.durum = "hata";
+            materyal.islemeHatasi = err.message;
+            await materyal.save();
+            return res.status(400).json({ hata: "Metin çıkarma başarısız oldu: " + err.message, materyal });
+        }
+    } catch (error) {
+        res.status(500).json({ hata: "Metin çıkarma isteği işlenirken hata oluştu." });
     }
 };

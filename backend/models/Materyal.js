@@ -39,6 +39,14 @@ const materyalSchema = new mongoose.Schema(
         durum: {
             type: String,
             default: "yuklendi",
+        },
+        cikarilanMetin: {
+            type: String,
+            default: "",
+        },
+        islemeHatasi: {
+            type: String,
+            default: "",
         }
     },
     {

@@ -1,11 +1,12 @@
 import Ders from "../models/Ders.js";
+import Materyal from "../models/Materyal.js";
 
 /* =========================
    Ders Oluştur
 ========================= */
 export const dersOlustur = async (req, res) => {
   try {
-    const { dersAdi, aciklama, donem } = req.body;
+    const { dersAdi, aciklama, donem, dersKodu, renk, simge } = req.body;
 
     if (!dersAdi) {
       return res.status(400).json({
@@ -18,6 +19,9 @@ export const dersOlustur = async (req, res) => {
       dersAdi,
       aciklama,
       donem,
+      dersKodu,
+      renk,
+      simge
     });
 
     res.status(201).json({
@@ -39,12 +43,22 @@ export const dersleriGetir = async (req, res) => {
   try {
     const dersler = await Ders.find({
       kullaniciId: req.user._id,
-    }).sort({ createdAt: -1 });
+    }).sort({ createdAt: -1 }).lean();
+
+    const materyalCounts = await Materyal.aggregate([
+      { $match: { kullaniciId: req.user._id } },
+      { $group: { _id: "$dersId", count: { $sum: 1 } } }
+    ]);
+
+    const derslerWithCount = dersler.map(ders => {
+      const mc = materyalCounts.find(m => m._id.toString() === ders._id.toString());
+      return { ...ders, materyalSayisi: mc ? mc.count : 0 };
+    });
 
     res.status(200).json({
       basarili: true,
-      dersSayisi: dersler.length,
-      dersler,
+      dersSayisi: derslerWithCount.length,
+      dersler: derslerWithCount,
     });
   } catch (hata) {
     res.status(500).json({
@@ -85,7 +99,7 @@ export const dersGetir = async (req, res) => {
 ========================= */
 export const dersGuncelle = async (req, res) => {
   try {
-    const { dersAdi, aciklama, donem } = req.body;
+    const { dersAdi, aciklama, donem, dersKodu, renk, simge } = req.body;
 
     const ders = await Ders.findOne({
       _id: req.params.id,
@@ -98,17 +112,12 @@ export const dersGuncelle = async (req, res) => {
       });
     }
 
-    if (dersAdi !== undefined) {
-      ders.dersAdi = dersAdi;
-    }
-
-    if (aciklama !== undefined) {
-      ders.aciklama = aciklama;
-    }
-
-    if (donem !== undefined) {
-      ders.donem = donem;
-    }
+    if (dersAdi !== undefined) ders.dersAdi = dersAdi;
+    if (aciklama !== undefined) ders.aciklama = aciklama;
+    if (donem !== undefined) ders.donem = donem;
+    if (dersKodu !== undefined) ders.dersKodu = dersKodu;
+    if (renk !== undefined) ders.renk = renk;
+    if (simge !== undefined) ders.simge = simge;
 
     await ders.save();
 

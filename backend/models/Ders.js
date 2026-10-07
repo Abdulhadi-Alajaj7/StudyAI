@@ -25,6 +25,22 @@ const dersSchema = new mongoose.Schema(
             trim: true,
             default: "",
         },
+
+        dersKodu: {
+            type: String,
+            trim: true,
+            default: "",
+        },
+
+        renk: {
+            type: String,
+            default: "indigo",
+        },
+
+        simge: {
+            type: String,
+            default: "desktop",
+        },
     },
     {
         timestamps: true,

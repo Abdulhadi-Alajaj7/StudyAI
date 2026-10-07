@@ -18,7 +18,7 @@ function DersHazir() {
         const materyalleriGetir = async () => {
             try {
                 const res = await axios.get(`http://localhost:5000/materyaller/ders/${dersId}`, { withCredentials: true });
-                setMateryalSayisi(res.data.materyaller?.length || 0);
+                setMateryalSayisi(res.data.materyaller?.filter(m => m.durum === 'hazir').length || 0);
             } catch (err) {
                 console.error("Materyaller alınamadı", err);
             }

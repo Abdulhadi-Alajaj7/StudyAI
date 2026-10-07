@@ -33,7 +33,13 @@ const menu = [
 ];
 
 function PanelLayout() {
-    const [isDark, setIsDark] = useState(false);
+    const [isDark, setIsDark] = useState(() => {
+        return localStorage.getItem("studyai-theme") === "dark";
+    });
+
+    useEffect(() => {
+        localStorage.setItem("studyai-theme", isDark ? "dark" : "light");
+    }, [isDark]);
     const [profilMenuAcik, setProfilMenuAcik] = useState(false);
     const [sidebarAcik, setSidebarAcik] = useState(true);
     const [kullanici, setKullanici] = useState(null);
