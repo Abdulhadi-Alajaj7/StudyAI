@@ -15,6 +15,10 @@ import Profil from "./pages/Profil.jsx";
 import Yanlislarim from "./pages/Yanlislarim.jsx";
 import Sinavlarim from "./pages/Sinavlarim.jsx";
 
+import YeniDersOlustur from "./pages/YeniDersOlustur.jsx";
+import MateryalEkle from "./pages/MateryalEkle.jsx";
+import DersHazir from "./pages/DersHazir.jsx";
+
 function App() {
     return (
         <BrowserRouter>
@@ -48,6 +52,21 @@ function App() {
                         <Route
                             path="dersler"
                             element={<Derslerim />}
+                        />
+                        
+                        <Route
+                            path="dersler/yeni"
+                            element={<YeniDersOlustur />}
+                        />
+                        
+                        <Route
+                            path="dersler/yeni/materyal"
+                            element={<MateryalEkle />}
+                        />
+                        
+                        <Route
+                            path="dersler/yeni/hazir"
+                            element={<DersHazir />}
                         />
 
                         <Route

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { useOutletContext } from "react-router-dom";
+import { useOutletContext, useNavigate } from "react-router-dom";
 import axios from "axios";
 import { 
     PlusIcon, 
@@ -16,6 +16,7 @@ import {
 
 function Derslerim() {
     const { isDark } = useOutletContext();
+    const navigate = useNavigate();
     
     const [dersler, setDersler] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -129,7 +130,7 @@ function Derslerim() {
                     </p>
                 </div>
                 <button 
-                    onClick={() => modalAc("olustur")}
+                    onClick={() => navigate("/panel/dersler/yeni")}
                     className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-medium transition-colors ${buttonPrimary}`}
                 >
                     <PlusIcon className="w-5 h-5" />
@@ -208,7 +209,7 @@ function Derslerim() {
                     <h3 className={`text-[20px] font-bold ${textPrimary} mb-2`}>Henüz ders eklemedin</h3>
                     <p className={`${textSecondary} max-w-md mb-6`}>İlk dersini oluşturarak öğrenme alanını hazırlamaya başla.</p>
                     <button 
-                        onClick={() => modalAc("olustur")}
+                        onClick={() => navigate("/panel/dersler/yeni")}
                         className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-medium transition-colors ${buttonPrimary}`}
                     >
                         <PlusIcon className="w-5 h-5" />
