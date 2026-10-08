@@ -1,5 +1,7 @@
 import Ders from "../models/Ders.js";
 import Materyal from "../models/Materyal.js";
+import MetinParcasi from "../models/MetinParcasi.js";
+import { guvenliDosyaSil } from "../utils/dosyaIslemleri.js";
 
 /* =========================
    Ders Oluştur
@@ -149,6 +151,19 @@ export const dersSil = async (req, res) => {
       });
     }
 
+    const materyaller = await Materyal.find({ dersId: ders._id });
+    
+    // 1. Önce ilişkili metin parçalarını sil
+    await MetinParcasi.deleteMany({ dersId: ders._id });
+
+    // 2. Materyalleri ve dosyaları teker teker sil
+    // Dosya silinmiş olsa bile (ENOENT), mekanizma idempotent olduğu için DB silme işlemine devam edecektir.
+    for (const mat of materyaller) {
+        guvenliDosyaSil(mat.dosyaYolu);
+        await Materyal.deleteOne({ _id: mat._id });
+    }
+
+    // 3. En son dersi sil
     await ders.deleteOne();
 
     res.status(200).json({

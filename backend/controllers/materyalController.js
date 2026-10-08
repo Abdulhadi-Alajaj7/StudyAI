@@ -1,8 +1,10 @@
 import Materyal from "../models/Materyal.js";
 import Ders from "../models/Ders.js";
 import path from "path";
-import fs from "fs";
+import { guvenliDosyaSil } from "../utils/dosyaIslemleri.js";
 import { metinCikar } from "../services/metinCikarmaService.js";
+import { metinParcalaVeKaydet } from "../services/metinParcalamaService.js";
+import MetinParcasi from "../models/MetinParcasi.js";
 
 const arkaPlandaMetinCikar = async (materyalIds) => {
     for (const id of materyalIds) {
@@ -14,6 +16,8 @@ const arkaPlandaMetinCikar = async (materyalIds) => {
             await materyal.save();
 
             const cikarilanText = await metinCikar(materyal.dosyaYolu, materyal.mimeTuru);
+            
+            await metinParcalaVeKaydet(cikarilanText, materyal);
             
             materyal.cikarilanMetin = cikarilanText;
             materyal.durum = "hazir";
@@ -39,7 +43,7 @@ export const materyalYukle = async (req, res) => {
             // Yetki yok veya ders yoksa, yuklenen dosyalari temizle
             if (req.files) {
                 req.files.forEach(file => {
-                    if(fs.existsSync(file.path)) fs.unlinkSync(file.path);
+                    guvenliDosyaSil(file.path);
                 });
             }
             return res.status(404).json({ hata: "Ders bulunamadı veya yetkiniz yok." });
@@ -87,7 +91,7 @@ export const materyalYukle = async (req, res) => {
     } catch (error) {
         if (req.files) {
             req.files.forEach(file => {
-                if(fs.existsSync(file.path)) fs.unlinkSync(file.path);
+                guvenliDosyaSil(file.path);
             });
         }
         res.status(500).json({ hata: error.message || "Materyal yüklenirken bir hata oluştu." });
@@ -137,11 +141,13 @@ export const materyalSil = async (req, res) => {
             return res.status(404).json({ hata: "Materyal bulunamadı veya yetkiniz yok." });
         }
 
-        // Dosyayi diskten sil
-        if (fs.existsSync(materyal.dosyaYolu)) {
-            fs.unlinkSync(materyal.dosyaYolu);
-        }
+        // 1. Önce ilişkili metin parçalarını sil
+        await MetinParcasi.deleteMany({ materyalId: materyalId });
+        
+        // 2. Dosyayı güvenli ve idempotent şekilde diskten sil
+        guvenliDosyaSil(materyal.dosyaYolu);
 
+        // 3. Materyali veritabanından sil
         await Materyal.deleteOne({ _id: materyalId });
         res.status(200).json({ mesaj: "Materyal başarıyla silindi." });
     } catch (error) {
@@ -165,6 +171,7 @@ export const materyalMetinCikar = async (req, res) => {
         
         try {
             const cikarilanText = await metinCikar(materyal.dosyaYolu, materyal.mimeTuru);
+            await metinParcalaVeKaydet(cikarilanText, materyal);
             materyal.cikarilanMetin = cikarilanText;
             materyal.durum = "hazir";
             await materyal.save();
