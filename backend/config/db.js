@@ -7,6 +7,7 @@ const veritabaninaBaglan = async () => {
     console.log(
       `MongoDB bağlantısı başarılı: ${baglanti.connection.host}`
     );
+    return baglanti;
   } catch (hata) {
     console.error(`MongoDB bağlantı hatası: ${hata.message}`);
     process.exit(1);

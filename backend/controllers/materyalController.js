@@ -6,29 +6,86 @@ import { metinCikar } from "../services/metinCikarmaService.js";
 import { metinParcalaVeKaydet } from "../services/metinParcalamaService.js";
 import MetinParcasi from "../models/MetinParcasi.js";
 
+import mongoose from "mongoose";
+
+/**
+ * Arka planda metin çıkarma ve parçalama işlemini güvenli staging mantığıyla yürütür.
+ * Eşzamanlı çağrılar veya silme işlemleriyle yarış durumlarına karşı dayanıklıdır.
+ */
 const arkaPlandaMetinCikar = async (materyalIds) => {
     for (const id of materyalIds) {
+        const yeniIslemeId = new mongoose.Types.ObjectId();
         try {
-            const materyal = await Materyal.findById(id);
-            if (!materyal) continue;
+            // 1. Atomik sahiplik alımı: Yalnızca "siliniyor" olmayan ve "isleniyor" durumda olmayan materyali sahiplen
+            const materyal = await Materyal.findOneAndUpdate(
+                { _id: id, durum: { $nin: ["isleniyor", "siliniyor"] } },
+                { $set: { durum: "isleniyor", islemeId: yeniIslemeId, islemeHatasi: "" } },
+                { new: true }
+            );
 
-            materyal.durum = "isleniyor";
-            await materyal.save();
+            if (!materyal) {
+                // Materyal zaten başka bir işlem tarafından işleniyor, silinmiş ya da silinme aşamasında
+                continue;
+            }
 
+            // 2. Metin çıkarma
             const cikarilanText = await metinCikar(materyal.dosyaYolu, materyal.mimeTuru);
-            
-            await metinParcalaVeKaydet(cikarilanText, materyal);
-            
-            materyal.cikarilanMetin = cikarilanText;
-            materyal.durum = "hazir";
-            materyal.islemeHatasi = "";
-            await materyal.save();
+
+            // 3. Kontrol noktası: Metin çıkarılırken materyal silinmiş veya silinme aşamasına alınmış mı?
+            const aktifMateryal = await Materyal.findOne({ _id: id, islemeId: yeniIslemeId, durum: "isleniyor" });
+            if (!aktifMateryal) {
+                // Silme başladıysa veya durum değiştiyse yazma yapmadan çık
+                continue;
+            }
+
+            // 4. Staging olarak metin parçalarını kaydet (eski parçalara dokunulmaz)
+            await metinParcalaVeKaydet(cikarilanText, aktifMateryal, yeniIslemeId);
+
+            // 5. Atomik Taahhüt (Commit): Materyal hâlâ bu işleme mi ait ve "isleniyor" durumunda mı?
+            const guncellenen = await Materyal.findOneAndUpdate(
+                { _id: id, islemeId: yeniIslemeId, durum: "isleniyor" },
+                { 
+                    $set: { 
+                        durum: "hazir", 
+                        aktifIslemeId: yeniIslemeId, 
+                        cikarilanMetin: cikarilanText, 
+                        islemeHatasi: "" 
+                    } 
+                },
+                { new: true }
+            );
+
+            if (!guncellenen) {
+                // Materyal insertMany sırasında veya hemen sonrasında silinmişse veya iptal edildiyse
+                // Yazılmış yeni parçaları da temizle (yetim kayıt kalmasını önle)
+                await MetinParcasi.deleteMany({ materyalId: id, islemeId: yeniIslemeId });
+                continue;
+            }
+
+            // 6. Başarılı taahhüt sonrası eski parçaları güvenle temizle
+            try {
+                await MetinParcasi.deleteMany({ materyalId: id, islemeId: { $ne: yeniIslemeId } });
+            } catch (eskiSilmeHatasi) {
+                console.error(`Eski parçaları temizleme uyarısı (Materyal ID: ${id}):`, eskiSilmeHatasi.message);
+                // Taahhüt edilmiş aktif versiyonu BOZMA; catch bloğuna düşüp aktif versiyonu silmesini engelle!
+            }
+
         } catch (error) {
             console.error(`Metin çıkarma hatası (Materyal ID: ${id}):`, error);
-            await Materyal.findByIdAndUpdate(id, {
-                durum: "hata",
-                islemeHatasi: error.message
-            });
+
+            // Hata durumunda bu işleme ait kısmi parçaları temizle (eski aktif versiyona dokunma!)
+            await MetinParcasi.deleteMany({ materyalId: id, islemeId: yeniIslemeId });
+
+            // Materyal silinme aşamasında değilse hata durumunu kaydet
+            await Materyal.findOneAndUpdate(
+                { _id: id, islemeId: yeniIslemeId, durum: "isleniyor" },
+                {
+                    $set: {
+                        durum: "hata",
+                        islemeHatasi: error.message
+                    }
+                }
+            );
         }
     }
 };
@@ -136,53 +193,123 @@ export const materyalSil = async (req, res) => {
         const materyalId = req.params.id;
         const kullaniciId = req.user._id;
 
-        const materyal = await Materyal.findOne({ _id: materyalId, kullaniciId });
+        // 1. Atomik olarak materyali "siliniyor" durumuna geçir (devam eden işlemleri iptale zorlar)
+        const materyal = await Materyal.findOneAndUpdate(
+            { _id: materyalId, kullaniciId, durum: { $ne: "siliniyor" } },
+            { $set: { durum: "siliniyor" } },
+            { new: true }
+        );
+
         if (!materyal) {
-            return res.status(404).json({ hata: "Materyal bulunamadı veya yetkiniz yok." });
+            return res.status(404).json({ hata: "Materyal bulunamadı, silinmekte veya yetkiniz yok." });
         }
 
-        // 1. Önce ilişkili metin parçalarını sil
+        // 2. İlişkili tüm metin parçalarını sil (tüm versiyonlar/staging dahil)
         await MetinParcasi.deleteMany({ materyalId: materyalId });
         
-        // 2. Dosyayı güvenli ve idempotent şekilde diskten sil
+        // 3. Dosyayı güvenli ve idempotent şekilde diskten sil
         guvenliDosyaSil(materyal.dosyaYolu);
 
-        // 3. Materyali veritabanından sil
+        // 4. Materyali veritabanından tamamen sil
         await Materyal.deleteOne({ _id: materyalId });
+
+        // 5. Yarış durumu temizliği: Silme işlemi sırasında `insertMany` yapmış olabilecek arka plan işi varsa temizle
+        await MetinParcasi.deleteMany({ materyalId: materyalId });
+
         res.status(200).json({ mesaj: "Materyal başarıyla silindi." });
     } catch (error) {
-        res.status(500).json({ hata: "Materyal silinirken hata oluştu." });
+        console.error("Materyal silme hatası:", error);
+        res.status(500).json({ hata: "Materyal silinirken hata oluştu: " + error.message });
     }
 };
 
 export const materyalMetinCikar = async (req, res) => {
+    const materyalId = req.params.id;
+    const kullaniciId = req.user._id;
+    const yeniIslemeId = new mongoose.Types.ObjectId();
+
     try {
-        const materyalId = req.params.id;
-        const kullaniciId = req.user._id;
+        // 1. Atomik sahiplik alımı
+        const materyal = await Materyal.findOneAndUpdate(
+            { _id: materyalId, kullaniciId, durum: { $nin: ["isleniyor", "siliniyor"] } },
+            { $set: { durum: "isleniyor", islemeId: yeniIslemeId, islemeHatasi: "" } },
+            { new: true }
+        );
 
-        const materyal = await Materyal.findOne({ _id: materyalId, kullaniciId });
         if (!materyal) {
-            return res.status(404).json({ hata: "Materyal bulunamadı veya yetkiniz yok." });
+            // Materyal zaten işleniyor olabilir veya bulunamadı
+            const mevcut = await Materyal.findOne({ _id: materyalId, kullaniciId });
+            if (!mevcut) {
+                return res.status(404).json({ hata: "Materyal bulunamadı veya yetkiniz yok." });
+            }
+            if (mevcut.durum === "isleniyor") {
+                return res.status(409).json({ hata: "Materyal şu anda zaten işleniyor." });
+            }
+            if (mevcut.durum === "siliniyor") {
+                return res.status(409).json({ hata: "Materyal silinme aşamasında." });
+            }
+            return res.status(400).json({ hata: "Materyal işlenmeye uygun durumda değil." });
         }
-
-        materyal.durum = "isleniyor";
-        materyal.islemeHatasi = "";
-        await materyal.save();
         
         try {
+            // 2. Metin çıkarma
             const cikarilanText = await metinCikar(materyal.dosyaYolu, materyal.mimeTuru);
-            await metinParcalaVeKaydet(cikarilanText, materyal);
-            materyal.cikarilanMetin = cikarilanText;
-            materyal.durum = "hazir";
-            await materyal.save();
-            return res.status(200).json({ mesaj: "Metin başarıyla çıkarıldı.", materyal });
+
+            // 3. Kontrol noktası: Metin çıkarılırken materyal silinmiş veya siliniyor yapılmış mı?
+            const aktifMateryal = await Materyal.findOne({ _id: materyalId, islemeId: yeniIslemeId, durum: "isleniyor" });
+            if (!aktifMateryal) {
+                await MetinParcasi.deleteMany({ materyalId: materyalId, islemeId: yeniIslemeId });
+                return res.status(409).json({ hata: "Materyal işleme sırasında silindi veya iptal edildi." });
+            }
+
+            // 4. Staging olarak metin parçalarını kaydet
+            await metinParcalaVeKaydet(cikarilanText, aktifMateryal, yeniIslemeId);
+
+            // 5. Atomik Taahhüt (Commit)
+            const guncellenen = await Materyal.findOneAndUpdate(
+                { _id: materyalId, islemeId: yeniIslemeId, durum: "isleniyor" },
+                { 
+                    $set: { 
+                        durum: "hazir", 
+                        aktifIslemeId: yeniIslemeId, 
+                        cikarilanMetin: cikarilanText, 
+                        islemeHatasi: "" 
+                    } 
+                },
+                { new: true }
+            );
+
+            if (!guncellenen) {
+                await MetinParcasi.deleteMany({ materyalId: materyalId, islemeId: yeniIslemeId });
+                return res.status(409).json({ hata: "Materyal işleme tamamlanırken silindi veya iptal edildi." });
+            }
+
+            // 6. Eski parçaları temizle
+            try {
+                await MetinParcasi.deleteMany({ materyalId: materyalId, islemeId: { $ne: yeniIslemeId } });
+            } catch (eskiSilmeHatasi) {
+                console.error(`Eski parçaları temizleme uyarısı (Materyal ID: ${materyalId}):`, eskiSilmeHatasi.message);
+                // Taahhüt edilmiş aktif versiyonu BOZMA; catch bloğuna düşüp aktif parçaları silmesini engelle!
+            }
+
+            return res.status(200).json({ mesaj: "Metin başarıyla çıkarıldı.", materyal: guncellenen });
         } catch (err) {
-            materyal.durum = "hata";
-            materyal.islemeHatasi = err.message;
-            await materyal.save();
-            return res.status(400).json({ hata: "Metin çıkarma başarısız oldu: " + err.message, materyal });
+            // Bu denemenin parçalarını temizle (eski aktif versiyon korunur)
+            await MetinParcasi.deleteMany({ materyalId: materyalId, islemeId: yeniIslemeId });
+
+            await Materyal.findOneAndUpdate(
+                { _id: materyalId, islemeId: yeniIslemeId, durum: "isleniyor" },
+                {
+                    $set: {
+                        durum: "hata",
+                        islemeHatasi: err.message
+                    }
+                }
+            );
+
+            return res.status(400).json({ hata: "Metin çıkarma başarısız oldu: " + err.message });
         }
     } catch (error) {
-        res.status(500).json({ hata: "Metin çıkarma isteği işlenirken hata oluştu." });
+        res.status(500).json({ hata: "Metin çıkarma isteği işlenirken hata oluştu: " + error.message });
     }
 };

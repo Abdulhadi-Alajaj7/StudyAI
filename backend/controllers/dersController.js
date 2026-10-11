@@ -151,19 +151,27 @@ export const dersSil = async (req, res) => {
       });
     }
 
-    const materyaller = await Materyal.find({ dersId: ders._id });
-    
-    // 1. Önce ilişkili metin parçalarını sil
+    // 1. Koordinasyon: Bu derse bağlı tüm materyalleri atomik olarak "siliniyor" durumuna geçir.
+    // Bu sayede arka planda devam eden herhangi bir metin çıkarma/parçalama görevi kendini iptal eder.
+    await Materyal.updateMany(
+      { dersId: ders._id },
+      { $set: { durum: "siliniyor" } }
+    );
+
+    // 2. İlişkili metin parçalarını sil (tüm versiyonlar/staging dahil)
     await MetinParcasi.deleteMany({ dersId: ders._id });
 
-    // 2. Materyalleri ve dosyaları teker teker sil
-    // Dosya silinmiş olsa bile (ENOENT), mekanizma idempotent olduğu için DB silme işlemine devam edecektir.
+    // 3. Materyalleri ve dosyaları teker teker sil
+    const materyaller = await Materyal.find({ dersId: ders._id });
     for (const mat of materyaller) {
         guvenliDosyaSil(mat.dosyaYolu);
         await Materyal.deleteOne({ _id: mat._id });
     }
 
-    // 3. En son dersi sil
+    // 4. Yarış durumu temizliği: Silme işlemi sırasında parça yazmış olabilecek asenkron işler için son kontrol
+    await MetinParcasi.deleteMany({ dersId: ders._id });
+
+    // 5. En son dersi sil
     await ders.deleteOne();
 
     res.status(200).json({
@@ -171,6 +179,7 @@ export const dersSil = async (req, res) => {
       mesaj: "Ders başarıyla silindi",
     });
   } catch (hata) {
+    console.error("Ders silme hatası:", hata);
     res.status(500).json({
       hata: hata.message,
     });

@@ -5,13 +5,31 @@ import cookieParser from "cookie-parser";
 import compression from "compression";
 
 import veritabaninaBaglan from "./config/db.js";
+import Materyal from "./models/Materyal.js";
 import authRoutes from "./routes/authRoutes.js";
 import dersRoutes from "./routes/dersRoutes.js";
 import materyalRoutes from "./routes/materyalRoutes.js";
 const app = express();
 
-// MongoDB bağlantısı
-veritabaninaBaglan();
+// MongoDB bağlantısı ve sunucu yeniden başlatma kurtarması (Zombie Lock Recovery)
+veritabaninaBaglan().then(async () => {
+    try {
+        const kurtarilan = await Materyal.updateMany(
+            { durum: "isleniyor" },
+            { 
+                $set: { 
+                    durum: "hata", 
+                    islemeHatasi: "Sunucu yeniden başlatıldığı için işlem yarıda kaldı." 
+                } 
+            }
+        );
+        if (kurtarilan.modifiedCount > 0) {
+            console.log(`Sunucu başlangıcı: ${kurtarilan.modifiedCount} adet yarıda kalmış materyal işlemi 'hata' olarak güncellendi.`);
+        }
+    } catch (hata) {
+        console.error("Başlangıç kurtarma hatası:", hata.message);
+    }
+});
 
 // Middleware
 app.use(compression());

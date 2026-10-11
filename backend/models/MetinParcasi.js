@@ -17,6 +17,10 @@ const metinParcasiSchema = new mongoose.Schema(
             ref: "Materyal",
             required: true,
         },
+        islemeId: {
+            type: mongoose.Schema.Types.ObjectId,
+            default: null,
+        },
         parcaIndex: {
             type: Number,
             required: true,
@@ -35,8 +39,9 @@ const metinParcasiSchema = new mongoose.Schema(
     }
 );
 
-// Aynı materyal içinde parcaIndex tekrarını engellemek için
-metinParcasiSchema.index({ materyalId: 1, parcaIndex: 1 }, { unique: true });
+// Yeni çoklu-versiyonlama ve staging uyumlu bileşik tekillik indeksi.
+// Aynı işlem içinde (islemeId) parcaIndex tekrarı olamaz, farklı işlemler (staging) birbirini engellemez.
+metinParcasiSchema.index({ materyalId: 1, islemeId: 1, parcaIndex: 1 }, { unique: true });
 
 const MetinParcasi = mongoose.model("MetinParcasi", metinParcasiSchema);
 

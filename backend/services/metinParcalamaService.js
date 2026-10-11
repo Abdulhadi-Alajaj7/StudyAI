@@ -92,10 +92,22 @@ export const metniParcalaraAyir = (metin, maxLength = 1000, overlap = 200) => {
     return parcalar;
 };
 
-export const metinParcalaVeKaydet = async (metin, materyal, parcaUzunlugu = 1000, overlap = 200) => {
-    // Önceki parçaları güvenli şekilde sil (yeniden işleme durumu)
-    await MetinParcasi.deleteMany({ materyalId: materyal._id });
-    
+/**
+ * Metni parçalar ve verilen islemeId altında staging olarak kaydeder.
+ * Eski parçalar SİLİNMEZ; yeni parçalar başarıyla yazıldıktan sonra
+ * materyalin aktif sürümü doğrulanıp eski parçalar temizlenir.
+ * 
+ * @param {string} metin - Parçalanacak metin
+ * @param {object} materyal - Materyal belgesi
+ * @param {mongoose.Types.ObjectId} islemeId - Bu işlem için atanmış benzersiz kimlik
+ * @param {number} parcaUzunlugu - Parça uzunluğu
+ * @param {number} overlap - Örtüşme miktarı
+ */
+export const metinParcalaVeKaydet = async (metin, materyal, islemeId, parcaUzunlugu = 1000, overlap = 200) => {
+    if (!islemeId) {
+        throw new Error("metinParcalaVeKaydet: Geçerli bir islemeId zorunludur.");
+    }
+
     const parcalar = metniParcalaraAyir(metin, parcaUzunlugu, overlap);
     
     if (parcalar.length === 0) return [];
@@ -104,19 +116,19 @@ export const metinParcalaVeKaydet = async (metin, materyal, parcaUzunlugu = 1000
         kullaniciId: materyal.kullaniciId,
         dersId: materyal.dersId,
         materyalId: materyal._id,
+        islemeId: islemeId,
         parcaIndex: index,
         icerik: icerik,
         karakterSayisi: icerik.length
     }));
     
-    if (belgeler.length > 0) {
-        try {
-            await MetinParcasi.insertMany(belgeler);
-        } catch (error) {
-            // Hata durumunda kısmi eklenenleri temizle ve hatayı fırlat
-            await MetinParcasi.deleteMany({ materyalId: materyal._id });
-            throw new Error("Metin parçaları veritabanına kaydedilirken hata oluştu: " + error.message);
-        }
+    try {
+        await MetinParcasi.insertMany(belgeler);
+    } catch (error) {
+        // Hata durumunda SADECE bu işleme (islemeId) ait yeni parçaları temizle
+        // Önceki geçerli aktif parçalara ASLA dokunulmaz!
+        await MetinParcasi.deleteMany({ materyalId: materyal._id, islemeId: islemeId });
+        throw new Error("Metin parçaları veritabanına kaydedilirken hata oluştu: " + error.message);
     }
     
     return belgeler;

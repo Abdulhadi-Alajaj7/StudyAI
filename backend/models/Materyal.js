@@ -40,6 +40,14 @@ const materyalSchema = new mongoose.Schema(
             type: String,
             default: "yuklendi",
         },
+        islemeId: {
+            type: mongoose.Schema.Types.ObjectId,
+            default: null,
+        },
+        aktifIslemeId: {
+            type: mongoose.Schema.Types.ObjectId,
+            default: null,
+        },
         cikarilanMetin: {
             type: String,
             default: "",
