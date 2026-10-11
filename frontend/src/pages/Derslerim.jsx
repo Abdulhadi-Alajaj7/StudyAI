@@ -225,7 +225,7 @@ function Derslerim() {
                             onToggleMenu={() => toggleMenu(ders._id)}
                             onEdit={() => modalAc("duzenle", ders)}
                             onDelete={() => silOnayAc(ders)}
-                            onClick={() => console.log("Derse git", ders._id)}
+                            onClick={() => navigate(`/panel/dersler/${ders._id}/hazir`)}
                         />
                     ))}
                     {filtreliDersler.length === 0 && (

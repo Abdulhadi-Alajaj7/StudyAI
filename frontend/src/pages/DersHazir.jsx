@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { useOutletContext, useNavigate, useLocation, useParams } from "react-router-dom";
 import axios from "axios";
 import DersOlusturmaAdimlari from "../components/DersOlusturmaAdimlari";
+import KonuHaritasiBolumu from "../components/KonuHaritasiBolumu";
 import { CheckBadgeIcon, ArrowRightIcon, BookOpenIcon, DocumentTextIcon, CheckIcon, CpuChipIcon, ListBulletIcon, ChatBubbleBottomCenterTextIcon, PuzzlePieceIcon, SparklesIcon, ComputerDesktopIcon, CodeBracketIcon, CircleStackIcon, CalculatorIcon, BeakerIcon } from "@heroicons/react/24/outline";
 
 function DersHazir() {
@@ -13,6 +14,43 @@ function DersHazir() {
     const [materyalSayisi, setMateryalSayisi] = useState(0);
     const [ders, setDers] = useState(location.state?.ders || null);
     const uiPrefs = location.state?.uiPrefs || { renk: "indigo", simge: "desktop", dersKodu: "" };
+
+    // Konu Haritası Durumları
+    const [konuHaritasi, setKonuHaritasi] = useState(null);
+    const [haritaYukleniyor, setHaritaYukleniyor] = useState(true);
+    const [haritaOlusturuluyor, setHaritaOlusturuluyor] = useState(false);
+    const [haritaHatasi, setHaritaHatasi] = useState("");
+    const [guncelMi, setGuncelMi] = useState(true);
+
+    const konuHaritasiniGetir = async () => {
+        setHaritaYukleniyor(true);
+        try {
+            const res = await axios.get(`http://localhost:5000/dersler/${dersId}/konu-haritasi`, { withCredentials: true });
+            setKonuHaritasi(res.data.harita);
+            setGuncelMi(res.data.guncelMi);
+            setHaritaHatasi(res.data.olusturmaHatasi || "");
+        } catch (err) {
+            console.error("Konu haritası alınamadı:", err);
+            setHaritaHatasi(err.response?.data?.hata || "Konu haritası yüklenemedi.");
+        } finally {
+            setHaritaYukleniyor(false);
+        }
+    };
+
+    const konuHaritasiOlustur = async () => {
+        setHaritaOlusturuluyor(true);
+        setHaritaHatasi("");
+        try {
+            const res = await axios.post(`http://localhost:5000/dersler/${dersId}/konu-haritasi`, {}, { withCredentials: true });
+            setKonuHaritasi(res.data.harita);
+            setGuncelMi(true);
+        } catch (err) {
+            console.error("Konu haritası oluşturma hatası:", err);
+            setHaritaHatasi(err.response?.data?.hata || "Konu haritası oluşturulurken bir hata oluştu.");
+        } finally {
+            setHaritaOlusturuluyor(false);
+        }
+    };
 
     useEffect(() => {
         const materyalleriGetir = async () => {
@@ -35,6 +73,7 @@ function DersHazir() {
         };
         if (dersId) {
             materyalleriGetir();
+            konuHaritasiniGetir();
             if (!ders) {
                 dersGetir();
             }
@@ -163,8 +202,12 @@ function DersHazir() {
                                         <p className={`text-[12px] ${textSecondary}`}>Ana ve alt başlıklar</p>
                                     </div>
                                 </div>
-                                <div className={`px-2.5 py-1 rounded text-[11px] font-bold ${isDark ? 'bg-[#1B2942] text-[#7F8AA3]' : 'bg-[#E2E8F0] text-[#64748B]'}`}>
-                                    -- Konu
+                                <div className={`px-2.5 py-1 rounded text-[11px] font-bold ${
+                                    konuHaritasi?.anaKonular?.length > 0 
+                                        ? "bg-[#4F46E5]/10 text-[#4F46E5]" 
+                                        : (isDark ? 'bg-[#1B2942] text-[#7F8AA3]' : 'bg-[#E2E8F0] text-[#64748B]')
+                                }`}>
+                                    {konuHaritasi?.anaKonular?.length > 0 ? `${konuHaritasi.anaKonular.length} Ana Konu` : "-- Konu"}
                                 </div>
                             </div>
 
@@ -216,16 +259,18 @@ function DersHazir() {
                         </div>
                     </div>
 
-                    {/* Belirlenen Konular */}
-                    <div>
-                        <div className="flex items-center justify-between mb-4">
-                            <h4 className={`text-[15px] font-bold ${textPrimary}`}>Belirlenen Konular <span className={`text-[12px] font-normal ${textSecondary}`}>(Otomatik Haritalanan)</span></h4>
-                            <button disabled className={`text-[13px] font-medium text-[#4F46E5] flex items-center gap-1 opacity-50`}>Konu Haritasını Gör <ArrowRightIcon className="w-3 h-3" /></button>
-                        </div>
-                        <div className={`p-6 rounded-xl border border-dashed flex flex-col items-center justify-center text-center ${isDark ? 'border-[#26334A] bg-[#0B1120]/30' : 'border-[#E7E5EF] bg-white'}`}>
-                            <p className={`text-[14px] ${textSecondary}`}>Materyaller analiz edildiğinde konular burada görüntülenecek.</p>
-                        </div>
-                    </div>
+                    {/* Konu Haritası Bölümü */}
+                    <KonuHaritasiBolumu 
+                        dersId={dersId}
+                        isDark={isDark}
+                        konuHaritasi={konuHaritasi}
+                        yukleniyor={haritaYukleniyor}
+                        olusturuluyor={haritaOlusturuluyor}
+                        hata={haritaHatasi}
+                        guncelMi={guncelMi}
+                        hazirMateryalSayisi={materyalSayisi}
+                        onOlustur={konuHaritasiOlustur}
+                    />
 
                     {/* Artık Neler Yapabilirsin? */}
                     <div className="mb-6">

@@ -1,6 +1,7 @@
 import Ders from "../models/Ders.js";
 import Materyal from "../models/Materyal.js";
 import MetinParcasi from "../models/MetinParcasi.js";
+import KonuHaritasi from "../models/KonuHaritasi.js";
 import { guvenliDosyaSil } from "../utils/dosyaIslemleri.js";
 
 /* =========================
@@ -171,7 +172,10 @@ export const dersSil = async (req, res) => {
     // 4. Yarış durumu temizliği: Silme işlemi sırasında parça yazmış olabilecek asenkron işler için son kontrol
     await MetinParcasi.deleteMany({ dersId: ders._id });
 
-    // 5. En son dersi sil
+    // 5. Derse ait Konu Haritası kaydını temizle
+    await KonuHaritasi.deleteMany({ dersId: ders._id });
+
+    // 6. En son dersi sil
     await ders.deleteOne();
 
     res.status(200).json({

@@ -8,9 +8,17 @@ import {
   dersSil,
 } from "../controllers/dersController.js";
 
+import {
+  konuHaritasiniGetir,
+  konuHaritasiOlustur,
+  geminiDurumuGetir
+} from "../controllers/konuHaritasiController.js";
+
 import kimlikDogrula from "../middleware/auth.js";
 
 const router = express.Router();
+
+router.get("/gemini-durum", kimlikDogrula, geminiDurumuGetir);
 
 router.post("/", kimlikDogrula, dersOlustur);
 
@@ -21,5 +29,9 @@ router.get("/:id", kimlikDogrula, dersGetir);
 router.put("/:id", kimlikDogrula, dersGuncelle);
 
 router.delete("/:id", kimlikDogrula, dersSil);
+
+// Konu Haritası Endpoint'leri
+router.get("/:id/konu-haritasi", kimlikDogrula, konuHaritasiniGetir);
+router.post("/:id/konu-haritasi", kimlikDogrula, konuHaritasiOlustur);
 
 export default router;
