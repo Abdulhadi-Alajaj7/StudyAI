@@ -141,20 +141,41 @@ export const konuHaritasiOlustur = async (req, res) => {
         // 4. Gemini ile analiz ve harita üretimi
         try {
             const tamamlananHarita = await konuHaritasiUretVeKaydet(ders, kullaniciId, yeniIslemToken);
+            if (!tamamlananHarita) {
+                // Analiz sırasında materyal değişti veya işlem iptal edildi
+                const guncel = await KonuHaritasi.findOne({ dersId, kullaniciId });
+                return res.status(409).json({
+                    hata: guncel?.olusturmaHatasi || "Materyaller işlem sırasında değiştiği için analiz tamamlanamadı.",
+                    durum: guncel?.durum || "hata",
+                    harita: guncel
+                });
+            }
+
             return res.status(200).json({
                 mesaj: "Konu haritası başarıyla oluşturuldu.",
                 durum: "hazir",
                 harita: tamamlananHarita
             });
         } catch (uretmeHatasi) {
-            // Hata detayını güvenli Türkçe hata mesajı olarak dön
+            // Hata detayını güvenli ve hassas bilgi içermeyen Türkçe hata mesajı olarak dön
             let hataMesaji = uretmeHatasi.message || "Konu haritası üretilemedi.";
-            if (uretmeHatasi.kod === "EKSİK_API_KEY") {
+            if (uretmeHatasi.kod === "EKSİK_API_KEY" || hataMesaji.includes("GEMINI_API_KEY")) {
                 hataMesaji = "Sistemde Gemini API anahtarı yapılandırılmamış. Lütfen yöneticiye başvurun.";
+            } else if (hataMesaji.includes("429") || hataMesaji.toLowerCase().includes("quota")) {
+                hataMesaji = "Gemini API istek kotası aşıldı. Lütfen birkaç dakika sonra tekrar deneyin.";
+            } else if (hataMesaji.includes("503") || hataMesaji.toLowerCase().includes("unavailable")) {
+                hataMesaji = "Gemini servisi şu anda geçici olarak kullanılamıyor. Lütfen daha sonra tekrar deneyin.";
+            } else if (hataMesaji.toLowerCase().includes("timeout")) {
+                hataMesaji = "Gemini analiz isteği zaman aşımına uğradı. Lütfen tekrar deneyin.";
             }
+
+            // Mevcut harita durumunu sorgula (varsa önceki başarılı konuları da dönebilmek için)
+            const guncelHarita = await KonuHaritasi.findOne({ dersId, kullaniciId });
+
             return res.status(400).json({
                 hata: hataMesaji,
-                durum: "hata"
+                durum: guncelHarita?.durum || "hata",
+                harita: guncelHarita
             });
         }
 

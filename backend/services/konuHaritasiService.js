@@ -1,17 +1,48 @@
+import crypto from "crypto";
 import mongoose from "mongoose";
 import Materyal from "../models/Materyal.js";
 import MetinParcasi from "../models/MetinParcasi.js";
 import KonuHaritasi from "../models/KonuHaritasi.js";
-import { geminiIleKonuHaritasiUret, VARSAYILAN_GEMINI_MODELI } from "./geminiService.js";
+import { 
+    geminiIleKonuHaritasiUret, 
+    geminiIleKonulariBirlestir, 
+    VARSAYILAN_GEMINI_MODELI 
+} from "./geminiService.js";
 
 /**
- * Bir dersin hazır ve aktif sürümdeki metin parçalarını toplar ve temizler.
- * Yalnızca Materyal.durum === "hazir" ve Materyal.aktifIslemeId ile eşleşen
- * MetinParcasi parçalarını çeker (Staging veya eski sürümler dahil edilmez).
+ * Başlık ve hiyerarşi temelinde kararlı, benzersiz ve deterministik konu kimliği üretir.
+ * Yeniden oluşturmada aynı kavramsal konu korunuyorsa önceki kimliğini korur.
+ * 
+ * @param {string} dersIdStr 
+ * @param {string} baslik 
+ * @param {string} [ustKonuBasligi] 
+ * @param {boolean} isAltKonu 
+ * @returns {string} örn: "top-7a2b9f3c" veya "sub-4d8e1a5f"
+ */
+export const deterministikKonuIdUret = (dersIdStr, baslik, ustKonuBasligi = "", isAltKonu = false) => {
+    const normalizeMetin = (baslik || "")
+        .trim()
+        .toLocaleLowerCase("tr-TR")
+        .replace(/[\s\-_]+/g, " ");
+
+    const ustNormalize = (ustKonuBasligi || "")
+        .trim()
+        .toLocaleLowerCase("tr-TR")
+        .replace(/[\s\-_]+/g, " ");
+
+    const hamGirdi = `${dersIdStr}::${ustNormalize}::${normalizeMetin}`;
+    const hash = crypto.createHash("sha256").update(hamGirdi, "utf8").digest("hex").slice(0, 8);
+
+    return isAltKonu ? `sub-${hash}` : `top-${hash}`;
+};
+
+/**
+ * Bir dersin hazır ve aktif sürümdeki TÜM metin parçalarını gruplar.
+ * Hiçbir parça sessizce atlanmaz; büyük içerikler batch'lere bölünür.
  * 
  * @param {mongoose.Types.ObjectId} dersId 
  * @param {mongoose.Types.ObjectId} kullaniciId 
- * @returns {Promise<{ hazirMateryaller: Array, metinParcalari: Array, birlestirilmisMetin: string }>}
+ * @returns {Promise<{ hazirMateryaller: Array, metinGruplari: Array<string>, toplamParcaSayisi: number }>}
  */
 export const aktifMateryalMetinleriniTopla = async (dersId, kullaniciId) => {
     // 1. Kullanıcının bu derse ait hazır durumdaki materyallerini bul
@@ -23,7 +54,7 @@ export const aktifMateryalMetinleriniTopla = async (dersId, kullaniciId) => {
     }).select("_id dosyaAdi orijinalDosyaAdi aktifIslemeId");
 
     if (!hazirMateryaller || hazirMateryaller.length === 0) {
-        return { hazirMateryaller: [], metinParcalari: [], birlestirilmisMetin: "" };
+        return { hazirMateryaller: [], metinGruplari: [], toplamParcaSayisi: 0 };
     }
 
     // 2. Her materyalin sadece aktifIslemeId'sine ait olan metin parçalarını çek
@@ -39,47 +70,49 @@ export const aktifMateryalMetinleriniTopla = async (dersId, kullaniciId) => {
     }).sort({ materyalId: 1, parcaIndex: 1 });
 
     if (!metinParcalari || metinParcalari.length === 0) {
-        return { hazirMateryaller, metinParcalari: [], birlestirilmisMetin: "" };
+        return { hazirMateryaller, metinGruplari: [], toplamParcaSayisi: 0 };
     }
 
-    // 3. Maliyet ve Prompt Token Kontrolü:
-    // Metin parçaları materyallere göre düzenlenir ve prompt sınırını aşmayacak şekilde birleştirilir.
-    // Her materyal için başlık ayracı ve parça içerikleri eklenir.
-    const materyalGrup = {};
-    for (const m of hazirMateryaller) {
-        materyalGrup[m._id.toString()] = {
-            dosyaAdi: m.orijinalDosyaAdi || m.dosyaAdi,
-            parcalar: []
-        };
-    }
+    // 3. Materyallere göre metinleri düzenle ve kontrollü batch'lere (gruplara) ayır
+    // BATCH_MAX_KARAKTER: ~80.000 karakter (yaklaşık 20.000 token). Tek prompt'ta güvenli ve eksiksiz analiz sağlar.
+    const BATCH_MAX_KARAKTER = 80000;
+    const metinGruplari = [];
+    let mevcutGrup = [];
+    let mevcutGrupKarakter = 0;
 
-    for (const p of metinParcalari) {
-        const matIdStr = p.materyalId.toString();
-        if (materyalGrup[matIdStr]) {
-            materyalGrup[matIdStr].parcalar.push(p.icerik);
+    let sonMateryalId = null;
+
+    for (const parca of metinParcalari) {
+        const matIdStr = parca.materyalId.toString();
+        const matBilgi = hazirMateryaller.find(m => m._id.toString() === matIdStr);
+        const dosyaBasligi = matBilgi ? (matBilgi.orijinalDosyaAdi || matBilgi.dosyaAdi) : "Materyal";
+
+        // Yeni materyale geçildiğinde başlık ekle
+        let parcaMetni = parca.icerik || "";
+        if (sonMateryalId !== matIdStr) {
+            parcaMetni = `\n=== MATERYAL: ${dosyaBasligi} ===\n` + parcaMetni;
+            sonMateryalId = matIdStr;
+        }
+
+        if (mevcutGrupKarakter + parcaMetni.length > BATCH_MAX_KARAKTER && mevcutGrup.length > 0) {
+            metinGruplari.push(mevcutGrup.join("\n\n"));
+            mevcutGrup = [parcaMetni];
+            mevcutGrupKarakter = parcaMetni.length;
+        } else {
+            mevcutGrup.push(parcaMetni);
+            mevcutGrupKarakter += parcaMetni.length;
         }
     }
 
-    const metinBloklari = [];
-    const MAKSIMUM_TOPLAM_KARAKTER = 120000; // ~30.000 token civarı, tek prompt için ideal maliyet ve performans dengesi
-    let toplamKarakter = 0;
-
-    for (const matId of Object.keys(materyalGrup)) {
-        const grup = materyalGrup[matId];
-        metinBloklari.push(`\n=== MATERYAL: ${grup.dosyaAdi} ===\n`);
-        
-        for (const parca of grup.parcalar) {
-            if (toplamKarakter + parca.length > MAKSIMUM_TOPLAM_KARAKTER) {
-                // Sınır aşıldığında diğer materyallerden de temsil edilmesi için kontrollü kesit al
-                break;
-            }
-            metinBloklari.push(parca);
-            toplamKarakter += parca.length;
-        }
+    if (mevcutGrup.length > 0) {
+        metinGruplari.push(mevcutGrup.join("\n\n"));
     }
 
-    const birlestirilmisMetin = metinBloklari.join("\n\n");
-    return { hazirMateryaller, metinParcalari, birlestirilmisMetin };
+    return { 
+        hazirMateryaller, 
+        metinGruplari, 
+        toplamParcaSayisi: metinParcalari.length 
+    };
 };
 
 /**
@@ -92,15 +125,21 @@ export const aktifMateryalMetinleriniTopla = async (dersId, kullaniciId) => {
  */
 export const konuHaritasiUretVeKaydet = async (ders, kullaniciId, islemToken, modelAdi = VARSAYILAN_GEMINI_MODELI) => {
     try {
-        // 1. Aktif ve hazır materyal metinlerini topla
-        const { hazirMateryaller, metinParcalari, birlestirilmisMetin } = await aktifMateryalMetinleriniTopla(ders._id, kullaniciId);
+        // 1. Analiz başlangıcında aktif ve hazır materyal metinlerini topla
+        const { hazirMateryaller, metinGruplari, toplamParcaSayisi } = await aktifMateryalMetinleriniTopla(ders._id, kullaniciId);
 
         if (hazirMateryaller.length === 0) {
             throw new Error("Derste hazır durumda hiç materyal bulunamadı.");
         }
-        if (metinParcalari.length === 0 || !birlestirilmisMetin.trim()) {
+        if (metinGruplari.length === 0 || toplamParcaSayisi === 0) {
             throw new Error("Hazır materyallerin aktif sürümünde işlenmiş metin parçası bulunamadı.");
         }
+
+        // Başlangıç kaynak anlık görüntüsü
+        const baslangicKaynaklar = hazirMateryaller.map(m => ({
+            materyalId: m._id.toString(),
+            aktifIslemeId: m.aktifIslemeId?.toString() || ""
+        }));
 
         // 2. Kontrol noktası: Harita veya ders bu süreçte silindi mi ya da yeni işlem başlatıldı mı?
         const kilitliHarita = await KonuHaritasi.findOne({
@@ -110,27 +149,101 @@ export const konuHaritasiUretVeKaydet = async (ders, kullaniciId, islemToken, mo
         });
 
         if (!kilitliHarita) {
-            // İşlem iptal edilmiş veya başka bir istek devralmış
+            return null; // Başka işlem devralmış veya iptal edilmiş
+        }
+
+        // 3. Gemini ile Analiz (Batching & Map-Reduce):
+        // Eğer 1 grup varsa doğrudan üret; birden fazla grup varsa her birinden ara konuları çıkar ve sentezle
+        let hamKonular = [];
+        const dersBilgisi = { dersAdi: ders.dersAdi, aciklama: ders.aciklama, donem: ders.donem };
+
+        if (metinGruplari.length === 1) {
+            hamKonular = await geminiIleKonuHaritasiUret(metinGruplari[0], dersBilgisi, modelAdi);
+        } else {
+            const araKonuListeleri = [];
+            for (const grupMetin of metinGruplari) {
+                const araListe = await geminiIleKonuHaritasiUret(grupMetin, dersBilgisi, modelAdi);
+                if (araListe && araListe.length > 0) {
+                    araKonuListeleri.push(...araListe);
+                }
+            }
+            hamKonular = await geminiIleKonulariBirlestir(araKonuListeleri, dersBilgisi, modelAdi);
+        }
+
+        // 4. Sonucu veritabanına yazmadan önce materyaller değişti mi kontrol et (Eşzamanlılık ve Tutarlılık)
+        const guncelHazir = await Materyal.find({
+            dersId: ders._id,
+            kullaniciId,
+            durum: "hazir",
+            aktifIslemeId: { $ne: null }
+        }).select("_id aktifIslemeId");
+
+        // Kaynak karşılaştırması
+        let kaynaklarAyni = (guncelHazir.length === baslangicKaynaklar.length);
+        if (kaynaklarAyni) {
+            const guncelMap = new Map();
+            for (const g of guncelHazir) {
+                guncelMap.set(g._id.toString(), g.aktifIslemeId?.toString() || "");
+            }
+            for (const b of baslangicKaynaklar) {
+                if (guncelMap.get(b.materyalId) !== b.aktifIslemeId) {
+                    kaynaklarAyni = false;
+                    break;
+                }
+            }
+        }
+
+        if (!kaynaklarAyni) {
+            // Analiz devam ederken materyaller değişti/silindi/güncellendi.
+            // Bu analizi GÜNCEL kabul edip kaydetmeyip, haritayı önceki haline veya hata/güncelleme durumuna çekiyoruz
+            await KonuHaritasi.findOneAndUpdate(
+                { dersId: ders._id, aktifIslemToken: islemToken },
+                {
+                    $set: {
+                        durum: kilitliHarita.anaKonular?.length > 0 ? "hazir" : "hata",
+                        olusturmaHatasi: "Analiz sırasında materyaller değişti. Lütfen konu haritasını yeniden oluşturun.",
+                        aktifIslemToken: null
+                    }
+                }
+            );
             return null;
         }
 
-        // 3. Gemini ile yapılandırılmış konu hiyerarşisi üret
-        const hamKonular = await geminiIleKonuHaritasiUret(
-            birlestirilmisMetin,
-            { dersAdi: ders.dersAdi, aciklama: ders.aciklama, donem: ders.donem },
-            modelAdi
-        );
-
-        // 4. Konulara kalıcı, benzersiz kimlikler (UUID/String) ve sıra ata
+        // 5. Konulara kararlı ve benzersiz kimlikler (deterministik ve önceki haritayla uyumlu) ata
+        const dersIdStr = ders._id.toString();
         let toplamAlt = 0;
+
+        // Önceki başarılı haritadaki konuların başlık-kimlik eşleşme haritası
+        const eskiKimlikMap = new Map();
+        if (kilitliHarita.anaKonular && Array.isArray(kilitliHarita.anaKonular)) {
+            for (const eAna of kilitliHarita.anaKonular) {
+                if (eAna.baslik && eAna.konuId) {
+                    eskiKimlikMap.set(eAna.baslik.trim().toLowerCase(), eAna.konuId);
+                }
+                if (Array.isArray(eAna.altKonular)) {
+                    for (const eAlt of eAna.altKonular) {
+                        if (eAlt.baslik && eAlt.konuId) {
+                            eskiKimlikMap.set(`${eAna.baslik.trim().toLowerCase()}::${eAlt.baslik.trim().toLowerCase()}`, eAlt.konuId);
+                        }
+                    }
+                }
+            }
+        }
+
         const kaliciAnaKonular = hamKonular.map((ana, aIndex) => {
-            const anaKonuId = `top-${ders._id.toString().slice(-4)}-${aIndex + 1}`;
+            const anaBaslik = ana.baslik.trim();
+            const eskiAnaId = eskiKimlikMap.get(anaBaslik.toLowerCase());
+            const anaKonuId = eskiAnaId || deterministikKonuIdUret(dersIdStr, anaBaslik, "", false);
             
             const altlar = (ana.altKonular || []).map((alt, subIndex) => {
                 toplamAlt++;
+                const altBaslik = alt.baslik.trim();
+                const eskiAltId = eskiKimlikMap.get(`${anaBaslik.toLowerCase()}::${altBaslik.toLowerCase()}`);
+                const altKonuId = eskiAltId || deterministikKonuIdUret(dersIdStr, altBaslik, anaBaslik, true);
+
                 return {
-                    konuId: `sub-${ders._id.toString().slice(-4)}-${aIndex + 1}-${subIndex + 1}`,
-                    baslik: alt.baslik,
+                    konuId: altKonuId,
+                    baslik: altBaslik,
                     aciklama: alt.aciklama || "",
                     sira: alt.sira || subIndex + 1
                 };
@@ -138,7 +251,7 @@ export const konuHaritasiUretVeKaydet = async (ders, kullaniciId, islemToken, mo
 
             return {
                 konuId: anaKonuId,
-                baslik: ana.baslik,
+                baslik: anaBaslik,
                 aciklama: ana.aciklama || "",
                 sira: ana.sira || aIndex + 1,
                 altKonular: altlar
@@ -151,7 +264,7 @@ export const konuHaritasiUretVeKaydet = async (ders, kullaniciId, islemToken, mo
             dosyaAdi: m.orijinalDosyaAdi || m.dosyaAdi
         }));
 
-        // 5. Atomik Taahhüt (Commit): Harita kaydını başarıyla güncelle
+        // 6. Atomik Taahhüt (Commit): Harita kaydını başarıyla güncelle
         const guncellenenHarita = await KonuHaritasi.findOneAndUpdate(
             { dersId: ders._id, aktifIslemToken: islemToken },
             {
@@ -175,11 +288,15 @@ export const konuHaritasiUretVeKaydet = async (ders, kullaniciId, islemToken, mo
         console.error(`Konu Haritası oluşturma hatası (Ders ID: ${ders._id}):`, hata.message);
 
         // Hata durumunda var olan eski başarılı haritayı bozmadan, sadece hata durumunu kaydet
+        // Eğer önceden başarılı anaKonular varsa harita durumunu "hazir" tutup hatayı bildiriyoruz; yoksa "hata"
+        const mevcut = await KonuHaritasi.findOne({ dersId: ders._id });
+        const oncekiBasariliMi = mevcut && mevcut.anaKonular && mevcut.anaKonular.length > 0;
+
         await KonuHaritasi.findOneAndUpdate(
             { dersId: ders._id, aktifIslemToken: islemToken },
             {
                 $set: {
-                    durum: "hata",
+                    durum: oncekiBasariliMi ? "hazir" : "hata",
                     olusturmaHatasi: hata.message,
                     aktifIslemToken: null
                 }

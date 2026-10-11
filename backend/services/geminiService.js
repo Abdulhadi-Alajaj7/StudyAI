@@ -67,11 +67,68 @@ export const geminiBaglantisiniDogrula = async (modelAdi = VARSAYILAN_GEMINI_MOD
 };
 
 /**
- * Metin içeriğinden Gemini ile yapılandırılmış JSON konu haritası üretir.
- * @param {string} metinIcerik - Analiz edilecek temizlenmiş metin
- * @param {object} dersBilgisi - { dersAdi, aciklama, donem }
- * @param {string} modelAdi
- * @returns {Promise<Array<{ baslik: string, aciklama?: string, sira: number, altKonular: Array<{ baslik: string, aciklama?: string, sira: number }> }>>}
+ * Ortak API çağrısı ve yeniden deneme mekanizması.
+ */
+async function callGeminiStructuredJson(ai, modelAdi, prompt, systemInstruction) {
+    let gecikme = 1000;
+    const maxDeneme = 2;
+    let sonHata = null;
+
+    for (let deneme = 1; deneme <= maxDeneme; deneme++) {
+        try {
+            const response = await ai.models.generateContent({
+                model: modelAdi,
+                contents: prompt,
+                config: {
+                    systemInstruction,
+                    temperature: 0.2,
+                    responseMimeType: "application/json"
+                }
+            });
+
+            const rawText = response?.text?.trim() || "";
+            if (!rawText) {
+                throw new Error("Gemini API boş yanıt döndürdü.");
+            }
+
+            // JSON Temizleme
+            let jsonMetni = rawText;
+            if (jsonMetni.startsWith("```json")) {
+                jsonMetni = jsonMetni.replace(/^```json\s*/i, "").replace(/```$/, "").trim();
+            } else if (jsonMetni.startsWith("```")) {
+                jsonMetni = jsonMetni.replace(/^```\s*/, "").replace(/```$/, "").trim();
+            }
+
+            let parsed;
+            try {
+                parsed = JSON.parse(jsonMetni);
+            } catch (pErr) {
+                throw new Error(`Gemini geçerli bir JSON döndürmedi: ${pErr.message}. Çıktı: ${jsonMetni.substring(0, 100)}`);
+            }
+
+            const dogrulanmis = semaDogrulaVeNormalizeEt(parsed);
+            if (dogrulanmis.length === 0) {
+                throw new Error("Gemini çıktısında geçerli konu tespit edilemedi.");
+            }
+
+            return dogrulanmis;
+        } catch (err) {
+            sonHata = err;
+            const isRetryable = err.message?.includes("429") || err.message?.includes("timeout") || err.message?.includes("503");
+            if (deneme < maxDeneme && isRetryable) {
+                await new Promise((r) => setTimeout(r, gecikme));
+                gecikme *= 2;
+            } else {
+                break;
+            }
+        }
+    }
+
+    throw sonHata;
+}
+
+/**
+ * Tek bir metin bloğundan Gemini ile yapılandırılmış JSON konu haritası üretir.
  */
 export const geminiIleKonuHaritasiUret = async (metinIcerik, dersBilgisi, modelAdi = VARSAYILAN_GEMINI_MODELI) => {
     const ai = getGeminiClient();
@@ -111,68 +168,56 @@ ${metinIcerik}
 
 Lütfen yukarıdaki materyal metnine dayanarak müfredat Konu Haritasını yukarıda belirtilen JSON şemasına tam uyumlu olarak üret.`;
 
-    let gecikme = 1000;
-    const maxDeneme = 2;
-    let sonHata = null;
+    return await callGeminiStructuredJson(ai, modelAdi, prompt, systemInstruction);
+};
 
-    for (let deneme = 1; deneme <= maxDeneme; deneme++) {
-        try {
-            const response = await ai.models.generateContent({
-                model: modelAdi,
-                contents: prompt,
-                config: {
-                    systemInstruction,
-                    temperature: 0.2,
-                    responseMimeType: "application/json"
-                }
-            });
+/**
+ * Birden fazla batch'ten çıkarılan ara konu listelerini tek bir tutarlı, tekrar etmeyen hiyerarşik haritada birleştirir.
+ */
+export const geminiIleKonulariBirlestir = async (araKonuListeleri, dersBilgisi, modelAdi = VARSAYILAN_GEMINI_MODELI) => {
+    const ai = getGeminiClient();
 
-            const rawText = response?.text?.trim() || "";
-            if (!rawText) {
-                throw new Error("Gemini API boş yanıt döndürdü.");
-            }
+    const systemInstruction = `Sen üniversite düzeyinde uzman bir müfredat ve konu taksonomisi sentezleyicisisin.
+Sana bir dersin farklı materyal bölümlerinden çıkarılmış ham konu listeleri verilmektedir.
+Görevin: Bu konuları tek bir bütüncül, mantıklı sıralanmış ve TEKRARLARDAN ARINDIRILMIŞ (deduplicated) hiyerarşik ders konu haritasına dönüştürmektir.
 
-            // JSON Temizleme ve Ayrıştırma (Markdown blokları varsa temizle)
-            let jsonMetni = rawText;
-            if (jsonMetni.startsWith("```json")) {
-                jsonMetni = jsonMetni.replace(/^```json\s*/i, "").replace(/```$/, "").trim();
-            } else if (jsonMetni.startsWith("```")) {
-                jsonMetni = jsonMetni.replace(/^```\s*/, "").replace(/```$/, "").trim();
-            }
+KESİN KURALLAR:
+1. Aynı veya benzer kavramsal konuları tek bir Ana Konu altında birleştir.
+2. Alt konuları mantıklı ana başlıkların altına yerleştir ve mükerrer alt başlıkları tekleştir.
+3. Sağlanan listelerde bulunmayan yeni/hayali konular ASLA uydurma.
+4. Çıktıyı SADECE geçerli bir JSON dizisi (Array) formatında ver.
 
-            let parsed;
-            try {
-                parsed = JSON.parse(jsonMetni);
-            } catch (pErr) {
-                throw new Error(`Gemini geçerli bir JSON döndürmedi: ${pErr.message}. Çıktı: ${jsonMetni.substring(0, 100)}`);
-            }
+JSON ŞEMASI:
+[
+  {
+    "baslik": "Ana Konu Başlığı (Türkçe)",
+    "aciklama": "Konu açıklaması",
+    "sira": 1,
+    "altKonular": [
+      {
+        "baslik": "Alt Konu Başlığı (Türkçe)",
+        "aciklama": "Alt konu açıklaması",
+        "sira": 1
+      }
+    ]
+  }
+]`;
 
-            // Şema Doğrulama
-            const dogrulanmisKonular = semaDogrulaVeNormalizeEt(parsed);
-            if (dogrulanmisKonular.length === 0) {
-                throw new Error("Gemini çıktısında geçerli ana konu tespit edilemedi.");
-            }
+    const prompt = `Ders Adı: ${dersBilgisi.dersAdi || "Belirtilmedi"}
+Ders Açıklaması: ${dersBilgisi.aciklama || ""}
 
-            return dogrulanmisKonular;
-        } catch (err) {
-            sonHata = err;
-            const isRetryable = err.message?.includes("429") || err.message?.includes("timeout") || err.message?.includes("503");
-            if (deneme < maxDeneme && isRetryable) {
-                await new Promise((r) => setTimeout(r, gecikme));
-                gecikme *= 2;
-            } else {
-                break;
-            }
-        }
-    }
+BÖLÜMLERDEN ÇIKARILAN HAM KONULAR:
+${JSON.stringify(araKonuListeleri, null, 2)}
 
-    throw sonHata;
+Lütfen bu ham konuları sentezleyip birleştirerek tek bir hiyerarşik JSON Konu Haritası üret.`;
+
+    return await callGeminiStructuredJson(ai, modelAdi, prompt, systemInstruction);
 };
 
 /**
  * Gelen JSON verisini doğrular, sanitize eder ve sıralar.
  */
-function semaDogrulaVeNormalizeEt(data) {
+export function semaDogrulaVeNormalizeEt(data) {
     if (!data) return [];
     const liste = Array.isArray(data) ? data : (data.konular || data.anaKonular || []);
     if (!Array.isArray(liste)) return [];

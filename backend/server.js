@@ -26,6 +26,22 @@ veritabaninaBaglan().then(async () => {
         if (kurtarilan.modifiedCount > 0) {
             console.log(`Sunucu başlangıcı: ${kurtarilan.modifiedCount} adet yarıda kalmış materyal işlemi 'hata' olarak güncellendi.`);
         }
+
+        // Konu Haritası yarıda kalmış kilit kurtarması
+        const { default: KonuHaritasi } = await import("./models/KonuHaritasi.js");
+        const kurtarilanHaritalar = await KonuHaritasi.updateMany(
+            { durum: "olusturuluyor" },
+            {
+                $set: {
+                    durum: "hata",
+                    olusturmaHatasi: "Sunucu yeniden başlatıldığı için konu haritası üretimi yarıda kaldı.",
+                    aktifIslemToken: null
+                }
+            }
+        );
+        if (kurtarilanHaritalar.modifiedCount > 0) {
+            console.log(`Sunucu başlangıcı: ${kurtarilanHaritalar.modifiedCount} adet 'olusturuluyor' durumundaki konu haritası 'hata' olarak güncellendi.`);
+        }
     } catch (hata) {
         console.error("Başlangıç kurtarma hatası:", hata.message);
     }
