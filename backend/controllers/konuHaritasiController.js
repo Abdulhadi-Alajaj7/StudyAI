@@ -2,9 +2,9 @@ import mongoose from "mongoose";
 import Ders from "../models/Ders.js";
 import Materyal from "../models/Materyal.js";
 import KonuHaritasi from "../models/KonuHaritasi.js";
-import { 
-    konuHaritasiUretVeKaydet, 
-    konuHaritasiGuncellikKontrolu 
+import {
+    konuHaritasiUretVeKaydet,
+    konuHaritasiGuncellikKontrolu
 } from "../services/konuHaritasiService.js";
 import { geminiBaglantisiniDogrula, VARSAYILAN_GEMINI_MODELI } from "../services/geminiService.js";
 
@@ -44,8 +44,8 @@ export const konuHaritasiniGetir = async (req, res) => {
                 harita: null,
                 hazirMateryalSayisi,
                 guncelMi: false,
-                mesaj: hazirMateryalSayisi > 0 
-                    ? "Konu haritası henüz oluşturulmadı. Hazır materyallerinizden harita oluşturabilirsiniz." 
+                mesaj: hazirMateryalSayisi > 0
+                    ? "Konu haritası henüz oluşturulmadı. Hazır materyallerinizden harita oluşturabilirsiniz."
                     : "Konu haritası oluşturmak için önce en az bir materyal yükleyip işlenmesini beklemelisiniz."
             });
         }
@@ -94,8 +94,8 @@ export const konuHaritasiOlustur = async (req, res) => {
         });
 
         if (hazirMateryalSayisi === 0) {
-            return res.status(400).json({ 
-                hata: "Konu haritası oluşturmak için işlenmiş en az bir hazır materyal gereklidir." 
+            return res.status(400).json({
+                hata: "Konu haritası oluşturmak için işlenmiş en az bir hazır materyal gereklidir."
             });
         }
 
@@ -106,29 +106,41 @@ export const konuHaritasiOlustur = async (req, res) => {
         let harita = await KonuHaritasi.findOne({ dersId, kullaniciId });
 
         if (harita && harita.durum === "olusturuluyor") {
-            return res.status(409).json({ 
-                hata: "Bu ders için şu anda zaten bir konu haritası oluşturuluyor. Lütfen işlemin tamamlanmasını bekleyin." 
+            return res.status(409).json({
+                hata: "Bu ders için şu anda zaten bir konu haritası oluşturuluyor. Lütfen işlemin tamamlanmasını bekleyin."
             });
         }
 
         if (!harita) {
-            harita = await KonuHaritasi.create({
-                dersId,
-                kullaniciId,
-                durum: "olusturuluyor",
-                olusturmaHatasi: "",
-                aktifIslemToken: yeniIslemToken
-            });
+            try {
+                harita = await KonuHaritasi.create({
+                    dersId,
+                    kullaniciId,
+                    durum: "olusturuluyor",
+                    olusturmaHatasi: "",
+                    aktifIslemToken: yeniIslemToken
+                });
+            } catch (error) {
+                // Aynı ders için iki eşzamanlı ilk oluşturma isteği
+                // geldiğinde unique index yalnızca bir kayda izin verir.
+                if (error.code === 11000) {
+                    return res.status(409).json({
+                        hata: "Bu ders için konu haritası oluşturma işlemi zaten başlatılmış. Lütfen mevcut işlemin tamamlanmasını bekleyin."
+                    });
+                }
+
+                throw error;
+            }
         } else {
             // Var olan harita üzerinde kilidi al (durum: olusturuluyor yap ama eski anaKonulari henüz silme!)
             harita = await KonuHaritasi.findOneAndUpdate(
                 { _id: harita._id, durum: { $ne: "olusturuluyor" } },
-                { 
-                    $set: { 
-                        durum: "olusturuluyor", 
+                {
+                    $set: {
+                        durum: "olusturuluyor",
                         olusturmaHatasi: "",
-                        aktifIslemToken: yeniIslemToken 
-                    } 
+                        aktifIslemToken: yeniIslemToken
+                    }
                 },
                 { new: true }
             );

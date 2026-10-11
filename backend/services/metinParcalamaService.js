@@ -1,135 +1,220 @@
+
 import MetinParcasi from "../models/MetinParcasi.js";
 
 /**
- * Metni belirli bir uzunlukta ve overlap ile anlamlı sınırları (paragraf, cümle, kelime) koruyarak parçalar.
+ * Metni anlamlı sınırları koruyarak parçalara ayırır.
+ * Parçalar arasında overlap bırakır ve metin kaybını önler.
  */
-export const metniParcalaraAyir = (metin, maxLength = 1000, overlap = 200) => {
-    if (!metin || typeof metin !== 'string') return [];
-    
+export const metniParcalaraAyir = (
+    metin,
+    maxLength = 1000,
+    overlap = 200
+) => {
+    if (typeof metin !== "string" || metin.trim().length === 0) {
+        return [];
+    }
+
+    if (!Number.isInteger(maxLength) || maxLength < 1) {
+        throw new Error("maxLength pozitif bir tam sayı olmalıdır.");
+    }
+
+    if (!Number.isInteger(overlap) || overlap < 0) {
+        throw new Error("overlap negatif olmayan bir tam sayı olmalıdır.");
+    }
+
     metin = metin.trim();
-    if (metin.length === 0) return [];
-    
+
     if (overlap >= maxLength) {
         overlap = Math.floor(maxLength / 5);
     }
-    
+
     const parcalar = [];
     let baslangic = 0;
-    
+
     while (baslangic < metin.length) {
-        if (baslangic + maxLength >= metin.length) {
-            const parca = metin.substring(baslangic).trim();
-            if (parca.length > 0) parcalar.push(parca);
-            break;
-        }
-        
-        let bitis = baslangic + maxLength;
-        const incelenenKisim = metin.substring(baslangic, bitis);
-        let gercekBitis = -1;
-        
-        const minHedefBitis = Math.floor(maxLength * 0.5);
-        
-        const ciftSatir = incelenenKisim.lastIndexOf("\n\n");
-        if (ciftSatir > minHedefBitis) {
-            gercekBitis = baslangic + ciftSatir;
-        }
-        
-        if (gercekBitis === -1) {
-            const tekSatir = incelenenKisim.lastIndexOf("\n");
-            if (tekSatir > minHedefBitis) {
-                gercekBitis = baslangic + tekSatir;
+        const maksimumBitis = Math.min(
+            baslangic + maxLength,
+            metin.length
+        );
+
+        let bitis = maksimumBitis;
+
+        if (maksimumBitis < metin.length) {
+            const incelenenKisim = metin.slice(
+                baslangic,
+                maksimumBitis
+            );
+
+            const minimumSinir = Math.floor(maxLength * 0.5);
+
+            const paragrafSiniri =
+                incelenenKisim.lastIndexOf("\n\n");
+
+            const satirSiniri =
+                incelenenKisim.lastIndexOf("\n");
+
+            const kelimeSiniri =
+                incelenenKisim.lastIndexOf(" ");
+
+            let secilenSinir = -1;
+
+            if (paragrafSiniri >= minimumSinir) {
+                secilenSinir = paragrafSiniri + 2;
+            } else if (satirSiniri >= minimumSinir) {
+                secilenSinir = satirSiniri + 1;
+            } else {
+                const cumleRegex = /[.?!](?=\s)/g;
+                let eslesme;
+                let sonCumleSiniri = -1;
+
+                while (
+                    (eslesme = cumleRegex.exec(incelenenKisim)) !== null
+                ) {
+                    sonCumleSiniri = eslesme.index + 1;
+                }
+
+                if (sonCumleSiniri >= minimumSinir) {
+                    secilenSinir = sonCumleSiniri;
+                } else if (kelimeSiniri >= minimumSinir) {
+                    secilenSinir = kelimeSiniri + 1;
+                }
+            }
+
+            if (secilenSinir > 0) {
+                bitis = baslangic + secilenSinir;
             }
         }
-        
-        if (gercekBitis === -1) {
-            const regex = /([.?!])(?=\s)/g;
-            let match;
-            let sonCumleSınırı = -1;
-            while ((match = regex.exec(incelenenKisim)) !== null) {
-                sonCumleSınırı = match.index + 1;
-            }
-            if (sonCumleSınırı > minHedefBitis) {
-                gercekBitis = baslangic + sonCumleSınırı;
-            }
+
+        // Son parçada kalan tüm metni koru.
+        if (maksimumBitis === metin.length) {
+            bitis = metin.length;
         }
-        
-        if (gercekBitis === -1) {
-            const kelimeSınırı = incelenenKisim.lastIndexOf(" ");
-            if (kelimeSınırı > minHedefBitis) {
-                gercekBitis = baslangic + kelimeSınırı;
-            }
+
+        // İlerleme garantisi.
+        if (bitis <= baslangic) {
+            bitis = maksimumBitis;
         }
-        
-        if (gercekBitis === -1) {
-            gercekBitis = bitis;
-        }
-        
-        const parca = metin.substring(baslangic, gercekBitis).trim();
+
+        const parca = metin.slice(baslangic, bitis).trim();
+
         if (parca.length > 0) {
-            if (parcalar.length > 0 && parcalar[parcalar.length - 1] === parca) {
-                baslangic += maxLength;
-                continue;
-            }
+            // Tekrarlanan gerçek metin parçaları silinmez.
             parcalar.push(parca);
         }
-        
-        let yeniBaslangic = gercekBitis - overlap;
-        
-        if (yeniBaslangic <= baslangic) {
-            yeniBaslangic = baslangic + 1;
-        } else {
-            while (yeniBaslangic > baslangic && yeniBaslangic < metin.length && metin[yeniBaslangic - 1] !== ' ' && metin[yeniBaslangic - 1] !== '\n') {
-                yeniBaslangic++;
+
+        if (bitis >= metin.length) {
+            break;
+        }
+
+        // Overlap korunur ve her döngüde yeterli ilerleme sağlanır.
+        let yeniBaslangic = Math.max(
+            baslangic + 1,
+            bitis - overlap
+        );
+
+        // Kelime sınırı yalnızca overlap miktarını aşmadan
+        // bulunabiliyorsa kullanılır. Aksi halde mevcut konum korunur.
+        if (yeniBaslangic > baslangic + 1) {
+            let adayBaslangic = yeniBaslangic;
+
+            while (
+                adayBaslangic > baslangic + 1 &&
+                !/\s/.test(metin[adayBaslangic - 1])
+            ) {
+                adayBaslangic--;
             }
-            if (yeniBaslangic >= gercekBitis) {
-                yeniBaslangic = gercekBitis;
+
+            // Çok geriye giderek ilerlemeyi yavaşlatma.
+            const minimumIlerleme = Math.max(
+                baslangic + 1,
+                bitis - maxLength + overlap
+            );
+
+            if (adayBaslangic >= minimumIlerleme) {
+                yeniBaslangic = adayBaslangic;
             }
         }
-        
+
+        if (yeniBaslangic >= bitis) {
+            yeniBaslangic = bitis;
+        }
+
+        baslangic = yeniBaslangic;
+
+        // Kelime ortasından başlamamaya çalış.
+        // Ancak ileri giderek metin kaybına neden olma.
+        if (yeniBaslangic > baslangic + 1) {
+            while (
+                yeniBaslangic > baslangic + 1 &&
+                !/\s/.test(metin[yeniBaslangic - 1])
+            ) {
+                yeniBaslangic--;
+            }
+        }
+
+        // Yeni başlangıç, bitişten önce olmalı.
+        if (yeniBaslangic >= bitis) {
+            yeniBaslangic = bitis;
+        }
+
         baslangic = yeniBaslangic;
     }
-    
+
     return parcalar;
 };
 
 /**
- * Metni parçalar ve verilen islemeId altında staging olarak kaydeder.
- * Eski parçalar SİLİNMEZ; yeni parçalar başarıyla yazıldıktan sonra
- * materyalin aktif sürümü doğrulanıp eski parçalar temizlenir.
- * 
- * @param {string} metin - Parçalanacak metin
- * @param {object} materyal - Materyal belgesi
- * @param {mongoose.Types.ObjectId} islemeId - Bu işlem için atanmış benzersiz kimlik
- * @param {number} parcaUzunlugu - Parça uzunluğu
- * @param {number} overlap - Örtüşme miktarı
+ * Metni parçalar ve islemeId altında staging olarak kaydeder.
+ * Eski aktif parçalar korunur.
  */
-export const metinParcalaVeKaydet = async (metin, materyal, islemeId, parcaUzunlugu = 1000, overlap = 200) => {
+export const metinParcalaVeKaydet = async (
+    metin,
+    materyal,
+    islemeId,
+    parcaUzunlugu = 1000,
+    overlap = 200
+) => {
     if (!islemeId) {
-        throw new Error("metinParcalaVeKaydet: Geçerli bir islemeId zorunludur.");
+        throw new Error(
+            "metinParcalaVeKaydet: Geçerli bir islemeId zorunludur."
+        );
     }
 
-    const parcalar = metniParcalaraAyir(metin, parcaUzunlugu, overlap);
-    
-    if (parcalar.length === 0) return [];
-    
+    const parcalar = metniParcalaraAyir(
+        metin,
+        parcaUzunlugu,
+        overlap
+    );
+
+    if (parcalar.length === 0) {
+        return [];
+    }
+
     const belgeler = parcalar.map((icerik, index) => ({
         kullaniciId: materyal.kullaniciId,
         dersId: materyal.dersId,
         materyalId: materyal._id,
-        islemeId: islemeId,
+        islemeId,
         parcaIndex: index,
-        icerik: icerik,
+        icerik,
         karakterSayisi: icerik.length
     }));
-    
+
     try {
         await MetinParcasi.insertMany(belgeler);
     } catch (error) {
-        // Hata durumunda SADECE bu işleme (islemeId) ait yeni parçaları temizle
-        // Önceki geçerli aktif parçalara ASLA dokunulmaz!
-        await MetinParcasi.deleteMany({ materyalId: materyal._id, islemeId: islemeId });
-        throw new Error("Metin parçaları veritabanına kaydedilirken hata oluştu: " + error.message);
+        // Yalnızca başarısız yeni işlem parçalarını temizle.
+        // Eski aktif materyal parçalarına dokunma.
+        await MetinParcasi.deleteMany({
+            materyalId: materyal._id,
+            islemeId
+        });
+
+        throw new Error(
+            "Metin parçaları veritabanına kaydedilirken hata oluştu: " +
+            error.message
+        );
     }
-    
+
     return belgeler;
 };
