@@ -5,6 +5,7 @@ import { guvenliDosyaSil } from "../utils/dosyaIslemleri.js";
 import { metinCikar } from "../services/metinCikarmaService.js";
 import { metinParcalaVeKaydet } from "../services/metinParcalamaService.js";
 import MetinParcasi from "../models/MetinParcasi.js";
+import { arkaPlandaKonuHaritasiGuncelle } from "../services/konuHaritasiService.js";
 
 import mongoose from "mongoose";
 
@@ -12,7 +13,7 @@ import mongoose from "mongoose";
  * Arka planda metin çıkarma ve parçalama işlemini güvenli staging mantığıyla yürütür.
  * Eşzamanlı çağrılar veya silme işlemleriyle yarış durumlarına karşı dayanıklıdır.
  */
-const arkaPlandaMetinCikar = async (materyalIds) => {
+const arkaPlandaMetinCikar = async (materyalIds, dersId, kullaniciId) => {
     for (const id of materyalIds) {
         const yeniIslemeId = new mongoose.Types.ObjectId();
         try {
@@ -88,6 +89,14 @@ const arkaPlandaMetinCikar = async (materyalIds) => {
             );
         }
     }
+
+    // Tüm batch tamamlandıktan sonra konu haritasını arka planda güncelle (bir kez tetikle)
+    // dersId ve kullaniciId sağlandıysa (güvenlik: sadece geçerli ders için tetikle)
+    if (dersId && kullaniciId) {
+        arkaPlandaKonuHaritasiGuncelle(dersId, kullaniciId).catch((hata) => {
+            console.error(`Batch metin çıkarma sonrası konu haritası tetikleme hatası (Ders ID: ${dersId}):`, hata.message);
+        });
+    }
 };
 
 export const materyalYukle = async (req, res) => {
@@ -135,7 +144,8 @@ export const materyalYukle = async (req, res) => {
             }
 
             // Arka planda extraction başlat (await kullanmıyoruz)
-            arkaPlandaMetinCikar(basariliIds);
+            // dersId ve kullaniciId iletilir: batch bitince konu haritası da otomatik güncellenir
+            arkaPlandaMetinCikar(basariliIds, dersId, kullaniciId);
 
             res.status(201).json({ mesaj: "Materyaller başarıyla yüklendi ve işlemeye alındı", materyaller: yuklenenMateryaller });
         } catch (dbError) {
@@ -216,6 +226,12 @@ export const materyalSil = async (req, res) => {
         // 5. Yarış durumu temizliği: Silme işlemi sırasında `insertMany` yapmış olabilecek arka plan işi varsa temizle
         await MetinParcasi.deleteMany({ materyalId: materyalId });
 
+        // 6. Silme tamamlandı; kalan hazır materyallere göre konu haritasını arka planda güncelle
+        // Hata yanıtı bloke edilmez; arka plan hatası HTTP yanıtını etkilemez
+        arkaPlandaKonuHaritasiGuncelle(materyal.dersId, kullaniciId).catch((hata) => {
+            console.error(`Materyal silme sonrası konu haritası tetikleme hatası (Ders ID: ${materyal.dersId}):`, hata.message);
+        });
+
         res.status(200).json({ mesaj: "Materyal başarıyla silindi." });
     } catch (error) {
         console.error("Materyal silme hatası:", error);
@@ -291,6 +307,11 @@ export const materyalMetinCikar = async (req, res) => {
                 console.error(`Eski parçaları temizleme uyarısı (Materyal ID: ${materyalId}):`, eskiSilmeHatasi.message);
                 // Taahhüt edilmiş aktif versiyonu BOZMA; catch bloğuna düşüp aktif parçaları silmesini engelle!
             }
+
+            // Başarılı taahhüt sonrası konu haritasını arka planda otomatik güncelle
+            arkaPlandaKonuHaritasiGuncelle(materyal.dersId, kullaniciId).catch((hata) => {
+                console.error(`Tekil metin çıkarma sonrası konu haritası tetikleme hatası (Ders ID: ${materyal.dersId}):`, hata.message);
+            });
 
             return res.status(200).json({ mesaj: "Metin başarıyla çıkarıldı.", materyal: guncellenen });
         } catch (err) {

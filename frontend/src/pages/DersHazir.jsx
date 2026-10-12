@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useOutletContext, useNavigate, useLocation, useParams } from "react-router-dom";
 import axios from "axios";
 import DersOlusturmaAdimlari from "../components/DersOlusturmaAdimlari";
@@ -22,6 +22,9 @@ function DersHazir() {
     const [haritaHatasi, setHaritaHatasi] = useState("");
     const [guncelMi, setGuncelMi] = useState(true);
 
+    const hataSayisiRef = useRef(0);
+    const pollSayisiRef = useRef(0);
+
     const konuHaritasiniGetir = async () => {
         setHaritaYukleniyor(true);
         try {
@@ -38,6 +41,8 @@ function DersHazir() {
     };
 
     const konuHaritasiOlustur = async () => {
+        hataSayisiRef.current = 0;
+        pollSayisiRef.current = 0;
         setHaritaOlusturuluyor(true);
         setHaritaHatasi("");
         try {
@@ -79,6 +84,62 @@ function DersHazir() {
             }
         }
     }, [dersId]);
+
+    // Sayfa açıldıktan sonra otomatik oluşturma başlasa bile algılayan kontrollü polling.
+    // Hata durumunda (max 3 hata) ve maksimum 40 yoklama (~120 sn) sonrasında durur;
+    // harita hazır ve güncel olduğunda veya component unmount olduğunda temizlenir.
+    useEffect(() => {
+        if (!dersId) return;
+
+        const hazirVeGuncel = konuHaritasi?.durum === "hazir" && guncelMi;
+        const kaliciHata = konuHaritasi?.durum === "hata" && !haritaOlusturuluyor;
+        if (hazirVeGuncel || kaliciHata) {
+            return;
+        }
+
+        const MAX_POLL = 40;
+        const MAX_HATA = 3;
+
+        if (pollSayisiRef.current >= MAX_POLL || hataSayisiRef.current >= MAX_HATA) {
+            return;
+        }
+
+        let isMounted = true;
+        const tid = setTimeout(async () => {
+            if (!isMounted) return;
+            pollSayisiRef.current += 1;
+
+            try {
+                const [haritaRes, matRes] = await Promise.all([
+                    axios.get(`http://localhost:5000/dersler/${dersId}/konu-haritasi`, { withCredentials: true }),
+                    axios.get(`http://localhost:5000/materyaller/ders/${dersId}`, { withCredentials: true }).catch(() => null)
+                ]);
+
+                if (!isMounted) return;
+
+                hataSayisiRef.current = 0;
+                setKonuHaritasi(haritaRes.data.harita);
+                setGuncelMi(haritaRes.data.guncelMi);
+                setHaritaHatasi(haritaRes.data.olusturmaHatasi || "");
+
+                if (matRes?.data?.materyaller) {
+                    setMateryalSayisi(matRes.data.materyaller.filter(m => m.durum === 'hazir').length || 0);
+                }
+            } catch (err) {
+                if (!isMounted) return;
+                hataSayisiRef.current += 1;
+                console.error("Konu haritası kontrollü yenileme hatası:", err);
+                if (hataSayisiRef.current >= MAX_HATA) {
+                    setHaritaHatasi("Bağlantı kesintisi nedeniyle otomatik durum güncellemesi durduruldu.");
+                }
+            }
+        }, 3000);
+
+        return () => {
+            isMounted = false;
+            clearTimeout(tid);
+        };
+    }, [dersId, konuHaritasi?.durum, guncelMi, haritaOlusturuluyor]);
 
     const cardBg = isDark ? "bg-[#162137] border-[#26334A]" : "bg-white border-[#E7E5EF]";
     const textPrimary = isDark ? "text-[#F8FAFC]" : "text-[#0F172A]";

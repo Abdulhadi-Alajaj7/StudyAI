@@ -16,11 +16,11 @@ veritabaninaBaglan().then(async () => {
     try {
         const kurtarilan = await Materyal.updateMany(
             { durum: "isleniyor" },
-            { 
-                $set: { 
-                    durum: "hata", 
-                    islemeHatasi: "Sunucu yeniden başlatıldığı için işlem yarıda kaldı." 
-                } 
+            {
+                $set: {
+                    durum: "hata",
+                    islemeHatasi: "Sunucu yeniden başlatıldığı için işlem yarıda kaldı."
+                }
             }
         );
         if (kurtarilan.modifiedCount > 0) {

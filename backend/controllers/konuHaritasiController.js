@@ -106,9 +106,13 @@ export const konuHaritasiOlustur = async (req, res) => {
         let harita = await KonuHaritasi.findOne({ dersId, kullaniciId });
 
         if (harita && harita.durum === "olusturuluyor") {
-            return res.status(409).json({
-                hata: "Bu ders için şu anda zaten bir konu haritası oluşturuluyor. Lütfen işlemin tamamlanmasını bekleyin."
-            });
+            const KILIT_ZAMAN_ASIMI_MS = 5 * 60 * 1000;
+            const sonGuncelleme = harita.updatedAt ? new Date(harita.updatedAt).getTime() : 0;
+            if (Date.now() - sonGuncelleme < KILIT_ZAMAN_ASIMI_MS) {
+                return res.status(409).json({
+                    hata: "Bu ders için şu anda zaten bir konu haritası oluşturuluyor. Lütfen işlemin tamamlanmasını bekleyin."
+                });
+            }
         }
 
         if (!harita) {
@@ -134,7 +138,13 @@ export const konuHaritasiOlustur = async (req, res) => {
         } else {
             // Var olan harita üzerinde kilidi al (durum: olusturuluyor yap ama eski anaKonulari henüz silme!)
             harita = await KonuHaritasi.findOneAndUpdate(
-                { _id: harita._id, durum: { $ne: "olusturuluyor" } },
+                {
+                    _id: harita._id,
+                    $or: [
+                        { durum: { $ne: "olusturuluyor" } },
+                        { updatedAt: { $lt: new Date(Date.now() - 5 * 60 * 1000) } }
+                    ]
+                },
                 {
                     $set: {
                         durum: "olusturuluyor",

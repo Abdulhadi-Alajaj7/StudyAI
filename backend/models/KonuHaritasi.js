@@ -77,6 +77,9 @@ const konuHaritasiSchema = new mongoose.Schema(
             default: "",
         },
         anaKonular: [anaKonuSchema],
+        // Son hazır materyal silinse bile gelecekteki Quiz, Flashcard ve Mastery kayıtlarının
+        // konu kimliklerini ve öğrenme geçmişini koruyan arşiv
+        gecmisKonular: [anaKonuSchema],
         toplamAnaKonuSayisi: {
             type: Number,
             default: 0,
