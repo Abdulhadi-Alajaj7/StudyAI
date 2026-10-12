@@ -21,6 +21,15 @@ const altKonuSchema = new mongoose.Schema(
             type: Number,
             default: 1,
         },
+        // Bu konuyu destekleyen materyallerin MongoDB ObjectId listesi.
+        // Adaptif modüller (Quiz, Mastery, Flashcard) bu ID üzerinden çalışır.
+        // Aynı materyal iki kez eklenemez (uygulama katmanında garanti edilir).
+        kaynakMateryalIds: [
+            {
+                type: mongoose.Schema.Types.ObjectId,
+                ref: "Materyal",
+            }
+        ],
     },
     { _id: true }
 );
@@ -46,6 +55,14 @@ const anaKonuSchema = new mongoose.Schema(
             type: Number,
             default: 1,
         },
+        // Bu ana konuyu destekleyen materyaller (altKonular üzerinden birleşik bakış için).
+        // Adaptif modüller öncelikle altKonu.kaynakMateryalIds'yi kullanır.
+        kaynakMateryalIds: [
+            {
+                type: mongoose.Schema.Types.ObjectId,
+                ref: "Materyal",
+            }
+        ],
         altKonular: [altKonuSchema],
     },
     { _id: true }

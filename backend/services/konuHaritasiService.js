@@ -44,6 +44,40 @@ export const deterministikKonuIdUret = (
 };
 
 /**
+ * Tek bir materyalin aktif metin parçalarını toplar (incremental analiz için).
+ */
+export const tekMateryalMetinleriniTopla = async (materyalId, dersId, kullaniciId) => {
+    const materyal = await Materyal.findOne({
+        _id: materyalId,
+        dersId,
+        kullaniciId,
+        durum: "hazir",
+        aktifIslemeId: { $ne: null }
+    }).select("_id dosyaAdi orijinalDosyaAdi aktifIslemeId");
+
+    if (!materyal) {
+        return { materyal: null, metinBlogu: "" };
+    }
+
+    const parcalar = await MetinParcasi.find({
+        materyalId: materyal._id,
+        islemeId: materyal.aktifIslemeId,
+        dersId,
+        kullaniciId
+    }).sort({ parcaIndex: 1 });
+
+    if (!parcalar || parcalar.length === 0) {
+        return { materyal, metinBlogu: "" };
+    }
+
+    const dosyaBasligi = materyal.orijinalDosyaAdi || materyal.dosyaAdi;
+    const metinBlogu = `\n=== MATERYAL: ${dosyaBasligi} ===\n` +
+        parcalar.map(p => p.icerik || "").join("\n\n");
+
+    return { materyal, metinBlogu };
+};
+
+/**
  * Hazır materyallerin aktif metin parçalarını toplar.
  */
 export const aktifMateryalMetinleriniTopla = async (
@@ -479,20 +513,30 @@ export const konuHaritasiUretVeKaydet = async (
                             ? eskiAltKonu.baslik
                             : altBaslik;
 
+                        const altKaynakIds = Array.isArray(eskiAltKonu?.kaynakMateryalIds) && eskiAltKonu.kaynakMateryalIds.length > 0
+                            ? eskiAltKonu.kaynakMateryalIds
+                            : (hazirMateryaller.length === 1 ? [hazirMateryaller[0]._id] : []);
+
                         return {
                             konuId: altKonuId,
                             baslik: nihaiAltBaslik,
                             aciklama: alt.aciklama || eskiAltKonu?.aciklama || "",
-                            sira: alt.sira || subIndex + 1
+                            sira: alt.sira || subIndex + 1,
+                            kaynakMateryalIds: altKaynakIds
                         };
                     }
                 );
+
+                const anaKaynakIds = Array.isArray(eskiAnaKonu?.kaynakMateryalIds) && eskiAnaKonu.kaynakMateryalIds.length > 0
+                    ? eskiAnaKonu.kaynakMateryalIds
+                    : (hazirMateryaller.length === 1 ? [hazirMateryaller[0]._id] : []);
 
                 return {
                     konuId: anaKonuId,
                     baslik: nihaiAnaBaslik,
                     aciklama: ana.aciklama || eskiAnaKonu?.aciklama || "",
                     sira: ana.sira || aIndex + 1,
+                    kaynakMateryalIds: anaKaynakIds,
                     altKonular: altlar
                 };
             }
@@ -811,4 +855,581 @@ export const arkaPlandaKonuHaritasiGuncelle = async (dersId, kullaniciId) => {
             console.error("Kilit temizleme hatası:", kilitAcmaHatasi.message);
         }
     }
+};
+
+/**
+ * Yeni bir materyal eklendiğinde SADECE o materyali Gemini ile analiz eder ve
+ * mevcut konu haritasıyla güvenli biçimde birleştirir (Incremental Update).
+ *
+ * Kesin kurallar:
+ * - Mevcut konuların ID ve başlıkları gereksiz yere değiştirilmez.
+ * - Yeni materyalin getirdiği gerçekten yeni konulara yeni konuId üretilir.
+ * - Eşleşen eski konulara yeni materyalId'si kaynak olarak eklenir.
+ * - Arşivden geri dönen konu varsa eski konuId yeniden kullanılır.
+ *
+ * @param {string|ObjectId} materyalId - Yeni yüklenen materyalin ID'si
+ * @param {string|ObjectId} dersId
+ * @param {string|ObjectId} kullaniciId
+ * @param {string} [modelAdi]
+ */
+export const materyalEklendigindeIncrementalGuncelle = async (
+    materyalId,
+    dersId,
+    kullaniciId,
+    modelAdi = VARSAYILAN_GEMINI_MODELI
+) => {
+    const matIdStr = materyalId.toString();
+    const dersIdStr = dersId.toString();
+
+    // 1. Yeni materyalin metnini topla
+    const { materyal, metinBlogu } = await tekMateryalMetinleriniTopla(materyalId, dersId, kullaniciId);
+
+    if (!materyal || !metinBlogu.trim()) {
+        console.warn(`[Incremental] Materyal metni boş veya hazır değil: ${matIdStr}`);
+        return null;
+    }
+
+    // 2. Ders bilgisini al
+    const ders = await Ders.findById(dersId);
+    if (!ders) {
+        console.warn(`[Incremental] Ders bulunamadı: ${dersIdStr}`);
+        return null;
+    }
+
+    const dersBilgisi = {
+        dersAdi: ders.dersAdi,
+        aciklama: ders.aciklama,
+        donem: ders.donem
+    };
+
+    // 3. Sadece yeni materyali Gemini ile analiz et
+    let yeniGeminiKonular;
+    try {
+        yeniGeminiKonular = await geminiIleKonuHaritasiUret(metinBlogu, dersBilgisi, modelAdi);
+    } catch (geminiHata) {
+        console.error(`[Incremental] Gemini analiz hatası (Materyal: ${matIdStr}):`, geminiHata.message);
+        throw geminiHata;
+    }
+
+    if (!yeniGeminiKonular || yeniGeminiKonular.length === 0) {
+        console.warn(`[Incremental] Gemini yeni konular üretemedi: ${matIdStr}`);
+        return null;
+    }
+
+    // 4. Mevcut konu haritasını oku
+    const mevcutHarita = await KonuHaritasi.findOne({ dersId, kullaniciId });
+
+    const eskiAnaKonular = (mevcutHarita?.anaKonular || []).map(k =>
+        typeof k?.toObject === "function" ? k.toObject() : k
+    );
+    const eskiGecmisKonular = (mevcutHarita?.gecmisKonular || []).map(k =>
+        typeof k?.toObject === "function" ? k.toObject() : k
+    );
+
+    // 5. Birleşik eski konu havuzu (aktif öncelikli)
+    const birlesikEskiListe = [];
+    const gorulenAnaIds = new Set();
+    const gorulenAnaNorms = new Set();
+
+    for (const ana of eskiAnaKonular) {
+        if (!ana?.konuId) continue;
+        gorulenAnaIds.add(ana.konuId);
+        gorulenAnaNorms.add(konuBasliginiNormalizeEt(ana.baslik));
+        birlesikEskiListe.push({ ...ana, _kaynak: "aktif" });
+    }
+    for (const ana of eskiGecmisKonular) {
+        if (!ana?.konuId || gorulenAnaIds.has(ana.konuId)) continue;
+        const normBaslik = konuBasliginiNormalizeEt(ana.baslik);
+        if (!gorulenAnaNorms.has(normBaslik)) {
+            gorulenAnaIds.add(ana.konuId);
+            gorulenAnaNorms.add(normBaslik);
+            birlesikEskiListe.push({ ...ana, _kaynak: "arsiv" });
+        }
+    }
+
+    // Tüm eski alt konular havuzu
+    const tumEskiAltKonular = [];
+    const gorulenAltNorms = new Set();
+    for (const ana of birlesikEskiListe) {
+        for (const alt of ana.altKonular || []) {
+            if (!alt?.konuId) continue;
+            const normBaslik = konuBasliginiNormalizeEt(alt.baslik);
+            if (!gorulenAltNorms.has(normBaslik)) {
+                gorulenAltNorms.add(normBaslik);
+                tumEskiAltKonular.push({
+                    ...alt,
+                    anaKonuId: ana.konuId,
+                    anaBaslik: ana.baslik,
+                    _kaynak: ana._kaynak
+                });
+            }
+        }
+    }
+
+    // 6. Mevcut haritadaki tüm kimlikleri topla (aktif + arşiv)
+    const eskiTumKimlikler = new Set();
+    for (const ana of birlesikEskiListe) {
+        if (ana.konuId) eskiTumKimlikler.add(ana.konuId);
+        for (const alt of ana.altKonular || []) {
+            if (alt.konuId) eskiTumKimlikler.add(alt.konuId);
+        }
+    }
+
+    // Aktif haritada şu an bulunan ve yeni atanan tüm konu kimlikleri (çakışmaları önlemek için)
+    const atanmisAktifKimlikler = new Set();
+    const nihaiAnaKonuMap = new Map();
+
+    for (const ana of eskiAnaKonular) {
+        if (!ana?.konuId) continue;
+        atanmisAktifKimlikler.add(ana.konuId);
+        const altlar = [];
+        for (const alt of ana.altKonular || []) {
+            if (alt?.konuId) {
+                atanmisAktifKimlikler.add(alt.konuId);
+                altlar.push({ ...alt, kaynakMateryalIds: [...(alt.kaynakMateryalIds || [])] });
+            }
+        }
+        nihaiAnaKonuMap.set(ana.konuId, {
+            ...ana,
+            kaynakMateryalIds: [...(ana.kaynakMateryalIds || [])],
+            altKonular: altlar
+        });
+    }
+
+    const yeniBenzersizKimlikUret = (tabanKimlik, tur) => {
+        let kimlik = tabanKimlik;
+        if (eskiTumKimlikler.has(kimlik) || atanmisAktifKimlikler.has(kimlik)) {
+            do {
+                kimlik = `${tur}-${crypto.randomUUID().replace(/-/g, "").slice(0, 8)}`;
+            } while (eskiTumKimlikler.has(kimlik) || atanmisAktifKimlikler.has(kimlik));
+        }
+        atanmisAktifKimlikler.add(kimlik);
+        eskiTumKimlikler.add(kimlik);
+        return kimlik;
+    };
+
+    // 7. Gemini çıktısını mevcut haritayla birleştir
+    // Ana konuları 1-e-1 eşleştirmek için taze bir Set başlatılır:
+    const eslesenAnaKimlikler = new Set();
+    const anaEslesmeleri = konuListesiniEsle(
+        yeniGeminiKonular,
+        birlesikEskiListe,
+        [],
+        eslesenAnaKimlikler,
+        {}
+    );
+
+    for (let aIndex = 0; aIndex < yeniGeminiKonular.length; aIndex++) {
+        const anaKonu = yeniGeminiKonular[aIndex];
+        const anaEslesme = anaEslesmeleri.get(anaKonu);
+        const eskiAnaId = anaEslesme?.eskiId || null;
+        const eskiAnaKonu = anaEslesme?.eskiKonu || null;
+
+        if (eskiAnaId && nihaiAnaKonuMap.has(eskiAnaId)) {
+            // Mevcut aktif ana konu: materyali kaynak olarak ekle
+            const mevcutAna = nihaiAnaKonuMap.get(eskiAnaId);
+            const mevAnaMatIds = new Set((mevcutAna.kaynakMateryalIds || []).map(id => id.toString()));
+            if (!mevAnaMatIds.has(matIdStr)) {
+                mevcutAna.kaynakMateryalIds.push(materyalId);
+            }
+
+            const eskiAltlar = mevcutAna.altKonular;
+            const baglam = { ustKonuBasligi: mevcutAna.baslik, ustKonuId: mevcutAna.konuId };
+
+            const eskiAltHavuz = eskiAltlar.map(alt => ({
+                ...alt,
+                anaKonuId: mevcutAna.konuId,
+                anaBaslik: mevcutAna.baslik,
+                _kaynak: "aktif"
+            }));
+            const ikincilAltHavuz = tumEskiAltKonular.filter(
+                a => !eskiAltHavuz.find(b => b.konuId === a.konuId)
+            );
+
+            const eslesenAltKimlikler = new Set();
+            const altEslesmeleri = konuListesiniEsle(
+                anaKonu.altKonular || [],
+                eskiAltHavuz,
+                ikincilAltHavuz,
+                eslesenAltKimlikler,
+                baglam
+            );
+
+            for (let subIndex = 0; subIndex < (anaKonu.altKonular || []).length; subIndex++) {
+                const altKonu = anaKonu.altKonular[subIndex];
+                const altEslesme = altEslesmeleri.get(altKonu);
+                const eskiAltId = altEslesme?.eskiId || null;
+
+                if (eskiAltId) {
+                    const altIdx = eskiAltlar.findIndex(a => a.konuId === eskiAltId);
+                    if (altIdx >= 0) {
+                        const mevAlt = eskiAltlar[altIdx];
+                        const mevAltMatIds = new Set((mevAlt.kaynakMateryalIds || []).map(id => id.toString()));
+                        if (!mevAltMatIds.has(matIdStr)) {
+                            mevAlt.kaynakMateryalIds.push(materyalId);
+                        }
+                    } else {
+                        // İkincil havuzdan (arşivden vb.) eşleşti
+                        const bulunanEskiAlt = altEslesme.eskiKonu;
+                        eskiAltlar.push({
+                            konuId: eskiAltId,
+                            baslik: bulunanEskiAlt?.baslik || altKonu.baslik.trim(),
+                            aciklama: altKonu.aciklama || bulunanEskiAlt?.aciklama || "",
+                            sira: altKonu.sira || subIndex + 1,
+                            kaynakMateryalIds: [materyalId]
+                        });
+                        atanmisAktifKimlikler.add(eskiAltId);
+                    }
+                } else {
+                    const yeniAltId = yeniBenzersizKimlikUret(
+                        deterministikKonuIdUret(dersIdStr, altKonu.baslik.trim(), mevcutAna.baslik, true),
+                        "sub"
+                    );
+                    eskiAltlar.push({
+                        konuId: yeniAltId,
+                        baslik: altKonu.baslik.trim(),
+                        aciklama: altKonu.aciklama || "",
+                        sira: altKonu.sira || subIndex + 1,
+                        kaynakMateryalIds: [materyalId]
+                    });
+                }
+            }
+
+            mevcutAna.altKonular = eskiAltlar;
+            nihaiAnaKonuMap.set(eskiAnaId, mevcutAna);
+
+        } else if (eskiAnaId && eskiAnaKonu && !nihaiAnaKonuMap.has(eskiAnaId)) {
+            // Arşivden geri dönen ana konu: yeniden aktifleştir
+            atanmisAktifKimlikler.add(eskiAnaId);
+            const baglam = { ustKonuBasligi: eskiAnaKonu.baslik, ustKonuId: eskiAnaId };
+
+            const eskiAltHavuz = (eskiAnaKonu.altKonular || []).map(alt => ({
+                ...alt,
+                anaKonuId: eskiAnaId,
+                anaBaslik: eskiAnaKonu.baslik,
+                _kaynak: "arsiv"
+            }));
+            const ikincilAltHavuz = tumEskiAltKonular.filter(
+                a => !eskiAltHavuz.find(b => b.konuId === a.konuId)
+            );
+
+            const eslesenAltKimlikler = new Set();
+            const altEslesmeleri = konuListesiniEsle(
+                anaKonu.altKonular || [],
+                eskiAltHavuz,
+                ikincilAltHavuz,
+                eslesenAltKimlikler,
+                baglam
+            );
+
+            const geriGelenAltlar = [];
+            for (let subIndex = 0; subIndex < (anaKonu.altKonular || []).length; subIndex++) {
+                const altKonu = anaKonu.altKonular[subIndex];
+                const altEslesme = altEslesmeleri.get(altKonu);
+                const eskiAltId = altEslesme?.eskiId || null;
+
+                if (eskiAltId) {
+                    const bulunanEskiAlt = altEslesme.eskiKonu;
+                    geriGelenAltlar.push({
+                        konuId: eskiAltId,
+                        baslik: bulunanEskiAlt?.baslik || altKonu.baslik.trim(),
+                        aciklama: altKonu.aciklama || bulunanEskiAlt?.aciklama || "",
+                        sira: altKonu.sira || subIndex + 1,
+                        kaynakMateryalIds: [materyalId]
+                    });
+                    atanmisAktifKimlikler.add(eskiAltId);
+                } else {
+                    const yeniAltId = yeniBenzersizKimlikUret(
+                        deterministikKonuIdUret(dersIdStr, altKonu.baslik.trim(), eskiAnaKonu.baslik, true),
+                        "sub"
+                    );
+                    geriGelenAltlar.push({
+                        konuId: yeniAltId,
+                        baslik: altKonu.baslik.trim(),
+                        aciklama: altKonu.aciklama || "",
+                        sira: altKonu.sira || subIndex + 1,
+                        kaynakMateryalIds: [materyalId]
+                    });
+                }
+            }
+
+            nihaiAnaKonuMap.set(eskiAnaId, {
+                konuId: eskiAnaId,
+                baslik: eskiAnaKonu.baslik,
+                aciklama: anaKonu.aciklama || eskiAnaKonu.aciklama || "",
+                sira: anaKonu.sira || eskiAnaKonu.sira || aIndex + 1,
+                kaynakMateryalIds: [materyalId],
+                altKonular: geriGelenAltlar
+            });
+
+        } else {
+            // Tamamen yeni ana konu
+            const yeniAnaId = yeniBenzersizKimlikUret(
+                deterministikKonuIdUret(dersIdStr, anaKonu.baslik.trim(), "", false),
+                "top"
+            );
+
+            const yeniAltlar = (anaKonu.altKonular || []).map((alt, subIndex) => {
+                const yeniAltId = yeniBenzersizKimlikUret(
+                    deterministikKonuIdUret(dersIdStr, alt.baslik.trim(), anaKonu.baslik.trim(), true),
+                    "sub"
+                );
+                return {
+                    konuId: yeniAltId,
+                    baslik: alt.baslik.trim(),
+                    aciklama: alt.aciklama || "",
+                    sira: alt.sira || subIndex + 1,
+                    kaynakMateryalIds: [materyalId]
+                };
+            });
+
+            nihaiAnaKonuMap.set(yeniAnaId, {
+                konuId: yeniAnaId,
+                baslik: anaKonu.baslik.trim(),
+                aciklama: anaKonu.aciklama || "",
+                sira: anaKonu.sira || aIndex + 1,
+                kaynakMateryalIds: [materyalId],
+                altKonular: yeniAltlar
+            });
+        }
+    }
+
+    const nihaiAnaKonular = Array.from(nihaiAnaKonuMap.values());
+
+    let toplamAlt = 0;
+    for (const ana of nihaiAnaKonular) {
+        toplamAlt += (ana.altKonular || []).length;
+    }
+
+    // gecmisKonular güncelle
+    const gecmisMap = new Map();
+    for (const eski of eskiGecmisKonular) {
+        if (eski?.konuId) gecmisMap.set(eski.konuId, eski);
+    }
+    for (const aktif of nihaiAnaKonular) {
+        if (aktif?.konuId) gecmisMap.set(aktif.konuId, aktif);
+    }
+    const nihaiGecmis = Array.from(gecmisMap.values());
+
+    // kaynakMateryaller güncelle
+    const mevcutKaynaklar = (mevcutHarita?.kaynakMateryaller || []).filter(
+        k => k.materyalId?.toString() !== matIdStr
+    );
+    const yeniKaynaklar = [
+        ...mevcutKaynaklar,
+        {
+            materyalId: materyal._id,
+            aktifIslemeId: materyal.aktifIslemeId,
+            dosyaAdi: materyal.orijinalDosyaAdi || materyal.dosyaAdi
+        }
+    ];
+
+    // 8. Haritayı kaydet
+    if (!mevcutHarita) {
+        return await KonuHaritasi.create({
+            dersId,
+            kullaniciId,
+            durum: "hazir",
+            olusturmaHatasi: "",
+            anaKonular: nihaiAnaKonular,
+            gecmisKonular: nihaiGecmis,
+            toplamAnaKonuSayisi: nihaiAnaKonular.length,
+            toplamAltKonuSayisi: toplamAlt,
+            kaynakMateryaller: yeniKaynaklar,
+            kullanilanModel: modelAdi,
+            sonOlusturmaTarihi: new Date(),
+            aktifIslemToken: null
+        });
+    }
+
+    return await KonuHaritasi.findOneAndUpdate(
+        { dersId, kullaniciId },
+        {
+            $set: {
+                durum: "hazir",
+                olusturmaHatasi: "",
+                anaKonular: nihaiAnaKonular,
+                gecmisKonular: nihaiGecmis,
+                toplamAnaKonuSayisi: nihaiAnaKonular.length,
+                toplamAltKonuSayisi: toplamAlt,
+                kaynakMateryaller: yeniKaynaklar,
+                kullanilanModel: modelAdi,
+                sonOlusturmaTarihi: new Date(),
+                aktifIslemToken: null
+            }
+        },
+        { new: true }
+    );
+};
+
+/**
+ * Bir materyal silindiğinde Gemini ÇAĞIRMADAN konu haritasını günceller.
+ *
+ * Kesin kurallar:
+ * - Sadece bu materyale ait kaynak bağlantıları kaldırılır.
+ * - Başka materyal tarafından desteklenen konular aktif kalır (konuId değişmez).
+ * - Hiç aktif kaynağı kalmayan alt konular gecmisKonular'a arşivlenir.
+ * - Öğrenci quiz/mastery/flashcard verisi bu fonksiyonda silinmez.
+ * - İdempotent: Tekrar çağrıldığında güvenlidir.
+ *
+ * @param {string|ObjectId} materyalId - Silinen materyalin ID'si
+ * @param {string|ObjectId} dersId
+ * @param {string|ObjectId} kullaniciId
+ */
+export const materyalSilindigindeGuncelle = async (materyalId, dersId, kullaniciId) => {
+    const matIdStr = materyalId.toString();
+
+    const harita = await KonuHaritasi.findOne({ dersId, kullaniciId });
+    if (!harita) return null;
+
+    const mevcutAnaKonular = (harita.anaKonular || []).map(k =>
+        typeof k?.toObject === "function" ? k.toObject() : k
+    );
+    const mevcutGecmis = (harita.gecmisKonular || []).map(k =>
+        typeof k?.toObject === "function" ? k.toObject() : k
+    );
+
+    const guncelKaynaklar = (harita.kaynakMateryaller || []).filter(
+        k => k.materyalId?.toString() !== matIdStr
+    );
+    const baskaKaynakVarMi = guncelKaynaklar.length > 0;
+
+    const guncelAnaKonular = [];
+    const arsivEklemeleri = []; // { anaKonuId, anaKonuBaslik, altKonu }
+
+    for (const ana of mevcutAnaKonular) {
+        if (!ana?.konuId) continue;
+
+        const anaKaynaklar = ana.kaynakMateryalIds || [];
+        const anaLegacyMi = anaKaynaklar.length === 0;
+        const anaSonrasiMatIds = anaKaynaklar.filter(
+            id => id.toString() !== matIdStr
+        );
+
+        const aktifAltlar = [];
+        const arsivlenecekAltlar = [];
+
+        for (const alt of ana.altKonular || []) {
+            if (!alt?.konuId) continue;
+            const altKaynaklar = alt.kaynakMateryalIds || [];
+            const altBuMateryaliDestekliyorMu = altKaynaklar.some(id => id.toString() === matIdStr);
+            const altLegacyMi = altKaynaklar.length === 0;
+
+            const altSonrasiMatIds = altKaynaklar.filter(
+                id => id.toString() !== matIdStr
+            );
+
+            if (altBuMateryaliDestekliyorMu) {
+                if (altSonrasiMatIds.length === 0) {
+                    arsivlenecekAltlar.push({ ...alt, kaynakMateryalIds: [] });
+                } else {
+                    aktifAltlar.push({ ...alt, kaynakMateryalIds: altSonrasiMatIds });
+                }
+            } else if (altLegacyMi) {
+                // Kaynak ilişkisi bilinmeyen legacy konular: başka materyal varsa yanlışlıkla arşivleme!
+                if (baskaKaynakVarMi) {
+                    aktifAltlar.push({ ...alt, kaynakMateryalIds: [] });
+                } else {
+                    arsivlenecekAltlar.push({ ...alt, kaynakMateryalIds: [] });
+                }
+            } else {
+                // Bu silinen materyalle ilişkisi olmayan başka materyal(ler)e bağlı alt konu
+                if (altSonrasiMatIds.length > 0) {
+                    aktifAltlar.push({ ...alt, kaynakMateryalIds: altSonrasiMatIds });
+                } else if (baskaKaynakVarMi) {
+                    aktifAltlar.push({ ...alt, kaynakMateryalIds: [] });
+                } else {
+                    arsivlenecekAltlar.push({ ...alt, kaynakMateryalIds: [] });
+                }
+            }
+        }
+
+        // Arşivlenen alt konuları gecmisKonular'a ekle
+        for (const arsivAlt of arsivlenecekAltlar) {
+            arsivEklemeleri.push({
+                anaKonuId: ana.konuId,
+                anaKonuBaslik: ana.baslik,
+                anaKonuAciklama: ana.aciklama || "",
+                anaKonuSira: ana.sira,
+                altKonu: arsivAlt
+            });
+        }
+
+        const anaAktifKaynak = anaSonrasiMatIds.length > 0 || aktifAltlar.length > 0 || (anaLegacyMi && baskaKaynakVarMi);
+
+        if (anaAktifKaynak && aktifAltlar.length > 0) {
+            guncelAnaKonular.push({
+                ...ana,
+                kaynakMateryalIds: anaSonrasiMatIds,
+                altKonular: aktifAltlar
+            });
+        } else {
+            // Ana konuyu tüm alt konularıyla birlikte arşivle
+            for (const alt of [...aktifAltlar, ...arsivlenecekAltlar]) {
+                arsivEklemeleri.push({
+                    anaKonuId: ana.konuId,
+                    anaKonuBaslik: ana.baslik,
+                    anaKonuAciklama: ana.aciklama || "",
+                    anaKonuSira: ana.sira,
+                    altKonu: { ...alt, kaynakMateryalIds: [] }
+                });
+            }
+        }
+    }
+
+    // gecmisKonular güncelle
+    const gecmisMap = new Map();
+    for (const eski of mevcutGecmis) {
+        if (eski?.konuId) gecmisMap.set(eski.konuId, { ...eski });
+    }
+    // Aktif kalan konuları gecmis'e de yaz
+    for (const aktif of guncelAnaKonular) {
+        if (aktif?.konuId) gecmisMap.set(aktif.konuId, aktif);
+    }
+    // Arşivlenen alt konuları ana konularına göre gecmis'e ekle
+    for (const ekle of arsivEklemeleri) {
+        const mevcutArsivAna = gecmisMap.get(ekle.anaKonuId);
+        if (mevcutArsivAna) {
+            const birleskAltIds = new Set((mevcutArsivAna.altKonular || []).map(a => a.konuId));
+            if (!birleskAltIds.has(ekle.altKonu.konuId)) {
+                mevcutArsivAna.altKonular = [...(mevcutArsivAna.altKonular || []), ekle.altKonu];
+                gecmisMap.set(ekle.anaKonuId, mevcutArsivAna);
+            }
+        } else {
+            gecmisMap.set(ekle.anaKonuId, {
+                konuId: ekle.anaKonuId,
+                baslik: ekle.anaKonuBaslik,
+                aciklama: ekle.anaKonuAciklama,
+                sira: ekle.anaKonuSira,
+                kaynakMateryalIds: [],
+                altKonular: [ekle.altKonu]
+            });
+        }
+    }
+
+    const nihaiGecmis = Array.from(gecmisMap.values());
+
+    let toplamAlt = 0;
+    for (const ana of guncelAnaKonular) {
+        toplamAlt += (ana.altKonular || []).length;
+    }
+
+    const yeniDurum = guncelAnaKonular.length > 0 ? "hazir" : "yok";
+
+    return await KonuHaritasi.findOneAndUpdate(
+        { dersId, kullaniciId },
+        {
+            $set: {
+                durum: yeniDurum,
+                olusturmaHatasi: "",
+                anaKonular: guncelAnaKonular,
+                gecmisKonular: nihaiGecmis,
+                toplamAnaKonuSayisi: guncelAnaKonular.length,
+                toplamAltKonuSayisi: toplamAlt,
+                kaynakMateryaller: guncelKaynaklar,
+                aktifIslemToken: null
+            }
+        },
+        { new: true }
+    );
 };

@@ -5,7 +5,10 @@ import { guvenliDosyaSil } from "../utils/dosyaIslemleri.js";
 import { metinCikar } from "../services/metinCikarmaService.js";
 import { metinParcalaVeKaydet } from "../services/metinParcalamaService.js";
 import MetinParcasi from "../models/MetinParcasi.js";
-import { arkaPlandaKonuHaritasiGuncelle } from "../services/konuHaritasiService.js";
+import {
+    materyalEklendigindeIncrementalGuncelle,
+    materyalSilindigindeGuncelle
+} from "../services/konuHaritasiService.js";
 
 import mongoose from "mongoose";
 
@@ -14,6 +17,8 @@ import mongoose from "mongoose";
  * Eşzamanlı çağrılar veya silme işlemleriyle yarış durumlarına karşı dayanıklıdır.
  */
 const arkaPlandaMetinCikar = async (materyalIds, dersId, kullaniciId) => {
+    const basariliMateryalIds = [];
+
     for (const id of materyalIds) {
         const yeniIslemeId = new mongoose.Types.ObjectId();
         try {
@@ -71,6 +76,8 @@ const arkaPlandaMetinCikar = async (materyalIds, dersId, kullaniciId) => {
                 // Taahhüt edilmiş aktif versiyonu BOZMA; catch bloğuna düşüp aktif versiyonu silmesini engelle!
             }
 
+            basariliMateryalIds.push(id);
+
         } catch (error) {
             console.error(`Metin çıkarma hatası (Materyal ID: ${id}):`, error);
 
@@ -90,12 +97,16 @@ const arkaPlandaMetinCikar = async (materyalIds, dersId, kullaniciId) => {
         }
     }
 
-    // Tüm batch tamamlandıktan sonra konu haritasını arka planda güncelle (bir kez tetikle)
-    // dersId ve kullaniciId sağlandıysa (güvenlik: sadece geçerli ders için tetikle)
-    if (dersId && kullaniciId) {
-        arkaPlandaKonuHaritasiGuncelle(dersId, kullaniciId).catch((hata) => {
-            console.error(`Batch metin çıkarma sonrası konu haritası tetikleme hatası (Ders ID: ${dersId}):`, hata.message);
-        });
+    // Başarıyla hazır duruma gelen yeni materyalleri sırayla ve güvenle incremental olarak konu haritasına ekle
+    // Yalnızca yeni yüklenen materyal analiz edilir; eski tüm materyaller Gemini'ye yeniden gönderilmez
+    if (dersId && kullaniciId && basariliMateryalIds.length > 0) {
+        for (const matId of basariliMateryalIds) {
+            try {
+                await materyalEklendigindeIncrementalGuncelle(matId, dersId, kullaniciId);
+            } catch (incHata) {
+                console.error(`Incremental konu haritası güncelleme hatası (Materyal ID: ${matId}):`, incHata.message);
+            }
+        }
     }
 };
 
@@ -226,10 +237,10 @@ export const materyalSil = async (req, res) => {
         // 5. Yarış durumu temizliği: Silme işlemi sırasında `insertMany` yapmış olabilecek arka plan işi varsa temizle
         await MetinParcasi.deleteMany({ materyalId: materyalId });
 
-        // 6. Silme tamamlandı; kalan hazır materyallere göre konu haritasını arka planda güncelle
+        // 6. Silme tamamlandı; Gemini ÇAĞIRMADAN konu haritasındaki kaynak bağlantısını kaldır ve gerekirse arşivle
         // Hata yanıtı bloke edilmez; arka plan hatası HTTP yanıtını etkilemez
-        arkaPlandaKonuHaritasiGuncelle(materyal.dersId, kullaniciId).catch((hata) => {
-            console.error(`Materyal silme sonrası konu haritası tetikleme hatası (Ders ID: ${materyal.dersId}):`, hata.message);
+        materyalSilindigindeGuncelle(materyalId, materyal.dersId, kullaniciId).catch((hata) => {
+            console.error(`Materyal silme sonrası incremental konu haritası güncelleme hatası (Ders ID: ${materyal.dersId}):`, hata.message);
         });
 
         res.status(200).json({ mesaj: "Materyal başarıyla silindi." });
@@ -308,9 +319,9 @@ export const materyalMetinCikar = async (req, res) => {
                 // Taahhüt edilmiş aktif versiyonu BOZMA; catch bloğuna düşüp aktif parçaları silmesini engelle!
             }
 
-            // Başarılı taahhüt sonrası konu haritasını arka planda otomatik güncelle
-            arkaPlandaKonuHaritasiGuncelle(materyal.dersId, kullaniciId).catch((hata) => {
-                console.error(`Tekil metin çıkarma sonrası konu haritası tetikleme hatası (Ders ID: ${materyal.dersId}):`, hata.message);
+            // Başarılı taahhüt sonrası yeni materyali incremental olarak konu haritasına ekle
+            materyalEklendigindeIncrementalGuncelle(materyalId, materyal.dersId, kullaniciId).catch((hata) => {
+                console.error(`Tekil metin çıkarma sonrası incremental konu haritası tetikleme hatası (Ders ID: ${materyal.dersId}):`, hata.message);
             });
 
             return res.status(200).json({ mesaj: "Metin başarıyla çıkarıldı.", materyal: guncellenen });
