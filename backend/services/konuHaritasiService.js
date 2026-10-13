@@ -13,7 +13,6 @@ import {
 } from "./geminiService.js";
 
 import {
-    eskiKonuKimliginiBul,
     konuBasliginiNormalizeEt,
     konuListesiniEsle
 } from "./konuKimlikEslemeService.js";

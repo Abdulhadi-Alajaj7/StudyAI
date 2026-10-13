@@ -5,11 +5,7 @@ import {
     ChevronDownIcon, 
     ChevronRightIcon, 
     ExclamationTriangleIcon, 
-    InformationCircleIcon, 
-    BookOpenIcon,
-    FolderIcon,
-    DocumentTextIcon,
-    CheckCircleIcon
+    BookOpenIcon
 } from "@heroicons/react/24/outline";
 
 /**
