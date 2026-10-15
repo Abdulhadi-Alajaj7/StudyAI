@@ -19,9 +19,11 @@ import YeniDersOlustur from "./pages/YeniDersOlustur.jsx";
 import MateryalEkle from "./pages/MateryalEkle.jsx";
 import DersHazir from "./pages/DersHazir.jsx";
 
+import DersAdimScroll from "./components/DersAdimScroll.jsx";
 function App() {
     return (
         <BrowserRouter>
+        <DersAdimScroll />
             <Routes>
 
                 {/* Kimlik Doğrulama */}

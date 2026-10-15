@@ -1,0 +1,26 @@
+VERİ YAPILARI - 20 ÇALIŞMA SORUSU
+
+1. Veri yapısı nedir?
+2. ADT nedir?
+3. Big-O neyi ifade eder?
+4. Array'in temel avantajı nedir?
+5. Linked List ile Array arasındaki fark nedir?
+6. Stack hangi prensiple çalışır?
+7. push ve pop ne yapar?
+8. Queue hangi prensiple çalışır?
+9. enqueue ve dequeue ne yapar?
+10. Tree'de root nedir?
+11. Leaf node nedir?
+12. BST'nin temel sıralama kuralı nedir?
+13. Inorder traversal nedir?
+14. Hash function ne işe yarar?
+15. Collision nedir?
+16. Graph'ta vertex nedir?
+17. Graph'ta edge nedir?
+18. BFS hangi yapıyı kullanır?
+19. DFS nasıl uygulanabilir?
+20. Binary Search neden sıralı veri ister?
+
+Kaynaklar:
+OpenDSA: https://opendsa.org/
+NIST DADS: https://xlinux.nist.gov/dads/

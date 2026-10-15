@@ -47,6 +47,8 @@ let mockMateryalBulundu = true;
 let mockMetinBlogu = "Veri yapıları ve algoritmalar hakkında içerik.";
 let mockGeminiCikti = null;
 let mockGeminiHatasi = null;
+let mockGeminiBekleme = null;
+let mockAktifIslemeId = isleme1;
 let mockFindOneCallCount = 0;
 let mockFindOneAndUpdateCallCount = 0;
 let mockCreateCallCount = 0;
@@ -82,26 +84,61 @@ function sifirla(overrides = {}) {
     mockFindOneAndUpdateCallCount   = 0;
     mockCreateCallCount             = 0;
     sonFindOneAndUpdateSet          = null;
+    mockAktifIslemeId = overrides.aktifIslemeId ?? isleme1;
+    mockGeminiBekleme = null;
 }
 
 // ─── Mock: Materyal ──────────────────────────────────────────────────────────
 
 mock.module("../models/Materyal.js", {
     defaultExport: {
+
+
         findOne: (sorgu) => {
             mockFindOneCallCount++;
+
             const matId = sorgu?._id || mat1Id;
-            const resultObj = !mockMateryalBulundu ? null : {
+
+            const resultObj = mockMateryalBulundu ? {
                 _id: matId,
                 dersId: dersId1,
                 kullaniciId,
                 dosyaAdi: "test.pdf",
                 orijinalDosyaAdi: "test.pdf",
-                aktifIslemeId: isleme1,
+                aktifIslemeId: mockAktifIslemeId,
                 durum: "hazir"
-            };
+            } : null;
+
+            let sonuc = resultObj;
+
+            if (sonuc && sorgu?.durum && sorgu.durum !== sonuc.durum) {
+                sonuc = null;
+            }
+
+
+            if (sonuc && sorgu?.aktifIslemeId !== undefined) {
+                const filtre = sorgu.aktifIslemeId;
+
+                if (
+                    filtre &&
+                    typeof filtre === "object" &&
+                    "$ne" in filtre
+                ) {
+                    if (String(sonuc.aktifIslemeId) === String(filtre.$ne)) {
+                        sonuc = null;
+                    }
+                } else if (
+                    String(filtre) !== String(sonuc.aktifIslemeId)
+                ) {
+                    sonuc = null;
+                }
+            }
+
+
             return {
-                select: async () => resultObj
+                select: () => Promise.resolve(sonuc),
+                then: (resolve, reject) =>
+                    Promise.resolve(sonuc).then(resolve, reject)
             };
         },
         find: () => ({ select: async () => [] }),
@@ -171,6 +208,9 @@ mock.module("../services/geminiService.js", {
     namedExports: {
         VARSAYILAN_GEMINI_MODELI: "test-model",
         geminiIleKonuHaritasiUret: async () => {
+            if (mockGeminiBekleme) {
+                await mockGeminiBekleme();
+            }
             if (mockGeminiHatasi) throw mockGeminiHatasi;
             if (mockGeminiCikti) return mockGeminiCikti;
             return [
@@ -711,4 +751,373 @@ test("T14: Legacy kaynak ilişkisi bilinmeyen konular derste başka materyal var
     assert.equal(mockAnaKonular[0].konuId, "top-legacy-koru", "Legacy ana konu korunmalı");
     assert.equal(mockAnaKonular[0].altKonular.length, 1, "Legacy alt konu korunmalı");
     assert.equal(mockAnaKonular[0].altKonular[0].konuId, "sub-legacy-koru", "Legacy alt konuId korunmalı");
+});
+
+test("T15: Eşzamanlı iki materyal güncellemesi kaynakları kaybetmez", async () => {
+    sifirla({ haritaDurum: "yok" });
+
+    mockGeminiCikti = [{
+        baslik: "Veri Yapıları",
+        aciklama: "Ortak konu",
+        sira: 1,
+        altKonular: [{
+            baslik: "Soyut Veri Tipi (ADT)",
+            aciklama: "Abstract Data Type",
+            sira: 1
+        }]
+    }];
+
+    const [sonuc1, sonuc2] = await Promise.all([
+        materyalEklendigindeIncrementalGuncelle(
+            mat1Id, dersId1, kullaniciId
+        ),
+        materyalEklendigindeIncrementalGuncelle(
+            mat2Id, dersId1, kullaniciId
+        )
+    ]);
+
+    assert.ok(sonuc1, "İlk işlem başarılı olmalı");
+    assert.ok(sonuc2, "İkinci işlem başarılı olmalı");
+
+    assert.equal(mockAnaKonular.length, 1);
+    assert.equal(mockAnaKonular[0].altKonular.length, 1);
+
+    const kaynaklar = mockAnaKonular[0].altKonular[0]
+        .kaynakMateryalIds.map(String);
+
+    assert.ok(
+        kaynaklar.includes(mat1Id.toString()),
+        "İlk materyalin kaynak ilişkisi korunmalı"
+    );
+
+    assert.ok(
+        kaynaklar.includes(mat2Id.toString()),
+        "İkinci materyalin kaynak ilişkisi korunmalı"
+    );
+
+    assert.equal(
+        new Set(kaynaklar).size,
+        2,
+        "Kaynak materyal kimlikleri tekrarlanmamalı"
+    );
+});
+
+
+test("T16: Aynı Gemini çıktısındaki ADT tekrarları tek konu olmalı", async () => {
+    sifirla({ haritaDurum: "yok" });
+
+    mockGeminiCikti = [{
+        baslik: "Veri Yapıları",
+        aciklama: "Veri yapılarının temel kavramları",
+        sira: 1,
+        altKonular: [
+            {
+                baslik: "Soyut Veri Tipi (ADT)",
+                aciklama: "Abstract Data Type kavramının tanımı",
+                sira: 1
+            },
+            {
+                baslik: "Soyut Veri Tipi (ADT) Tanımı",
+                aciklama: "Abstract Data Type kavramının açıklaması",
+                sira: 2
+            }
+        ]
+    }];
+
+    await materyalEklendigindeIncrementalGuncelle(
+        mat1Id,
+        dersId1,
+        kullaniciId
+    );
+
+    assert.equal(
+        mockAnaKonular.length,
+        1,
+        "Tek ana konu oluşturulmalı"
+    );
+
+    assert.equal(
+        mockAnaKonular[0].altKonular.length,
+        1,
+        "Aynı anlama gelen ADT konuları birleştirilmeli"
+    );
+});
+
+
+test("T17: Eşzamanlı silme ve ekleme kaynakları ve konuId'yi korur", async () => {
+    sifirla({ haritaDurum: "yok" });
+
+    mockGeminiCikti = [{
+        baslik: "Veri Yapıları",
+        aciklama: "Veri yapıları",
+        sira: 1,
+        altKonular: [{
+            baslik: "Soyut Veri Tipi (ADT)",
+            aciklama: "Abstract Data Type",
+            sira: 1
+        }]
+    }];
+
+    // Başlangıç: Aynı konuyu destekleyen iki materyal.
+    await materyalEklendigindeIncrementalGuncelle(
+        mat1Id, dersId1, kullaniciId
+    );
+
+    await materyalEklendigindeIncrementalGuncelle(
+        mat2Id, dersId1, kullaniciId
+    );
+
+    const eskiKonuId = mockAnaKonular[0].altKonular[0].konuId;
+
+    // Aynı ders için silme ve yeni materyal ekleme eşzamanlı başlar.
+    const [silmeSonucu, eklemeSonucu] = await Promise.all([
+        materyalSilindigindeGuncelle(
+            mat1Id, dersId1, kullaniciId
+        ),
+        materyalEklendigindeIncrementalGuncelle(
+            mat3Id, dersId1, kullaniciId
+        )
+    ]);
+
+    assert.ok(silmeSonucu, "Silme işlemi başarılı olmalı");
+    assert.ok(eklemeSonucu, "Ekleme işlemi başarılı olmalı");
+
+    assert.equal(mockAnaKonular.length, 1);
+    assert.equal(mockAnaKonular[0].altKonular.length, 1);
+
+    const sonKonu = mockAnaKonular[0].altKonular[0];
+
+    assert.equal(
+        sonKonu.konuId,
+        eskiKonuId,
+        "Eşzamanlı işlemler mevcut konuId'yi değiştirmemeli"
+    );
+
+    const kaynaklar = sonKonu.kaynakMateryalIds.map(String);
+
+    assert.deepEqual(
+        [...kaynaklar].sort(),
+        [mat2Id.toString(), mat3Id.toString()].sort(),
+        "Silinen materyal geri gelmemeli, mevcut ve yeni kaynak korunmalı"
+    );
+
+    const haritaKaynaklari = mockKaynakMateryaller.map(
+        kaynak => kaynak.materyalId.toString()
+    );
+
+    assert.deepEqual(
+        [...haritaKaynaklari].sort(),
+        [mat2Id.toString(), mat3Id.toString()].sort(),
+        "Haritanın kaynakMateryaller listesi de tutarlı kalmalı"
+    );
+});
+
+
+test("T18: Gemini sırasında değişen materyalin eski sonucu kaydedilmez", async () => {
+    sifirla({ haritaDurum: "yok" });
+
+    mockGeminiCikti = [{
+        baslik: "Veri Yapıları",
+        aciklama: "Test konusu",
+        sira: 1,
+        altKonular: [{
+            baslik: "Soyut Veri Tipi (ADT)",
+            aciklama: "ADT konusu",
+            sira: 1
+        }]
+    }];
+
+    let geminiBasladi;
+    const geminiBasladiPromise = new Promise(resolve => {
+        geminiBasladi = resolve;
+    });
+
+    let geminiDevamEt;
+    const geminiBeklemePromise = new Promise(resolve => {
+        geminiDevamEt = resolve;
+    });
+
+    mockGeminiBekleme = async () => {
+        geminiBasladi();
+        await geminiBeklemePromise;
+    };
+
+    try {
+        const islem = materyalEklendigindeIncrementalGuncelle(
+            mat1Id, dersId1, kullaniciId
+        );
+
+        // Materyalin ilk okuması tamamlandı ve Gemini başladı.
+        await geminiBasladiPromise;
+
+        // Gemini beklerken aktif işleme sürümü değişiyor.
+        mockAktifIslemeId = isleme2;
+
+        // Eski Gemini sonucunun dönmesine izin ver.
+        geminiDevamEt();
+
+        const sonuc = await islem;
+
+        assert.equal(
+            sonuc,
+            null,
+            "Eski işleme sürümünün Gemini sonucu reddedilmeli"
+        );
+
+        assert.equal(
+            mockAnaKonular.length,
+            0,
+            "Eski sonuç haritaya konu eklememeli"
+        );
+
+        assert.equal(
+            mockFindOneAndUpdateCallCount,
+            0,
+            "Geçersiz sonuç veritabanına yazılmamalı"
+        );
+
+        assert.equal(
+            mockCreateCallCount,
+            0,
+            "Geçersiz sonuç yeni harita oluşturmamalı"
+        );
+    } finally {
+        geminiDevamEt();
+        mockGeminiBekleme = null;
+    }
+});
+
+
+test("T19: Gemini sırasında silinen materyalin sonucu kaydedilmez", async () => {
+    sifirla({ haritaDurum: "yok" });
+
+    let geminiBasladi;
+    const geminiBasladiPromise = new Promise(resolve => {
+        geminiBasladi = resolve;
+    });
+
+    let geminiDevamEt;
+    const geminiBeklemePromise = new Promise(resolve => {
+        geminiDevamEt = resolve;
+    });
+
+    mockGeminiBekleme = async () => {
+        geminiBasladi();
+        await geminiBeklemePromise;
+    };
+
+    try {
+        const islem = materyalEklendigindeIncrementalGuncelle(
+            mat1Id, dersId1, kullaniciId
+        );
+
+        // Gemini'nin gerçekten başladığını bekle.
+        await geminiBasladiPromise;
+
+        // Gemini çalışırken materyal veritabanından siliniyor.
+        mockMateryalBulundu = false;
+
+        // Gemini eski analiz sonucunu döndürüyor.
+        geminiDevamEt();
+
+        const sonuc = await islem;
+
+        assert.equal(
+            sonuc,
+            null,
+            "Silinen materyalin sonucu reddedilmeli"
+        );
+
+        assert.equal(
+            mockAnaKonular.length,
+            0,
+            "Silinen materyalin konuları haritaya eklenmemeli"
+        );
+
+        assert.equal(
+            mockFindOneAndUpdateCallCount,
+            0,
+            "Silinen materyal için harita güncellenmemeli"
+        );
+
+        assert.equal(
+            mockCreateCallCount,
+            0,
+            "Silinen materyal için yeni harita oluşturulmamalı"
+        );
+    } finally {
+        geminiDevamEt();
+        mockGeminiBekleme = null;
+    }
+});
+
+
+test("T20: Çalışma Soruları tekrarları tespit edilmeli", async () => {
+    sifirla({ haritaDurum: "yok" });
+
+    mockGeminiCikti = [{
+        baslik: "Gerçek Kullanım Örnekleri ve Uygulamalar",
+        aciklama: "",
+        altKonular: [
+            {
+                baslik: "Çalışma Soruları ve Problemler",
+                aciklama: "Parantez kontrolü ve yazıcı kuyruğu"
+            },
+            {
+                baslik: "Çalışma Soruları",
+                aciklama: "Parantez kontrolü ve yazıcı kuyruğu"
+            }
+        ]
+    }];
+
+    await materyalEklendigindeIncrementalGuncelle(
+        mat1Id, dersId1, kullaniciId
+    );
+
+    const altlar = mockAnaKonular.flatMap(
+        ana => ana.altKonular || []
+    );
+
+    assert.equal(
+        altlar.length,
+        1,
+        "Aynı çalışma soruları iki kez oluşturulmamalı"
+    );
+});
+
+test("T21: Aynı alt konu farklı ana konularda tekrarlanmamalı", async () => {
+    sifirla({ haritaDurum: "yok" });
+
+    mockGeminiCikti = [
+        {
+            baslik: "Ağaç Dolaşma Yöntemleri",
+            altKonular: [
+                { baslik: "Binary Search", aciklama: "İkili arama" }
+            ]
+        },
+        {
+            baslik: "Arama Algoritmaları",
+            altKonular: [
+                { baslik: "Binary Search", aciklama: "İkili arama" }
+            ]
+        }
+    ];
+
+    await materyalEklendigindeIncrementalGuncelle(
+        mat1Id, dersId1, kullaniciId
+    );
+
+    const tumAltlar = mockAnaKonular.flatMap(
+        ana => ana.altKonular || []
+    );
+
+    const binarySearchSayisi = tumAltlar.filter(
+        alt => alt.baslik === "Binary Search"
+    ).length;
+
+    assert.equal(
+        binarySearchSayisi,
+        1,
+        "Binary Search iki farklı ana konuda tekrarlanmamalı"
+    );
 });

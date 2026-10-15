@@ -42,6 +42,57 @@ export const deterministikKonuIdUret = (
     return isAltKonu ? `sub-${hash}` : `top-${hash}`;
 };
 
+
+const geminiTekrarlariniTemizle = (konular = []) => {
+    const temelBaslik = (baslik) => {
+        return konuBasliginiNormalizeEt(baslik || "")
+            .replace(/\s+tanimi$/i, "")
+            .trim();
+    };
+
+    const sonuc = [];
+
+    for (const ana of konular) {
+        if (!ana?.baslik?.trim()) continue;
+
+        const anaKopya = {
+            ...ana,
+            altKonular: []
+        };
+
+        const gorulenAltlar = new Map();
+
+        for (const alt of ana.altKonular || []) {
+            if (!alt?.baslik?.trim()) continue;
+
+            const anahtar = temelBaslik(alt.baslik);
+
+            if (!anahtar) continue;
+
+            if (!gorulenAltlar.has(anahtar)) {
+                const yeniAlt = { ...alt };
+                gorulenAltlar.set(anahtar, yeniAlt);
+                anaKopya.altKonular.push(yeniAlt);
+                continue;
+            }
+
+            const mevcutAlt = gorulenAltlar.get(anahtar);
+
+            if (
+                (alt.aciklama || "").length >
+                (mevcutAlt.aciklama || "").length
+            ) {
+                mevcutAlt.aciklama = alt.aciklama;
+            }
+        }
+
+        sonuc.push(anaKopya);
+    }
+
+    return sonuc;
+};
+
+
 /**
  * Tek bir materyalin aktif metin parçalarını toplar (incremental analiz için).
  */
@@ -150,7 +201,7 @@ export const aktifMateryalMetinleriniTopla = async (
 
         if (
             mevcutGrupKarakter + parcaMetni.length >
-                BATCH_MAX_KARAKTER &&
+            BATCH_MAX_KARAKTER &&
             mevcutGrup.length > 0
         ) {
             metinGruplari.push(mevcutGrup.join("\n\n"));
@@ -327,7 +378,7 @@ export const konuHaritasiUretVeKaydet = async (
         // =========================================
         // KONU ID EŞLEŞTİRME - YENİ BÖLÜM
         // =========================================
-
+        hamKonular = geminiTekrarlariniTemizle(hamKonular);
         const dersIdStr = ders._id.toString();
         let toplamAlt = 0;
 
@@ -605,9 +656,9 @@ export const konuHaritasiUretVeKaydet = async (
         if (guncellenenHarita) {
             konuHaritasiGuncellikKontrolu(guncellenenHarita, ders._id, kullaniciId).then((guncelMi) => {
                 if (!guncelMi) {
-                    arkaPlandaKonuHaritasiGuncelle(ders._id, kullaniciId).catch(() => {});
+                    arkaPlandaKonuHaritasiGuncelle(ders._id, kullaniciId).catch(() => { });
                 }
-            }).catch(() => {});
+            }).catch(() => { });
         }
 
         return guncellenenHarita;
@@ -714,7 +765,8 @@ export const konuHaritasiGuncellikKontrolu = async (
  * @param {mongoose.Types.ObjectId|string} dersId
  * @param {mongoose.Types.ObjectId|string} kullaniciId
  */
-export const arkaPlandaKonuHaritasiGuncelle = async (dersId, kullaniciId) => {
+
+const arkaPlandaKonuHaritasiGuncelleIslemi = async (dersId, kullaniciId) => {
     let alinanIslemToken = null;
     try {
         // 1. Hazır (aktif islemeId'ye sahip) materyal var mı?
@@ -871,7 +923,7 @@ export const arkaPlandaKonuHaritasiGuncelle = async (dersId, kullaniciId) => {
  * @param {string|ObjectId} kullaniciId
  * @param {string} [modelAdi]
  */
-export const materyalEklendigindeIncrementalGuncelle = async (
+const materyalEklendigindeIncrementalGuncelleIslemi = async (
     materyalId,
     dersId,
     kullaniciId,
@@ -910,11 +962,28 @@ export const materyalEklendigindeIncrementalGuncelle = async (
         throw geminiHata;
     }
 
+    // Gemini çalışırken materyal silinmiş veya yeniden işlenmiş olabilir.
+    // Eski analiz sonucunun konu haritasına yazılmasını engelle.
+    const guncelMateryal = await Materyal.findOne({
+        _id: materyalId,
+        dersId,
+        kullaniciId,
+        durum: "hazir",
+        aktifIslemeId: materyal.aktifIslemeId
+    });
+
+    if (!guncelMateryal) {
+        console.warn(
+            `[Incremental] Materyal silindi veya işleme sürümü değişti: ${matIdStr}`
+        );
+        return null;
+    }
+
     if (!yeniGeminiKonular || yeniGeminiKonular.length === 0) {
         console.warn(`[Incremental] Gemini yeni konular üretemedi: ${matIdStr}`);
         return null;
     }
-
+    yeniGeminiKonular = geminiTekrarlariniTemizle(yeniGeminiKonular);
     // 4. Mevcut konu haritasını oku
     const mevcutHarita = await KonuHaritasi.findOne({ dersId, kullaniciId });
 
@@ -1261,6 +1330,71 @@ export const materyalEklendigindeIncrementalGuncelle = async (
     );
 };
 
+
+/**
+ * Aynı ders için incremental güncellemeleri sıraya alır.
+ * Farklı dersler birbirini beklemez.
+ *
+ * Not: Bu kilit tek Node.js process'i içinde çalışır.
+ */
+
+const dersGuncellemeKuyruklari = new Map();
+
+const dersIsleminiSirayaAl = async (dersId, kullaniciId, islem) => {
+    const kuyrukAnahtari = `${kullaniciId}:${dersId}`;
+
+    const oncekiIslem =
+        dersGuncellemeKuyruklari.get(kuyrukAnahtari) ||
+        Promise.resolve();
+
+    const yeniIslem = oncekiIslem
+        .catch(() => {
+            // Önceki işlem başarısız olsa da sonraki işlem çalışır.
+        })
+        .then(islem);
+
+    dersGuncellemeKuyruklari.set(kuyrukAnahtari, yeniIslem);
+
+    try {
+        return await yeniIslem;
+    } finally {
+        if (dersGuncellemeKuyruklari.get(kuyrukAnahtari) === yeniIslem) {
+            dersGuncellemeKuyruklari.delete(kuyrukAnahtari);
+        }
+    }
+};
+
+export const materyalEklendigindeIncrementalGuncelle = async (
+    materyalId,
+    dersId,
+    kullaniciId,
+    modelAdi = VARSAYILAN_GEMINI_MODELI
+) => {
+    return dersIsleminiSirayaAl(
+        dersId,
+        kullaniciId,
+        () => materyalEklendigindeIncrementalGuncelleIslemi(
+            materyalId,
+            dersId,
+            kullaniciId,
+            modelAdi
+        )
+    );
+};
+
+
+export const arkaPlandaKonuHaritasiGuncelle = async (dersId, kullaniciId) => {
+    return dersIsleminiSirayaAl(
+        dersId,
+        kullaniciId,
+        () => arkaPlandaKonuHaritasiGuncelleIslemi(
+            dersId,
+            kullaniciId
+        )
+    );
+};
+
+
 /**
  * Bir materyal silindiğinde Gemini ÇAĞIRMADAN konu haritasını günceller.
  *
@@ -1275,7 +1409,7 @@ export const materyalEklendigindeIncrementalGuncelle = async (
  * @param {string|ObjectId} dersId
  * @param {string|ObjectId} kullaniciId
  */
-export const materyalSilindigindeGuncelle = async (materyalId, dersId, kullaniciId) => {
+const materyalSilindigindeGuncelleIslemi = async (materyalId, dersId, kullaniciId) => {
     const matIdStr = materyalId.toString();
 
     const harita = await KonuHaritasi.findOne({ dersId, kullaniciId });
@@ -1430,5 +1564,22 @@ export const materyalSilindigindeGuncelle = async (materyalId, dersId, kullanici
             }
         },
         { new: true }
+    );
+};
+
+
+export const materyalSilindigindeGuncelle = async (
+    materyalId,
+    dersId,
+    kullaniciId
+) => {
+    return dersIsleminiSirayaAl(
+        dersId,
+        kullaniciId,
+        () => materyalSilindigindeGuncelleIslemi(
+            materyalId,
+            dersId,
+            kullaniciId
+        )
     );
 };

@@ -9,7 +9,7 @@ function MateryalEkle() {
     const navigate = useNavigate();
     const location = useLocation();
     const { dersId } = useParams();
-    
+
     // Get created course and uiPrefs from state if available
     const [ders, setDers] = useState(location.state?.ders || null);
     const uiPrefs = location.state?.uiPrefs || { renk: "indigo", simge: "desktop", dersKodu: "" };
@@ -21,6 +21,9 @@ function MateryalEkle() {
     const [metinModalAcik, setMetinModalAcik] = useState(false);
     const [seciliMetin, setSeciliMetin] = useState("");
     const [metinYukleniyor, setMetinYukleniyor] = useState(false);
+    const [haritaDurumu, setHaritaDurumu] = useState(null);
+const [devamKontrolEdiliyor, setDevamKontrolEdiliyor] = useState(false);
+const devamKontrolRef = useRef(false);
 
     const cardBg = isDark ? "bg-[#162137] border-[#26334A]" : "bg-white border-[#E7E5EF]";
     const textPrimary = isDark ? "text-[#F8FAFC]" : "text-[#0F172A]";
@@ -45,6 +48,42 @@ function MateryalEkle() {
         }
         return () => clearInterval(interval);
     }, [materyaller]);
+
+
+useEffect(() => {
+    let aktif = true;
+
+    const durumuGetir = async () => {
+        try {
+            const res = await axios.get(
+                `http://localhost:5000/dersler/${dersId}/konu-haritasi`,
+                { withCredentials: true }
+            );
+
+            if (aktif) {
+                setHaritaDurumu(res.data);
+            }
+        } catch (err) {
+            console.error("Konu haritası durumu alınamadı:", err);
+            if (aktif) {
+                setHaritaDurumu(null);
+            }
+        }
+    };
+
+    durumuGetir();
+
+    const interval = setInterval(() => {
+        durumuGetir();
+        materyalleriGetir();
+    }, 3000);
+
+    return () => {
+        aktif = false;
+        clearInterval(interval);
+    };
+}, [dersId]);
+
 
     const dersGetir = async () => {
         try {
@@ -98,7 +137,7 @@ function MateryalEkle() {
 
     const materyalSil = async (id) => {
         if (!window.confirm("Bu materyali silmek istediğinize emin misiniz?")) return;
-        
+
         try {
             await axios.delete(`http://localhost:5000/materyaller/${id}`, { withCredentials: true });
             setMateryaller(materyaller.filter(m => m._id !== id));
@@ -139,9 +178,82 @@ function MateryalEkle() {
         return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`;
     };
 
-    const handleNext = () => {
-        navigate(`/panel/dersler/${dersId}/hazir`, { state: { ders, uiPrefs } });
-    };
+
+const handleNext = async () => {
+    if (devamKontrolRef.current || yukleniyor) return;
+
+    devamKontrolRef.current = true;
+    setDevamKontrolEdiliyor(true);
+    setHata("");
+
+    try {
+        const [materyalRes, haritaRes] = await Promise.all([
+            axios.get(
+                `http://localhost:5000/materyaller/ders/${dersId}`,
+                { withCredentials: true }
+            ),
+            axios.get(
+                `http://localhost:5000/dersler/${dersId}/konu-haritasi`,
+                { withCredentials: true }
+            )
+        ]);
+
+        const guncelMateryaller = materyalRes.data.materyaller || [];
+        const durum = haritaRes.data;
+
+        setMateryaller(guncelMateryaller);
+        setHaritaDurumu(durum);
+
+        const materyalYok =
+            guncelMateryaller.length === 0 &&
+            durum.dahaSonraEklenebilirMi === true;
+
+        const tumMateryallerHazir =
+            guncelMateryaller.length > 0 &&
+            guncelMateryaller.every(m => m.durum === "hazir");
+
+        const devamHazir =
+            tumMateryallerHazir &&
+            durum.devamEdilebilirMi === true &&
+            durum.guncelMi === true;
+
+        if (!materyalYok && !devamHazir) {
+            const hataliMateryalVar =
+                guncelMateryaller.some(m => m.durum === "hata") ||
+                durum.hataliMateryalSayisi > 0;
+
+            if (hataliMateryalVar) {
+                setHata(
+                    "Bazı materyaller işlenemedi. Hatalı materyalleri yeniden deneyin veya silin."
+                );
+            } else if (durum.durum === "hata") {
+                setHata(
+                    durum.olusturmaHatasi ||
+                    "Konu haritası oluşturulamadı. Lütfen tekrar deneyin."
+                );
+            } else {
+                setHata(
+                    "Materyallerin işlenmesi ve konu haritasının güncellenmesi henüz tamamlanmadı. Lütfen bekleyin."
+                );
+            }
+
+            return;
+        }
+
+        navigate(`/panel/dersler/${dersId}/hazir`, {
+            state: { ders, uiPrefs }
+        });
+    } catch (err) {
+        setHata(
+            err.response?.data?.hata ||
+            "İşlem durumu kontrol edilemedi. Lütfen tekrar deneyin."
+        );
+    } finally {
+        devamKontrolRef.current = false;
+        setDevamKontrolEdiliyor(false);
+    }
+};
+
 
     return (
         <div className="max-w-[1200px] mx-auto pb-10">
@@ -170,27 +282,27 @@ function MateryalEkle() {
                             <div className="w-16 h-16 rounded-full bg-[#4F46E5]/10 flex items-center justify-center mb-6">
                                 <CloudArrowUpIcon className="w-8 h-8 text-[#4F46E5]" />
                             </div>
-                            
+
                             <h3 className={`text-[20px] md:text-[24px] font-bold ${textPrimary} mb-2`}>Dosyalarını buraya sürükle ve bırak</h3>
                             <p className={`text-[15px] ${textSecondary} mb-8`}>veya bilgisayarından dosya seç</p>
-                            
-                            <input 
-                                type="file" 
-                                multiple 
-                                ref={fileInputRef} 
+
+                            <input
+                                type="file"
+                                multiple
+                                ref={fileInputRef}
                                 onChange={handleDosyaYukle}
-                                className="hidden" 
+                                className="hidden"
                                 accept=".pdf,.docx,.pptx,.txt"
                             />
-                            
-                            <button 
+
+                            <button
                                 onClick={handleDosyaSec}
                                 disabled={yukleniyor}
                                 className={`px-8 py-3 rounded-xl font-medium border-2 border-[#4F46E5] text-[#4F46E5] hover:bg-[#4F46E5]/10 transition-colors mb-6 ${yukleniyor ? 'opacity-50 cursor-not-allowed' : ''}`}
                             >
                                 {yukleniyor ? 'Yükleniyor...' : 'Dosya Seç'}
                             </button>
-                            
+
                             <div className={`text-[13px] ${textSecondary}`}>
                                 <p>PDF, DOCX, PPTX ve TXT desteklenir. (Maks. 50 MB / dosya)</p>
                                 <p className="mt-1">Birden fazla dosyayı aynı anda yükleyebilirsiniz.</p>
@@ -220,10 +332,10 @@ function MateryalEkle() {
                             </div>
                             <h3 className={`text-[16px] md:text-[18px] font-bold ${textPrimary}`}>İçerik Analizi</h3>
                         </div>
-                        
+
                         <p className={`text-[13px] ${textSecondary} mb-6 leading-relaxed`}>
-                            {materyaller.length > 0 
-                                ? "Materyaller yüklendi. Analiz sistemi sonraki aşamada etkinleştirilecek." 
+                            {materyaller.length > 0
+                                ? "Materyaller yüklendi. Analiz sistemi sonraki aşamada etkinleştirilecek."
                                 : "Materyaller hazırlanıyor: Dosyalarındaki içerikler analiz için hazırlanıyor."}
                         </p>
 
@@ -239,7 +351,7 @@ function MateryalEkle() {
 
                         <div className="flex-1">
                             <h4 className={`text-[11px] font-bold uppercase tracking-widest ${textSecondary} mb-3`}>İŞLEM DURUMLARI</h4>
-                            
+
                             <div className="space-y-2">
                                 <div className={`flex items-center justify-between p-3 rounded-lg border ${isDark ? 'border-[#26334A] bg-[#0B1120]' : 'border-[#E7E5EF] bg-white'}`}>
                                     <span className={`text-[13px] font-medium ${isDark ? 'text-[#7F8AA3]' : 'text-[#94A3B8]'}`}>İşleniyor / Yükleniyor</span>
@@ -272,7 +384,7 @@ function MateryalEkle() {
                     <h3 className={`text-[20px] font-bold ${textPrimary}`}>Yüklenen Materyaller</h3>
                     <span className={`px-3 py-1 rounded-lg text-sm font-medium ${isDark ? 'bg-[#10192C] text-[#A7B0C2]' : 'bg-[#F1F5F9] text-[#64748B]'}`}>{materyaller.length} Materyal</span>
                 </div>
-                
+
                 {materyaller.length === 0 ? (
                     <div className={`py-12 flex flex-col items-center justify-center text-center rounded-xl border border-dashed ${isDark ? 'border-[#26334A] bg-[#0B1120]/30' : 'border-[#E7E5EF] bg-white'}`}>
                         <p className={`text-[15px] ${textSecondary}`}>Henüz materyal eklenmedi.</p>
@@ -313,7 +425,7 @@ function MateryalEkle() {
                                 </div>
                                 <div className="flex items-center gap-2">
                                     {materyal.durum === 'hazir' && (
-                                        <button 
+                                        <button
                                             onClick={() => handleMetinGor(materyal._id)}
                                             className="px-3 py-1.5 rounded-lg border border-green-500 text-green-500 hover:bg-green-500/10 transition-colors text-[12px] font-medium"
                                         >
@@ -321,14 +433,14 @@ function MateryalEkle() {
                                         </button>
                                     )}
                                     {materyal.durum === 'hata' && (
-                                        <button 
+                                        <button
                                             onClick={() => handleMetinCikarYenidenDene(materyal._id)}
                                             className="px-3 py-1.5 rounded-lg border border-[#4F46E5] text-[#4F46E5] hover:bg-[#4F46E5]/10 transition-colors text-[12px] font-medium"
                                         >
                                             Yeniden Dene
                                         </button>
                                     )}
-                                    <button 
+                                    <button
                                         onClick={() => materyalSil(materyal._id)}
                                         className="p-2 rounded-lg hover:bg-red-500/10 text-red-500 transition-colors"
                                         title="Sil"
@@ -343,15 +455,17 @@ function MateryalEkle() {
             </div>
 
             <div className="mt-8 pt-6 border-t border-[#E7E5EF] dark:border-[#26334A] flex flex-col sm:flex-row items-center justify-between gap-4">
-                <button 
+                <button
                     onClick={handleNext}
+                    disabled={devamKontrolEdiliyor || yukleniyor}
                     className={`w-full sm:w-auto px-6 py-3 rounded-xl font-medium border ${isDark ? 'border-[#26334A] hover:bg-white/5 text-[#F8FAFC]' : 'border-[#E7E5EF] hover:bg-black/5 text-[#0F172A]'} transition-colors`}
                 >
                     {materyaller.length > 0 ? "Geç" : "Daha Sonra Ekle"}
                 </button>
                 <div className="flex items-center gap-4 w-full sm:w-auto">
-                    <button 
+                    <button
                         onClick={handleNext}
+                        disabled={devamKontrolEdiliyor || yukleniyor}
                         className={`w-full sm:w-auto flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-medium transition-colors ${buttonPrimary}`}
                     >
                         Devam Et

@@ -627,3 +627,33 @@ test("Negatif (Senaryo 5): Başlık ortaklaması olmayan konular açıklama kan�
     );
     assert.equal(eskiKonuKimliginiBul(yeniKonu, [eskiKonu]), null);
 });
+
+
+
+test("Regresyon: ADT başlığı ile ADT Tanımı aynı konuyu temsil eder", () => {
+    const eskiKonular = [{
+        konuId: "adt-eski-id",
+        baslik: "Soyut Veri Tipi (ADT)",
+        aciklama: "Abstract Data Type kavramı",
+        anaBaslik: "Veri Yapıları"
+    }];
+
+    const yeniKonular = [{
+        baslik: "Soyut Veri Tipi (ADT) Tanımı",
+        aciklama: "Abstract Data Type kavramının tanımı"
+    }];
+
+    const eslesmeler = konuListesiniEsle(
+        yeniKonular,
+        eskiKonular,
+        [],
+        new Set(),
+        { ustKonuBasligi: "Veri Yapıları" }
+    );
+
+    assert.equal(
+        eslesmeler.get(yeniKonular[0])?.eskiId,
+        "adt-eski-id",
+        "ADT Tanımı için yeni konuId üretilmemeli"
+    );
+});

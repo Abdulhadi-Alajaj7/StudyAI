@@ -1,0 +1,21 @@
+VERİ YAPILARI - SINAV ÖNCESİ HIZLI TEKRAR
+
+1. Array: İndeksle erişim hızlıdır. Tipik erişim O(1).
+2. Linked List: Dinamik bağlantılarla eleman tutar.
+3. Stack: LIFO - son giren ilk çıkar.
+4. Queue: FIFO - ilk giren ilk çıkar.
+5. BST: Sol alt ağaç küçük, sağ alt ağaç büyük değerleri tutar.
+6. Hash Table: Anahtarı hash function ile konuma dönüştürür.
+7. Graph: Vertex ve edge yapısından oluşur.
+8. BFS: Genellikle queue kullanır.
+9. DFS: Stack veya recursion ile uygulanabilir.
+10. Binary Search: Sıralı veri üzerinde çalışır, O(log n).
+
+ÇALIŞMA:
+- Her veri yapısının ekleme, silme, arama maliyetini karşılaştır.
+- En az bir örneği elle çöz.
+- Algoritmanın neden o veri yapısını kullandığını açıklayabil.
+
+Kaynaklar:
+OpenDSA: https://opendsa.org/
+NIST DADS: https://xlinux.nist.gov/dads/
