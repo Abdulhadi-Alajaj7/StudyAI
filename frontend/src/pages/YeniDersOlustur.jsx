@@ -1,95 +1,295 @@
-import React, { useState } from "react";
-import { useOutletContext, useNavigate } from "react-router-dom";
+
+import React, { useEffect, useRef, useState } from "react";
+import {
+    useOutletContext,
+    useNavigate,
+    useLocation,
+} from "react-router-dom";
 import axios from "axios";
+
 import DersOlusturmaAdimlari from "../components/DersOlusturmaAdimlari";
-import { ArrowRightIcon, Bars3BottomLeftIcon, BookOpenIcon, ComputerDesktopIcon, CodeBracketIcon, CircleStackIcon, CalculatorIcon, BeakerIcon } from "@heroicons/react/24/outline";
 import DersKarti from "../components/DersKarti";
+
+import {
+    ArrowRightIcon,
+    Bars3BottomLeftIcon,
+    BookOpenIcon,
+    ComputerDesktopIcon,
+    CodeBracketIcon,
+    CircleStackIcon,
+    CalculatorIcon,
+    BeakerIcon,
+} from "@heroicons/react/24/outline";
+
+const API_URL = "http://localhost:5000";
+const TASLAK_OTURUM_ANAHTARI = "studyai_ders_taslagi";
+
+const BOS_FORM = {
+    dersAdi: "",
+    aciklama: "",
+    donem: "",
+    dersKodu: "",
+    renk: "indigo",
+    simge: "desktop",
+};
+
+const kayitliTaslagiOku = () => {
+    try {
+        const kayit = sessionStorage.getItem(
+            TASLAK_OTURUM_ANAHTARI
+        );
+
+        return kayit ? JSON.parse(kayit) : null;
+    } catch {
+        return null;
+    }
+};
 
 function YeniDersOlustur() {
     const { isDark } = useOutletContext();
     const navigate = useNavigate();
+    const location = useLocation();
 
-    const [form, setForm] = useState({
-        dersAdi: "",
-        aciklama: "",
-        donem: "",
-        dersKodu: "",
-        renk: "indigo",
-        simge: "desktop"
-    });
+    const geriDonusTaslagi =
+        location.state?.taslak || null;
+
+    const kayitliTaslakRef = useRef(
+        kayitliTaslagiOku()
+    );
+
+    const [form, setForm] = useState(() => ({
+        ...BOS_FORM,
+        ...(kayitliTaslakRef.current?.form || {}),
+        ...(geriDonusTaslagi || {}),
+    }));
+
+    const [taslakId, setTaslakId] = useState(
+        geriDonusTaslagi?._id ||
+        kayitliTaslakRef.current?.taslakId ||
+        null
+    );
+
+    const [olusturmaAnahtari] = useState(() =>
+        kayitliTaslakRef.current?.olusturmaAnahtari ||
+        crypto.randomUUID()
+    );
+
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
 
-    const cardBg = isDark ? "bg-[#162137] border-[#26334A]" : "bg-white border-[#E7E5EF]";
-    const textPrimary = isDark ? "text-[#F8FAFC]" : "text-[#0F172A]";
-    const textSecondary = isDark ? "text-[#A7B0C2]" : "text-[#64748B]";
-    const inputBg = isDark ? "bg-[#0B1120] border-[#26334A] text-[#F8FAFC]" : "bg-white border-[#E7E5EF] text-[#0F172A]";
-    const buttonPrimary = "bg-[#4F46E5] hover:bg-[#4338CA] text-white";
+    const cardBg = isDark
+        ? "bg-[#162137] border-[#26334A]"
+        : "bg-white border-[#E7E5EF]";
+
+    const textPrimary = isDark
+        ? "text-[#F8FAFC]"
+        : "text-[#0F172A]";
+
+    const textSecondary = isDark
+        ? "text-[#A7B0C2]"
+        : "text-[#64748B]";
+
+    const inputBg = isDark
+        ? "bg-[#0B1120] border-[#26334A] text-[#F8FAFC]"
+        : "bg-white border-[#E7E5EF] text-[#0F172A]";
+
+    const buttonPrimary =
+        "bg-[#4F46E5] hover:bg-[#4338CA] text-white";
 
     const renkler = [
         { id: "indigo", bg: "bg-[#4F46E5]" },
         { id: "cyan", bg: "bg-[#06B6D4]" },
         { id: "emerald", bg: "bg-[#10B981]" },
         { id: "amber", bg: "bg-[#F59E0B]" },
-        { id: "rose", bg: "bg-[#F43F5E]" }
+        { id: "rose", bg: "bg-[#F43F5E]" },
     ];
 
     const simgeler = [
-        { id: "book", icon: BookOpenIcon, label: "Kitap" },
-        { id: "desktop", icon: ComputerDesktopIcon, label: "Bilgisayar" },
-        { id: "code", icon: CodeBracketIcon, label: "Kod" },
-        { id: "database", icon: CircleStackIcon, label: "Veritabanı" },
-        { id: "calc", icon: CalculatorIcon, label: "Hesap" },
-        { id: "science", icon: BeakerIcon, label: "Bilim" }
+        {
+            id: "book",
+            icon: BookOpenIcon,
+            label: "Kitap",
+        },
+        {
+            id: "desktop",
+            icon: ComputerDesktopIcon,
+            label: "Bilgisayar",
+        },
+        {
+            id: "code",
+            icon: CodeBracketIcon,
+            label: "Kod",
+        },
+        {
+            id: "database",
+            icon: CircleStackIcon,
+            label: "Veritabanı",
+        },
+        {
+            id: "calc",
+            icon: CalculatorIcon,
+            label: "Hesap",
+        },
+        {
+            id: "science",
+            icon: BeakerIcon,
+            label: "Bilim",
+        },
     ];
+
+    useEffect(() => {
+        sessionStorage.setItem(
+            TASLAK_OTURUM_ANAHTARI,
+            JSON.stringify({
+                taslakId,
+                olusturmaAnahtari,
+                form,
+            })
+        );
+    }, [form, taslakId, olusturmaAnahtari]);
 
     const handleNext = async (e) => {
         e.preventDefault();
+
+        if (loading) return;
+
+        if (!form.dersAdi.trim()) {
+            setError("Ders adı zorunludur.");
+            return;
+        }
+
         setLoading(true);
         setError(null);
-        
+
+        const payload = {
+            dersAdi: form.dersAdi.trim(),
+            aciklama: form.aciklama.trim(),
+            donem: form.donem,
+            dersKodu: form.dersKodu.trim(),
+            renk: form.renk,
+            simge: form.simge,
+        };
+
         try {
-            // Sadece backend'in desteklediği alanları gönderiyoruz
-            const payload = {
-                dersAdi: form.dersAdi,
-                aciklama: form.aciklama,
-                donem: form.donem,
-                dersKodu: form.dersKodu,
-                renk: form.renk,
-                simge: form.simge
-            };
-            
-            const res = await axios.post("http://localhost:5000/dersler", payload, { withCredentials: true });
-            const yeniDers = res.data.ders;
-            
-            // Seçilen renk ve simge (frontend state) de sonraki sayfaya aktarılabilir
-            navigate(`/panel/dersler/${yeniDers._id}/materyal`, { state: { ders: yeniDers, uiPrefs: { renk: form.renk, simge: form.simge, dersKodu: form.dersKodu } } });
+            let taslak;
+
+            if (taslakId) {
+                const response = await axios.put(
+                    `${API_URL}/ders-taslaklari/${taslakId}`,
+                    payload,
+                    { withCredentials: true }
+                );
+
+                taslak = response.data.taslak;
+            } else {
+                const response = await axios.post(
+                    `${API_URL}/ders-taslaklari`,
+                    {
+                        ...payload,
+                        olusturmaAnahtari,
+                    },
+                    { withCredentials: true }
+                );
+
+                taslak = response.data.taslak;
+            }
+
+            if (!taslak?._id) {
+                throw new Error(
+                    "Taslak kimliği alınamadı."
+                );
+            }
+
+            setTaslakId(taslak._id);
+
+            sessionStorage.setItem(
+                TASLAK_OTURUM_ANAHTARI,
+                JSON.stringify({
+                    taslakId: taslak._id,
+                    olusturmaAnahtari,
+                    form,
+                })
+            );
+
+            navigate(
+                `/panel/dersler/${taslak._id}/materyal`,
+                {
+                    state: {
+                        taslak,
+                        ders: taslak,
+                        taslakId: taslak._id,
+                        uiPrefs: {
+                            renk: form.renk,
+                            simge: form.simge,
+                            dersKodu: form.dersKodu,
+                        },
+                    },
+                }
+            );
         } catch (err) {
-            setError(err.response?.data?.hata || "Ders oluşturulurken bir hata meydana geldi.");
+            setError(
+                err.response?.data?.hata ||
+                err.message ||
+                "Ders taslağı oluşturulamadı."
+            );
         } finally {
             setLoading(false);
         }
     };
 
+    const handleCancel = () => {
+        sessionStorage.removeItem(
+            TASLAK_OTURUM_ANAHTARI
+        );
+
+        navigate("/panel/dersler");
+    };
+
     return (
         <div className="max-w-[1200px] mx-auto pb-10">
             <div className="mb-8">
-                <h1 className={`text-[32px] md:text-[38px] font-bold tracking-tight ${textPrimary}`}>Yeni Ders Oluştur</h1>
-                <p className={`mt-1.5 text-[16px] ${textSecondary}`}>
-                    Dersini oluştur, materyallerini ekle ve öğrenme alanını hazırla.
+                <h1
+                    className={`text-[32px] md:text-[38px] font-bold tracking-tight ${textPrimary}`}
+                >
+                    Yeni Ders Oluştur
+                </h1>
+
+                <p
+                    className={`mt-1.5 text-[16px] ${textSecondary}`}
+                >
+                    Dersini oluştur, materyallerini ekle ve
+                    öğrenme alanını hazırla.
                 </p>
             </div>
 
-            <DersOlusturmaAdimlari aktifAdim={1} isDark={isDark} />
+            <DersOlusturmaAdimlari
+                aktifAdim={1}
+                isDark={isDark}
+            />
 
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
                 {/* Form Section - Left */}
-                <div className={`lg:col-span-8 p-6 md:p-8 rounded-2xl border ${cardBg}`}>
+                <div
+                    className={`lg:col-span-8 p-6 md:p-8 rounded-2xl border ${cardBg}`}
+                >
                     <div className="flex items-center gap-3 mb-8 pb-6 border-b border-[#E7E5EF] dark:border-[#26334A]">
-                        <Bars3BottomLeftIcon className={`w-6 h-6 ${textSecondary}`} />
+                        <Bars3BottomLeftIcon
+                            className={`w-6 h-6 ${textSecondary}`}
+                        />
+
                         <div>
-                            <h2 className={`text-[20px] font-bold ${textPrimary}`}>Ders Bilgileri</h2>
-                            <p className={`text-[14px] ${textSecondary} mt-1`}>Dersini tanımlamak için temel bilgileri gir.</p>
+                            <h2
+                                className={`text-[20px] font-bold ${textPrimary}`}
+                            >
+                                Ders Bilgileri
+                            </h2>
+
+                            <p
+                                className={`text-[14px] ${textSecondary} mt-1`}
+                            >
+                                Dersini tanımlamak için temel
+                                bilgileri gir.
+                            </p>
                         </div>
                     </div>
 
@@ -99,108 +299,244 @@ function YeniDersOlustur() {
                         </div>
                     )}
 
-                    <form onSubmit={handleNext} className="space-y-6">
+                    <form
+                        onSubmit={handleNext}
+                        className="space-y-6"
+                    >
                         <div>
-                            <label className={`block text-sm font-medium mb-1.5 ${textPrimary}`}>Ders Adı <span className="text-red-500">*</span></label>
-                            <input 
+                            <label
+                                className={`block text-sm font-medium mb-1.5 ${textPrimary}`}
+                            >
+                                Ders Adı{" "}
+                                <span className="text-red-500">
+                                    *
+                                </span>
+                            </label>
+
+                            <input
                                 type="text"
                                 required
                                 value={form.dersAdi}
-                                onChange={(e) => setForm({...form, dersAdi: e.target.value})}
+                                onChange={(e) =>
+                                    setForm({
+                                        ...form,
+                                        dersAdi: e.target.value,
+                                    })
+                                }
                                 className={`w-full px-4 py-3 rounded-xl border focus:outline-none focus:ring-2 focus:ring-[#4F46E5] transition-all ${inputBg}`}
                                 placeholder="Örn: İşletim Sistemleri"
                             />
                         </div>
 
                         <div>
-                            <label className={`block text-sm font-medium mb-1.5 flex justify-between ${textPrimary}`}>
+                            <label
+                                className={`block text-sm font-medium mb-1.5 flex justify-between ${textPrimary}`}
+                            >
                                 <span>Ders Açıklaması</span>
-                                <span className={textSecondary}>{form.aciklama.length} / 300</span>
+                                <span className={textSecondary}>
+                                    {form.aciklama.length} / 300
+                                </span>
                             </label>
-                            <textarea 
+
+                            <textarea
                                 rows="4"
                                 maxLength="300"
                                 value={form.aciklama}
-                                onChange={(e) => setForm({...form, aciklama: e.target.value})}
+                                onChange={(e) =>
+                                    setForm({
+                                        ...form,
+                                        aciklama: e.target.value,
+                                    })
+                                }
                                 className={`w-full px-4 py-3 rounded-xl border focus:outline-none focus:ring-2 focus:ring-[#4F46E5] resize-none transition-all ${inputBg}`}
                                 placeholder="İşletim sistemlerinin temel yapıları, süreç yönetimi, bellek yönetimi ve dosya sistemleri."
-                            ></textarea>
-                            <p className={`text-[13px] ${textSecondary} mt-2`}>Bu açıklama yapay zekânın konu ağırlıklarını önceliklendirmesine rehberlik eder.</p>
+                            />
+
+                            <p
+                                className={`text-[13px] ${textSecondary} mt-2`}
+                            >
+                                Bu açıklama yapay zekânın konu
+                                ağırlıklarını önceliklendirmesine
+                                rehberlik eder.
+                            </p>
                         </div>
 
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div>
-                                <label className={`block text-sm font-medium mb-1.5 ${textPrimary}`}>Ders Dönemi</label>
+                                <label
+                                    className={`block text-sm font-medium mb-1.5 ${textPrimary}`}
+                                >
+                                    Ders Dönemi
+                                </label>
+
                                 <select
                                     value={form.donem}
-                                    onChange={(e) => setForm({...form, donem: e.target.value})}
+                                    onChange={(e) =>
+                                        setForm({
+                                            ...form,
+                                            donem: e.target.value,
+                                        })
+                                    }
                                     className={`w-full px-4 py-3 rounded-xl border focus:outline-none focus:ring-2 focus:ring-[#4F46E5] transition-all appearance-none ${inputBg}`}
                                 >
-                                    <option value="">Dönem Seçin...</option>
-                                    <option value="2026-2027 Güz Dönemi">2026-2027 Güz Dönemi</option>
-                                    <option value="2026-2027 Bahar Dönemi">2026-2027 Bahar Dönemi</option>
+                                    <option value="">
+                                        Dönem Seçin...
+                                    </option>
+                                    <option value="2026-2027 Güz Dönemi">
+                                        2026-2027 Güz Dönemi
+                                    </option>
+                                    <option value="2026-2027 Bahar Dönemi">
+                                        2026-2027 Bahar Dönemi
+                                    </option>
                                 </select>
                             </div>
+
                             <div>
-                                <label className={`block text-sm font-medium mb-1.5 flex items-center gap-2 ${textPrimary}`}>
-                                    Ders Kodu <span className={`text-[11px] font-normal px-1.5 py-0.5 rounded ${isDark ? 'bg-white/10 text-[#A7B0C2]' : 'bg-black/5 text-[#64748B]'}`}>Opsiyonel</span>
+                                <label
+                                    className={`block text-sm font-medium mb-1.5 flex items-center gap-2 ${textPrimary}`}
+                                >
+                                    Ders Kodu
+                                    <span
+                                        className={`text-[11px] font-normal px-1.5 py-0.5 rounded ${
+                                            isDark
+                                                ? "bg-white/10 text-[#A7B0C2]"
+                                                : "bg-black/5 text-[#64748B]"
+                                        }`}
+                                    >
+                                        Opsiyonel
+                                    </span>
                                 </label>
-                                <input 
+
+                                <input
                                     type="text"
                                     value={form.dersKodu}
-                                    onChange={(e) => setForm({...form, dersKodu: e.target.value})}
+                                    onChange={(e) =>
+                                        setForm({
+                                            ...form,
+                                            dersKodu: e.target.value,
+                                        })
+                                    }
                                     className={`w-full px-4 py-3 rounded-xl border focus:outline-none focus:ring-2 focus:ring-[#4F46E5] transition-all ${inputBg}`}
                                     placeholder="Örn: BIL301"
                                 />
                             </div>
                         </div>
 
-                        {/* Ders Görünümü Bölümü (Tasarım Amaçlı) */}
-                        <div className={`mt-8 p-6 rounded-xl border ${isDark ? 'bg-[#0B1120]/50 border-[#26334A]' : 'bg-[#F8F7FC] border-[#E7E5EF]'}`}>
+                        {/* Ders Görünümü */}
+                        <div
+                            className={`mt-8 p-6 rounded-xl border ${
+                                isDark
+                                    ? "bg-[#0B1120]/50 border-[#26334A]"
+                                    : "bg-[#F8F7FC] border-[#E7E5EF]"
+                            }`}
+                        >
                             <div className="mb-4">
-                                <h3 className={`text-[15px] font-bold flex items-center gap-2 ${textPrimary}`}>
-                                    Ders Görünümü <span className={`text-[11px] font-normal px-1.5 py-0.5 rounded ${isDark ? 'bg-white/10 text-[#A7B0C2]' : 'bg-black/5 text-[#64748B]'}`}>Opsiyonel</span>
+                                <h3
+                                    className={`text-[15px] font-bold flex items-center gap-2 ${textPrimary}`}
+                                >
+                                    Ders Görünümü
+                                    <span
+                                        className={`text-[11px] font-normal px-1.5 py-0.5 rounded ${
+                                            isDark
+                                                ? "bg-white/10 text-[#A7B0C2]"
+                                                : "bg-black/5 text-[#64748B]"
+                                        }`}
+                                    >
+                                        Opsiyonel
+                                    </span>
                                 </h3>
-                                <p className={`text-[13px] ${textSecondary} mt-1`}>Dersini diğer derslerden kolayca ayırt etmek için renk ve simge seçebilirsin.</p>
+
+                                <p
+                                    className={`text-[13px] ${textSecondary} mt-1`}
+                                >
+                                    Dersini diğer derslerden kolayca
+                                    ayırt etmek için renk ve simge
+                                    seçebilirsin.
+                                </p>
                             </div>
 
                             <div className="space-y-6">
                                 <div>
-                                    <label className={`block text-[13px] font-medium mb-3 ${textPrimary}`}>Ders Rengi</label>
+                                    <label
+                                        className={`block text-[13px] font-medium mb-3 ${textPrimary}`}
+                                    >
+                                        Ders Rengi
+                                    </label>
+
                                     <div className="flex flex-wrap items-center gap-3">
-                                        {renkler.map(r => (
+                                        {renkler.map((r) => (
                                             <button
                                                 key={r.id}
                                                 type="button"
-                                                onClick={() => setForm({...form, renk: r.id})}
-                                                className={`w-10 h-10 rounded-full flex items-center justify-center ${r.bg} ${form.renk === r.id ? 'ring-2 ring-offset-2 ring-[#4F46E5] dark:ring-offset-[#0B1120]' : 'opacity-80 hover:opacity-100'} transition-all`}
+                                                onClick={() =>
+                                                    setForm({
+                                                        ...form,
+                                                        renk: r.id,
+                                                    })
+                                                }
+                                                className={`w-10 h-10 rounded-full flex items-center justify-center ${r.bg} ${
+                                                    form.renk === r.id
+                                                        ? "ring-2 ring-offset-2 ring-[#4F46E5] dark:ring-offset-[#0B1120]"
+                                                        : "opacity-80 hover:opacity-100"
+                                                } transition-all`}
                                             >
-                                                {form.renk === r.id && <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>}
+                                                {form.renk === r.id && (
+                                                    <svg
+                                                        className="w-5 h-5 text-white"
+                                                        fill="none"
+                                                        viewBox="0 0 24 24"
+                                                        stroke="currentColor"
+                                                    >
+                                                        <path
+                                                            strokeLinecap="round"
+                                                            strokeLinejoin="round"
+                                                            strokeWidth={2}
+                                                            d="M5 13l4 4L19 7"
+                                                        />
+                                                    </svg>
+                                                )}
                                             </button>
                                         ))}
                                     </div>
                                 </div>
-                                
+
                                 <div>
-                                    <label className={`block text-[13px] font-medium mb-3 ${textPrimary}`}>Ders Simgesi</label>
+                                    <label
+                                        className={`block text-[13px] font-medium mb-3 ${textPrimary}`}
+                                    >
+                                        Ders Simgesi
+                                    </label>
+
                                     <div className="flex flex-wrap items-center gap-3">
-                                        {simgeler.map(s => {
+                                        {simgeler.map((s) => {
                                             const Icon = s.icon;
-                                            const isSelected = form.simge === s.id;
+                                            const isSelected =
+                                                form.simge === s.id;
+
                                             return (
                                                 <button
                                                     key={s.id}
                                                     type="button"
-                                                    onClick={() => setForm({...form, simge: s.id})}
-                                                    className={`flex flex-col items-center justify-center w-20 h-20 rounded-xl border transition-all
-                                                        ${isSelected 
-                                                            ? (isDark ? 'bg-[#4F46E5]/10 border-[#4F46E5] text-[#4F46E5]' : 'bg-[#EEF2FF] border-[#4F46E5] text-[#4F46E5]') 
-                                                            : (isDark ? 'border-[#26334A] hover:border-[#7F8AA3] text-[#A7B0C2]' : 'border-[#E7E5EF] hover:border-[#94A3B8] text-[#64748B]')
-                                                        }
-                                                    `}
+                                                    onClick={() =>
+                                                        setForm({
+                                                            ...form,
+                                                            simge: s.id,
+                                                        })
+                                                    }
+                                                    className={`flex flex-col items-center justify-center w-20 h-20 rounded-xl border transition-all ${
+                                                        isSelected
+                                                            ? isDark
+                                                                ? "bg-[#4F46E5]/10 border-[#4F46E5] text-[#4F46E5]"
+                                                                : "bg-[#EEF2FF] border-[#4F46E5] text-[#4F46E5]"
+                                                            : isDark
+                                                                ? "border-[#26334A] hover:border-[#7F8AA3] text-[#A7B0C2]"
+                                                                : "border-[#E7E5EF] hover:border-[#94A3B8] text-[#64748B]"
+                                                    }`}
                                                 >
                                                     <Icon className="w-6 h-6 mb-2" />
-                                                    <span className="text-[11px] font-medium">{s.label}</span>
+                                                    <span className="text-[11px] font-medium">
+                                                        {s.label}
+                                                    </span>
                                                 </button>
                                             );
                                         })}
@@ -210,51 +546,93 @@ function YeniDersOlustur() {
                         </div>
 
                         <div className="pt-8 flex flex-col sm:flex-row items-center justify-between gap-4">
-                            <button 
+                            <button
                                 type="button"
-                                onClick={() => navigate("/panel/dersler")}
-                                className={`w-full sm:w-auto px-6 py-3 rounded-xl font-medium border ${isDark ? 'border-[#26334A] hover:bg-white/5 text-[#F8FAFC]' : 'border-[#E7E5EF] hover:bg-black/5 text-[#0F172A]'} transition-colors`}
+                                onClick={handleCancel}
+                                className={`w-full sm:w-auto px-6 py-3 rounded-xl font-medium border ${
+                                    isDark
+                                        ? "border-[#26334A] hover:bg-white/5 text-[#F8FAFC]"
+                                        : "border-[#E7E5EF] hover:bg-black/5 text-[#0F172A]"
+                                } transition-colors`}
                             >
                                 İptal
                             </button>
-                            <button 
+
+                            <button
                                 type="submit"
                                 disabled={loading}
-                                className={`w-full sm:w-auto flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-medium transition-colors ${buttonPrimary} ${loading ? 'opacity-70 cursor-not-allowed' : ''}`}
+                                className={`w-full sm:w-auto flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-medium transition-colors ${buttonPrimary} ${
+                                    loading
+                                        ? "opacity-70 cursor-not-allowed"
+                                        : ""
+                                }`}
                             >
-                                {loading ? 'Oluşturuluyor...' : 'Dersi Oluştur ve Devam Et'}
-                                {!loading && <ArrowRightIcon className="w-5 h-5" />}
+                                {loading
+                                    ? "Kaydediliyor..."
+                                    : "İleri"}
+                                {!loading && (
+                                    <ArrowRightIcon className="w-5 h-5" />
+                                )}
                             </button>
                         </div>
                     </form>
                 </div>
-                
+
                 {/* Preview Section - Right */}
                 <div className="lg:col-span-4">
                     <div className="sticky top-28">
                         <div className="mb-4">
-                            <h3 className={`text-[18px] font-bold ${textPrimary} flex items-center gap-2`}>
-                                Önizleme 
-                                <span className="px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 text-[11px] font-bold tracking-wide uppercase">Canlı</span>
+                            <h3
+                                className={`text-[18px] font-bold ${textPrimary} flex items-center gap-2`}
+                            >
+                                Önizleme
+                                <span className="px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 text-[11px] font-bold tracking-wide uppercase">
+                                    Canlı
+                                </span>
                             </h3>
-                            <p className={`text-[13px] ${textSecondary} mt-1`}>Ders kartının Derslerim sayfasındaki görünümü</p>
+
+                            <p
+                                className={`text-[13px] ${textSecondary} mt-1`}
+                            >
+                                Ders kartının Derslerim sayfasındaki
+                                görünümü
+                            </p>
                         </div>
-                        
-                        <DersKarti 
-                            ders={form} 
-                            isDark={isDark} 
-                            isMenuOpen={false} 
+
+                        <DersKarti
+                            ders={form}
+                            isDark={isDark}
+                            isMenuOpen={false}
                             onToggleMenu={null}
                             onEdit={null}
                             onDelete={null}
                             onClick={null}
                         />
 
-                        <div className={`mt-4 p-4 rounded-xl border flex items-start gap-3 ${isDark ? 'border-[#4F46E5]/30 bg-indigo-500/5' : 'border-[#4F46E5]/20 bg-indigo-500/5'}`}>
+                        <div
+                            className={`mt-4 p-4 rounded-xl border flex items-start gap-3 ${
+                                isDark
+                                    ? "border-[#4F46E5]/30 bg-indigo-500/5"
+                                    : "border-[#4F46E5]/20 bg-indigo-500/5"
+                            }`}
+                        >
                             <div className="mt-0.5">💡</div>
+
                             <div>
-                                <h4 className={`text-[13px] font-bold ${textPrimary} mb-1`}>İpucu</h4>
-                                <p className={`text-[12px] ${textSecondary} leading-relaxed`}>Dersi oluşturduktan sonraki adımda PDF, slayt veya ders notlarını ekleyerek öğrenme materyallerini hazırlayabileceksin.</p>
+                                <h4
+                                    className={`text-[13px] font-bold ${textPrimary} mb-1`}
+                                >
+                                    İpucu
+                                </h4>
+
+                                <p
+                                    className={`text-[12px] ${textSecondary} leading-relaxed`}
+                                >
+                                    Bir sonraki adımda PDF, slayt
+                                    veya ders notlarını ekleyebilirsin.
+                                    Ders, materyaller analiz edilip
+                                    onaylandıktan sonra oluşturulur.
+                                </p>
                             </div>
                         </div>
                     </div>

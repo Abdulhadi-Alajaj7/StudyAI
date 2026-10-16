@@ -9,6 +9,7 @@ import Materyal from "./models/Materyal.js";
 import authRoutes from "./routes/authRoutes.js";
 import dersRoutes from "./routes/dersRoutes.js";
 import materyalRoutes from "./routes/materyalRoutes.js";
+import dersTaslagiRoutes from "./routes/dersTaslagiRoutes.js";
 const app = express();
 
 // MongoDB bağlantısı ve sunucu yeniden başlatma kurtarması (Zombie Lock Recovery)
@@ -65,6 +66,7 @@ app.use(cookieParser());
 app.use("/auth", authRoutes);
 app.use("/dersler", dersRoutes);
 app.use("/materyaller", materyalRoutes);
+app.use("/ders-taslaklari", dersTaslagiRoutes);
 
 // Ana route
 app.get("/", (req, res) => {

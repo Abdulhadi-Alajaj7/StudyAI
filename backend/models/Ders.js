@@ -1,3 +1,4 @@
+
 import mongoose from "mongoose";
 
 const dersSchema = new mongoose.Schema(
@@ -41,9 +42,42 @@ const dersSchema = new mongoose.Schema(
             type: String,
             default: "desktop",
         },
+
+        // Dersin oluşturulma sürecindeki durumunu gösterir.
+        // Eski dersler varsayılan olarak hazır kabul edilir.
+        durum: {
+            type: String,
+            enum: ["hazirlaniyor", "hazir"],
+            default: "hazir",
+            index: true,
+        },
+
+        // Ders onaylandıktan sonra materyaller değiştirilemez.
+        materyallerKilitli: {
+            type: Boolean,
+            default: false,
+        },
+
+        // Aynı onay isteğinin ikinci kez ders oluşturmasını önler.
+        olusturmaAnahtari: {
+            type: String,
+            trim: true,
+            default: undefined,
+        },
     },
     {
         timestamps: true,
+    }
+);
+
+// Aynı kullanıcı için oluşturma anahtarı benzersiz olmalıdır.
+dersSchema.index(
+    { kullaniciId: 1, olusturmaAnahtari: 1 },
+    {
+        unique: true,
+        partialFilterExpression: {
+            olusturmaAnahtari: { $type: "string" },
+        },
     }
 );
 

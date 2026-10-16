@@ -85,12 +85,10 @@ export const metniParcalaraAyir = (
             }
         }
 
-        // Son parçada kalan tüm metni koru.
         if (maksimumBitis === metin.length) {
             bitis = metin.length;
         }
 
-        // İlerleme garantisi.
         if (bitis <= baslangic) {
             bitis = maksimumBitis;
         }
@@ -98,7 +96,6 @@ export const metniParcalaraAyir = (
         const parca = metin.slice(baslangic, bitis).trim();
 
         if (parca.length > 0) {
-            // Tekrarlanan gerçek metin parçaları silinmez.
             parcalar.push(parca);
         }
 
@@ -106,14 +103,11 @@ export const metniParcalaraAyir = (
             break;
         }
 
-        // Overlap korunur ve her döngüde yeterli ilerleme sağlanır.
         let yeniBaslangic = Math.max(
             baslangic + 1,
             bitis - overlap
         );
 
-        // Kelime sınırı yalnızca overlap miktarını aşmadan
-        // bulunabiliyorsa kullanılır. Aksi halde mevcut konum korunur.
         if (yeniBaslangic > baslangic + 1) {
             let adayBaslangic = yeniBaslangic;
 
@@ -124,7 +118,6 @@ export const metniParcalaraAyir = (
                 adayBaslangic--;
             }
 
-            // Çok geriye giderek ilerlemeyi yavaşlatma.
             const minimumIlerleme = Math.max(
                 baslangic + 1,
                 bitis - maxLength + overlap
@@ -140,32 +133,16 @@ export const metniParcalaraAyir = (
         }
 
         baslangic = yeniBaslangic;
-
-        // Kelime ortasından başlamamaya çalış.
-        // Ancak ileri giderek metin kaybına neden olma.
-        if (yeniBaslangic > baslangic + 1) {
-            while (
-                yeniBaslangic > baslangic + 1 &&
-                !/\s/.test(metin[yeniBaslangic - 1])
-            ) {
-                yeniBaslangic--;
-            }
-        }
-
-        // Yeni başlangıç, bitişten önce olmalı.
-        if (yeniBaslangic >= bitis) {
-            yeniBaslangic = bitis;
-        }
-
-        baslangic = yeniBaslangic;
     }
 
     return parcalar;
 };
 
 /**
- * Metni parçalar ve islemeId altında staging olarak kaydeder.
- * Eski aktif parçalar korunur.
+ * Metni parçalara ayırır ve veritabanına kaydeder.
+ *
+ * Hem resmi ders materyallerini hem de
+ * ders oluşturma taslağındaki materyalleri destekler.
  */
 export const metinParcalaVeKaydet = async (
     metin,
@@ -177,6 +154,21 @@ export const metinParcalaVeKaydet = async (
     if (!islemeId) {
         throw new Error(
             "metinParcalaVeKaydet: Geçerli bir islemeId zorunludur."
+        );
+    }
+
+    if (!materyal?._id || !materyal?.kullaniciId) {
+        throw new Error(
+            "Metin parçalama için geçerli bir materyal zorunludur."
+        );
+    }
+
+    const dersVar = Boolean(materyal.dersId);
+    const taslakVar = Boolean(materyal.taslakId);
+
+    if (dersVar === taslakVar) {
+        throw new Error(
+            "Materyal yalnızca bir derse veya bir taslağa bağlı olmalıdır."
         );
     }
 
@@ -192,22 +184,23 @@ export const metinParcalaVeKaydet = async (
 
     const belgeler = parcalar.map((icerik, index) => ({
         kullaniciId: materyal.kullaniciId,
-        dersId: materyal.dersId,
+        dersId: materyal.dersId || null,
+        taslakId: materyal.taslakId || null,
         materyalId: materyal._id,
         islemeId,
         parcaIndex: index,
         icerik,
-        karakterSayisi: icerik.length
+        karakterSayisi: icerik.length,
     }));
 
     try {
         await MetinParcasi.insertMany(belgeler);
     } catch (error) {
-        // Yalnızca başarısız yeni işlem parçalarını temizle.
-        // Eski aktif materyal parçalarına dokunma.
+        // Yalnızca başarısız işleme ait parçaları sil.
+        // Önceden başarıyla işlenmiş parçaları koru.
         await MetinParcasi.deleteMany({
             materyalId: materyal._id,
-            islemeId
+            islemeId,
         });
 
         throw new Error(
