@@ -6,6 +6,7 @@ import {
   dersGetir,
   dersGuncelle,
   dersSil,
+  materyalleriOnayla,
 } from "../controllers/dersController.js";
 
 import {
@@ -29,6 +30,9 @@ router.get("/:id", kimlikDogrula, dersGetir);
 router.put("/:id", kimlikDogrula, dersGuncelle);
 
 router.delete("/:id", kimlikDogrula, dersSil);
+
+// Materyal Onay Endpoint'i
+router.post("/:id/materyaller/onayla", kimlikDogrula, materyalleriOnayla);
 
 // Konu Haritası Endpoint'leri
 router.get("/:id/konu-haritasi", kimlikDogrula, konuHaritasiniGetir);

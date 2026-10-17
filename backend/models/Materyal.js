@@ -36,6 +36,10 @@ const materyalSchema = new mongoose.Schema(
             type: Number,
             required: true,
         },
+        dosyaHash: {
+            type: String,
+            default: undefined,
+        },
         durum: {
             type: String,
             default: "yuklendi",
@@ -59,6 +63,15 @@ const materyalSchema = new mongoose.Schema(
     },
     {
         timestamps: true,
+    }
+);
+materyalSchema.index(
+    { dersId: 1, dosyaHash: 1 },
+    {
+        unique: true,
+        partialFilterExpression: {
+            dosyaHash: { $type: "string" }
+        }
     }
 );
 

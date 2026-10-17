@@ -768,8 +768,30 @@ export const konuHaritasiGuncellikKontrolu = async (
 
 const arkaPlandaKonuHaritasiGuncelleIslemi = async (dersId, kullaniciId) => {
     let alinanIslemToken = null;
+    let islemKaydedildi = false;
+
     try {
-        // 1. Hazır (aktif islemeId'ye sahip) materyal var mı?
+        // Onaylanmış derslerde otomatik güncelleme başlatılmaz.
+        // İşlem sayacı atomik olarak artırılır.
+        const dersKilidi = await Ders.findOneAndUpdate(
+            {
+                _id: dersId,
+                kullaniciId,
+                materyallerOnaylandi: { $ne: true }
+            },
+            {
+                $inc: { aktifMateryalIslemSayisi: 1 }
+            },
+            { new: true }
+        );
+
+        if (!dersKilidi) {
+            return;
+        }
+
+        islemKaydedildi = true;
+
+        // 1. Hazır materyal var mı?
         const hazirSayisi = await Materyal.countDocuments({
             dersId,
             kullaniciId,
@@ -778,20 +800,39 @@ const arkaPlandaKonuHaritasiGuncelleIslemi = async (dersId, kullaniciId) => {
         });
 
         if (hazirSayisi === 0) {
-            // Son hazır materyal silindiğinde resmi konu haritasının güncel içeriği boş duruma geçmeli.
-            // Ancak gelecekteki Quiz, Flashcard ve Mastery Score kayıtları veya öğrenme geçmişi silinmemeli.
-            const mevcutHarita = await KonuHaritasi.findOne({ dersId, kullaniciId });
+            // Önceki konuları arşivde koru.
+            const mevcutHarita = await KonuHaritasi.findOne({
+                dersId,
+                kullaniciId
+            });
+
             if (mevcutHarita) {
-                const oncekiKonular = Array.isArray(mevcutHarita.anaKonular) ? mevcutHarita.anaKonular : [];
+                const oncekiKonular = Array.isArray(mevcutHarita.anaKonular)
+                    ? mevcutHarita.anaKonular
+                    : [];
+
                 const gecmisMap = new Map();
+
                 for (const eski of (mevcutHarita.gecmisKonular || [])) {
-                    const doc = typeof eski?.toObject === "function" ? eski.toObject() : eski;
-                    if (doc?.konuId) gecmisMap.set(doc.konuId, doc);
+                    const doc = typeof eski?.toObject === "function"
+                        ? eski.toObject()
+                        : eski;
+
+                    if (doc?.konuId) {
+                        gecmisMap.set(doc.konuId, doc);
+                    }
                 }
+
                 for (const aktif of oncekiKonular) {
-                    const doc = typeof aktif?.toObject === "function" ? aktif.toObject() : aktif;
-                    if (doc?.konuId) gecmisMap.set(doc.konuId, doc);
+                    const doc = typeof aktif?.toObject === "function"
+                        ? aktif.toObject()
+                        : aktif;
+
+                    if (doc?.konuId) {
+                        gecmisMap.set(doc.konuId, doc);
+                    }
                 }
+
                 const nihaiGecmis = Array.from(gecmisMap.values());
 
                 await KonuHaritasi.findOneAndUpdate(
@@ -810,33 +851,54 @@ const arkaPlandaKonuHaritasiGuncelleIslemi = async (dersId, kullaniciId) => {
                     }
                 );
             }
+
             return;
         }
 
-        // 2. Mevcut harita durumunu kontrol et
-        const harita = await KonuHaritasi.findOne({ dersId, kullaniciId });
+        // 2. Mevcut harita durumunu kontrol et.
+        const harita = await KonuHaritasi.findOne({
+            dersId,
+            kullaniciId
+        });
 
         if (harita && harita.durum === "olusturuluyor") {
             const KILIT_ZAMAN_ASIMI_MS = 5 * 60 * 1000;
-            const sonGuncelleme = new Date(harita.updatedAt || harita.sonOlusturmaTarihi || Date.now()).getTime();
+
+            const sonGuncelleme = new Date(
+                harita.updatedAt ||
+                harita.sonOlusturmaTarihi ||
+                Date.now()
+            ).getTime();
+
             const gecenSure = Date.now() - sonGuncelleme;
+
             if (gecenSure < KILIT_ZAMAN_ASIMI_MS) {
-                // Zaten başka bir istek üretiyor ve kilit geçerli; çift Gemini çağrısından kaçın.
                 return;
             }
         }
 
-        // 3. Güncellik kontrolü — harita zaten tüm hazır materyalleri kapsıyorsa yeniden üretme
-        const guncelMi = await konuHaritasiGuncellikKontrolu(harita, dersId, kullaniciId);
+        // 3. Güncel haritayı gereksiz yere yeniden üretme.
+        const guncelMi = await konuHaritasiGuncellikKontrolu(
+            harita,
+            dersId,
+            kullaniciId
+        );
+
         if (guncelMi) {
             return;
         }
 
-        // 4. Ders bilgisini al
-        const ders = await Ders.findById(dersId);
-        if (!ders) return;
+        // 4. Ders bilgisini al.
+        const ders = await Ders.findOne({
+            _id: dersId,
+            kullaniciId
+        });
 
-        // 5. Eşzamanlı erişim kilidi: Haritayı "olusturuluyor" durumuna geçir
+        if (!ders) {
+            return;
+        }
+
+        // 5. Harita oluşturma kilidini al.
         const yeniIslemToken = new mongoose.Types.ObjectId();
         alinanIslemToken = yeniIslemToken;
 
@@ -851,14 +913,17 @@ const arkaPlandaKonuHaritasiGuncelleIslemi = async (dersId, kullaniciId) => {
                 });
             } catch (err) {
                 if (err.code === 11000) {
-                    // Başka bir eşzamanlı istek kaydı önce oluşturdu; atla
                     return;
                 }
+
                 throw err;
             }
         } else {
             const kilitliHarita = await KonuHaritasi.findOneAndUpdate(
-                { _id: harita._id, durum: { $ne: "olusturuluyor" } },
+                {
+                    _id: harita._id,
+                    durum: { $ne: "olusturuluyor" }
+                },
                 {
                     $set: {
                         durum: "olusturuluyor",
@@ -870,40 +935,77 @@ const arkaPlandaKonuHaritasiGuncelleIslemi = async (dersId, kullaniciId) => {
             );
 
             if (!kilitliHarita) {
-                // Yarış durumu: başka bir istek kilidi önce aldı
                 return;
             }
         }
 
-        // 6. Konu haritasını üret ve kaydet (hata yönetimi içinde, mevcut veri korunur)
-        await konuHaritasiUretVeKaydet(ders, kullaniciId, yeniIslemToken);
+        // 6. Gemini analizini tamamla.
+        await konuHaritasiUretVeKaydet(
+            ders,
+            kullaniciId,
+            yeniIslemToken
+        );
 
     } catch (hata) {
         console.error(
             `Otomatik konu haritası güncelleme hatası (Ders ID: ${dersId}):`,
             hata.message
         );
-        // Kilit alındıktan sonra hata oluşursa haritanın süresiz "olusturuluyor" durumunda kalmasını önle
+
         try {
             const mevcut = await KonuHaritasi.findOne({ dersId });
-            const oncekiBasariliMi = Boolean(mevcut && Array.isArray(mevcut.anaKonular) && mevcut.anaKonular.length > 0);
-            await KonuHaritasi.findOneAndUpdate(
-                {
-                    dersId,
-                    ...(alinanIslemToken
-                        ? { aktifIslemToken: alinanIslemToken }
-                        : { durum: "olusturuluyor" })
-                },
-                {
-                    $set: {
-                        durum: oncekiBasariliMi ? "hazir" : "hata",
-                        olusturmaHatasi: hata.message || "Otomatik güncelleme hatası",
-                        aktifIslemToken: null
-                    }
-                }
+
+            const oncekiBasariliMi = Boolean(
+                mevcut &&
+                Array.isArray(mevcut.anaKonular) &&
+                mevcut.anaKonular.length > 0
             );
+
+            // Başka bir işlemin kilidine dokunma.
+            if (alinanIslemToken) {
+                await KonuHaritasi.findOneAndUpdate(
+                    {
+                        dersId,
+                        kullaniciId,
+                        aktifIslemToken: alinanIslemToken
+                    },
+                    {
+                        $set: {
+                            durum: oncekiBasariliMi ? "hazir" : "hata",
+                            olusturmaHatasi:
+                                hata.message || "Otomatik güncelleme hatası",
+                            aktifIslemToken: null
+                        }
+                    }
+                );
+            }
         } catch (kilitAcmaHatasi) {
-            console.error("Kilit temizleme hatası:", kilitAcmaHatasi.message);
+            console.error(
+                "Kilit temizleme hatası:",
+                kilitAcmaHatasi.message
+            );
+        }
+
+    } finally {
+        // Her durumda işlem sayacını serbest bırak.
+        if (islemKaydedildi) {
+            try {
+                await Ders.findOneAndUpdate(
+                    {
+                        _id: dersId,
+                        kullaniciId,
+                        aktifMateryalIslemSayisi: { $gt: 0 }
+                    },
+                    {
+                        $inc: { aktifMateryalIslemSayisi: -1 }
+                    }
+                );
+            } catch (sayacHatasi) {
+                console.error(
+                    "Otomatik harita işlem sayacı azaltılamadı:",
+                    sayacHatasi
+                );
+            }
         }
     }
 };
@@ -941,9 +1043,21 @@ const materyalEklendigindeIncrementalGuncelleIslemi = async (
     }
 
     // 2. Ders bilgisini al
-    const ders = await Ders.findById(dersId);
+    const ders = await Ders.findOne({
+        _id: dersId,
+        kullaniciId
+    });
+
     if (!ders) {
         console.warn(`[Incremental] Ders bulunamadı: ${dersIdStr}`);
+        return null;
+    }
+
+    // Onaylanmış derslerde incremental analiz başlatılmaz.
+    if (ders.materyallerOnaylandi === true) {
+        console.warn(
+            `[Incremental] Ders onaylandığı için güncelleme engellendi: ${dersIdStr}`
+        );
         return null;
     }
 
@@ -1291,7 +1405,20 @@ const materyalEklendigindeIncrementalGuncelleIslemi = async (
             dosyaAdi: materyal.orijinalDosyaAdi || materyal.dosyaAdi
         }
     ];
+    // Gemini analizi sırasında ders onaylandı mı?
+    // Onaylanan dersin konu haritasını değiştirme.
+    const guncelDers = await Ders.findOne({
+        _id: dersId,
+        kullaniciId
+    }).select("materyallerOnaylandi");
 
+    if (!guncelDers || guncelDers.materyallerOnaylandi === true) {
+        console.warn(
+            `[Incremental] Ders onaylandı veya silindi, harita kaydedilmeyecek: ${dersIdStr}`
+        );
+        return null;
+    }
+    
     // 8. Haritayı kaydet
     if (!mevcutHarita) {
         return await KonuHaritasi.create({

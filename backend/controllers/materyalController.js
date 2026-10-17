@@ -1,3 +1,4 @@
+
 import Materyal from "../models/Materyal.js";
 import Ders from "../models/Ders.js";
 import path from "path";
@@ -11,6 +12,33 @@ import {
 } from "../services/konuHaritasiService.js";
 
 import mongoose from "mongoose";
+
+import crypto from "node:crypto";
+import fs from "node:fs/promises";
+
+/**
+ * Ders onayıyla yarışmayan atomik materyal işlem kaydı.
+ * Başarılı her kayıt, işlem tamamen bitince bir kez serbest bırakılmalıdır.
+ */
+const materyalIslemiBaslat = async (dersId, kullaniciId) => {
+    return Ders.findOneAndUpdate(
+        {
+            _id: dersId,
+            kullaniciId,
+            materyallerOnaylandi: { $ne: true },
+            temizleniyor: { $ne: true }
+        },
+        { $inc: { aktifMateryalIslemSayisi: 1 } },
+        { new: true }
+    );
+};
+
+const materyalIslemiBitir = async (dersId, kullaniciId) => {
+    await Ders.updateOne(
+        { _id: dersId, kullaniciId, aktifMateryalIslemSayisi: { $gt: 0 } },
+        { $inc: { aktifMateryalIslemSayisi: -1 } }
+    );
+};
 
 /**
  * Arka planda metin çıkarma ve parçalama işlemini güvenli staging mantığıyla yürütür.
@@ -50,13 +78,13 @@ const arkaPlandaMetinCikar = async (materyalIds, dersId, kullaniciId) => {
             // 5. Atomik Taahhüt (Commit): Materyal hâlâ bu işleme mi ait ve "isleniyor" durumunda mı?
             const guncellenen = await Materyal.findOneAndUpdate(
                 { _id: id, islemeId: yeniIslemeId, durum: "isleniyor" },
-                { 
-                    $set: { 
-                        durum: "hazir", 
-                        aktifIslemeId: yeniIslemeId, 
-                        cikarilanMetin: cikarilanText, 
-                        islemeHatasi: "" 
-                    } 
+                {
+                    $set: {
+                        durum: "hazir",
+                        aktifIslemeId: yeniIslemeId,
+                        cikarilanMetin: cikarilanText,
+                        islemeHatasi: ""
+                    }
                 },
                 { new: true }
             );
@@ -111,33 +139,50 @@ const arkaPlandaMetinCikar = async (materyalIds, dersId, kullaniciId) => {
 };
 
 export const materyalYukle = async (req, res) => {
-    try {
-        const dersId = req.params.dersId;
-        const kullaniciId = req.user._id;
+    const dersId = req.params.dersId;
+    const kullaniciId = req.user._id;
+    let islemKaydedildi = false;
+    let arkaPlanaDevredildi = false;
+    const basariliIds = [];
 
-        const ders = await Ders.findOne({ _id: dersId, kullaniciId });
-        if (!ders) {
-            // Yetki yok veya ders yoksa, yuklenen dosyalari temizle
-            if (req.files) {
-                req.files.forEach(file => {
-                    guvenliDosyaSil(file.path);
-                });
-            }
-            return res.status(404).json({ hata: "Ders bulunamadı veya yetkiniz yok." });
+    try {
+        if (!mongoose.Types.ObjectId.isValid(dersId)) {
+            return res.status(400).json({ hata: "Geçersiz ders kimliği." });
         }
 
         if (!req.files || req.files.length === 0) {
             return res.status(400).json({ hata: "Dosya yüklenmedi." });
         }
 
+        const ders = await materyalIslemiBaslat(dersId, kullaniciId);
+        if (!ders) {
+            const mevcut = await Ders.findOne({ _id: dersId, kullaniciId });
+            return res.status(mevcut ? 409 : 404).json({
+                hata: mevcut
+                    ? "Bu dersin materyalleri onaylandı. Yeni materyal eklenemez."
+                    : "Ders bulunamadı veya yetkiniz yok."
+            });
+        }
+        islemKaydedildi = true;
+
         const yuklenenMateryaller = [];
-        const basariliIds = [];
+        const tekrarEdenDosyalar = [];
 
-        try {
-            for (const file of req.files) {
-                const ext = path.extname(file.originalname).substring(1).toLowerCase();
-                const dosyaTuru = ext === "docx" ? "docx" : ext === "pptx" ? "pptx" : ext === "txt" ? "txt" : "pdf";
+        for (const file of req.files) {
+            const dosyaIcerigi = await fs.readFile(file.path);
 
+            const dosyaHash = crypto
+                .createHash("sha256")
+                .update(dosyaIcerigi)
+                .digest("hex");
+
+            const ext = path.extname(file.originalname).substring(1).toLowerCase();
+            const dosyaTuru =
+                ext === "docx" ? "docx" :
+                    ext === "pptx" ? "pptx" :
+                        ext === "txt" ? "txt" : "pdf";
+
+            try {
                 const yeniMateryal = await Materyal.create({
                     kullaniciId,
                     dersId,
@@ -147,32 +192,64 @@ export const materyalYukle = async (req, res) => {
                     dosyaTuru,
                     mimeTuru: file.mimetype,
                     dosyaBoyutu: file.size,
+                    dosyaHash,
                     durum: "yuklendi"
                 });
 
                 basariliIds.push(yeniMateryal._id);
                 yuklenenMateryaller.push(yeniMateryal);
-            }
 
-            // Arka planda extraction başlat (await kullanmıyoruz)
-            // dersId ve kullaniciId iletilir: batch bitince konu haritası da otomatik güncellenir
-            arkaPlandaMetinCikar(basariliIds, dersId, kullaniciId);
+            } catch (error) {
+                if (error.code === 11000) {
+                    tekrarEdenDosyalar.push(file.originalname);
+                    await fs.unlink(file.path).catch(() => { });
+                    continue;
+                }
 
-            res.status(201).json({ mesaj: "Materyaller başarıyla yüklendi ve işlemeye alındı", materyaller: yuklenenMateryaller });
-        } catch (dbError) {
-            // DB kaydı sırasında hata olursa oluşturulanları geri al
-            if (basariliIds.length > 0) {
-                await Materyal.deleteMany({ _id: { $in: basariliIds } });
+                throw error;
             }
-            throw dbError; // Outer catch'e fırlat ki dosyalar da silinsin
         }
-    } catch (error) {
-        if (req.files) {
-            req.files.forEach(file => {
-                guvenliDosyaSil(file.path);
+        if (basariliIds.length === 0) {
+            return res.status(409).json({
+                hata: "Yüklenen dosyaların tamamı bu derste zaten mevcut.",
+                tekrarEdenDosyalar
             });
         }
-        res.status(500).json({ hata: error.message || "Materyal yüklenirken bir hata oluştu." });
+
+        // Kilit, metin çıkarma ve incremental Gemini güncellemesi bitene kadar korunur.
+        const arkaPlan = arkaPlandaMetinCikar(basariliIds, dersId, kullaniciId);
+        arkaPlanaDevredildi = true;
+        void arkaPlan
+            .catch((hata) => console.error("Arka plan materyal işleme hatası:", hata))
+            .finally(() => materyalIslemiBitir(dersId, kullaniciId).catch((hata) => {
+                console.error("Materyal işlem kilidi bırakılamadı:", hata);
+            }));
+
+        return res.status(201).json({
+            mesaj: "Materyaller başarıyla yüklendi ve işlemeye alındı",
+            materyaller: yuklenenMateryaller,
+            tekrarEdenDosyalar
+        });
+    } catch (error) {
+        if (basariliIds.length > 0 && !arkaPlanaDevredildi) {
+            try {
+                await Materyal.deleteMany({ _id: { $in: basariliIds } });
+            } catch (temizlemeHatasi) {
+                console.error("Materyal kayıt temizleme hatası:", temizlemeHatasi);
+            }
+        }
+        return res.status(500).json({ hata: error.message || "Materyal yüklenirken bir hata oluştu." });
+    } finally {
+        if (!arkaPlanaDevredildi) {
+            if (req.files) {
+                req.files.forEach(file => guvenliDosyaSil(file.path));
+            }
+            if (islemKaydedildi) {
+                await materyalIslemiBitir(dersId, kullaniciId).catch(hata => {
+                    console.error("Materyal işlem kilidi bırakılamadı:", hata);
+                });
+            }
+        }
     }
 };
 
@@ -210,43 +287,52 @@ export const materyalGetir = async (req, res) => {
 };
 
 export const materyalSil = async (req, res) => {
-    try {
-        const materyalId = req.params.id;
-        const kullaniciId = req.user._id;
+    const materyalId = req.params.id;
+    const kullaniciId = req.user._id;
+    let kilitliDersId = null;
 
-        // 1. Atomik olarak materyali "siliniyor" durumuna geçir (devam eden işlemleri iptale zorlar)
+    try {
+        if (!mongoose.Types.ObjectId.isValid(materyalId)) {
+            return res.status(400).json({ hata: "Geçersiz materyal kimliği." });
+        }
+
+        const mevcutMateryal = await Materyal.findOne({ _id: materyalId, kullaniciId });
+        if (!mevcutMateryal) {
+            return res.status(404).json({ hata: "Materyal bulunamadı veya yetkiniz yok." });
+        }
+
+        const ders = await materyalIslemiBaslat(mevcutMateryal.dersId, kullaniciId);
+        if (!ders) {
+            return res.status(409).json({ hata: "Bu dersin materyalleri onaylandı veya ders artık mevcut değil." });
+        }
+        kilitliDersId = mevcutMateryal.dersId;
+
         const materyal = await Materyal.findOneAndUpdate(
-            { _id: materyalId, kullaniciId, durum: { $ne: "siliniyor" } },
+            { _id: materyalId, kullaniciId, dersId: kilitliDersId, durum: { $ne: "siliniyor" } },
             { $set: { durum: "siliniyor" } },
             { new: true }
         );
-
         if (!materyal) {
             return res.status(404).json({ hata: "Materyal bulunamadı, silinmekte veya yetkiniz yok." });
         }
 
-        // 2. İlişkili tüm metin parçalarını sil (tüm versiyonlar/staging dahil)
-        await MetinParcasi.deleteMany({ materyalId: materyalId });
-        
-        // 3. Dosyayı güvenli ve idempotent şekilde diskten sil
-        guvenliDosyaSil(materyal.dosyaYolu);
+        await MetinParcasi.deleteMany({ materyalId });
+        await guvenliDosyaSil(materyal.dosyaYolu);
+        await Materyal.deleteOne({ _id: materyalId, kullaniciId });
+        await MetinParcasi.deleteMany({ materyalId });
 
-        // 4. Materyali veritabanından tamamen sil
-        await Materyal.deleteOne({ _id: materyalId });
-
-        // 5. Yarış durumu temizliği: Silme işlemi sırasında `insertMany` yapmış olabilecek arka plan işi varsa temizle
-        await MetinParcasi.deleteMany({ materyalId: materyalId });
-
-        // 6. Silme tamamlandı; Gemini ÇAĞIRMADAN konu haritasındaki kaynak bağlantısını kaldır ve gerekirse arşivle
-        // Hata yanıtı bloke edilmez; arka plan hatası HTTP yanıtını etkilemez
-        materyalSilindigindeGuncelle(materyalId, materyal.dersId, kullaniciId).catch((hata) => {
-            console.error(`Materyal silme sonrası incremental konu haritası güncelleme hatası (Ders ID: ${materyal.dersId}):`, hata.message);
-        });
-
-        res.status(200).json({ mesaj: "Materyal başarıyla silindi." });
+        // Harita güncellemesini de kilidin içinde tamamla.
+        await materyalSilindigindeGuncelle(materyalId, materyal.dersId, kullaniciId);
+        return res.status(200).json({ mesaj: "Materyal başarıyla silindi." });
     } catch (error) {
         console.error("Materyal silme hatası:", error);
-        res.status(500).json({ hata: "Materyal silinirken hata oluştu: " + error.message });
+        return res.status(500).json({ hata: "Materyal silinirken hata oluştu: " + error.message });
+    } finally {
+        if (kilitliDersId) {
+            await materyalIslemiBitir(kilitliDersId, kullaniciId).catch(hata => {
+                console.error("Materyal işlem kilidi bırakılamadı:", hata);
+            });
+        }
     }
 };
 
@@ -254,11 +340,25 @@ export const materyalMetinCikar = async (req, res) => {
     const materyalId = req.params.id;
     const kullaniciId = req.user._id;
     const yeniIslemeId = new mongoose.Types.ObjectId();
+    let kilitliDersId = null;
 
     try {
+        if (!mongoose.Types.ObjectId.isValid(materyalId)) {
+            return res.status(400).json({ hata: "Geçersiz materyal kimliği." });
+        }
+        const mevcutMateryal = await Materyal.findOne({ _id: materyalId, kullaniciId });
+        if (!mevcutMateryal) {
+            return res.status(404).json({ hata: "Materyal bulunamadı veya yetkiniz yok." });
+        }
+        const ders = await materyalIslemiBaslat(mevcutMateryal.dersId, kullaniciId);
+        if (!ders) {
+            return res.status(409).json({ hata: "Bu dersin materyalleri onaylandı veya ders artık mevcut değil." });
+        }
+        kilitliDersId = mevcutMateryal.dersId;
+
         // 1. Atomik sahiplik alımı
         const materyal = await Materyal.findOneAndUpdate(
-            { _id: materyalId, kullaniciId, durum: { $nin: ["isleniyor", "siliniyor"] } },
+            { _id: materyalId, kullaniciId, dersId: kilitliDersId, durum: { $nin: ["isleniyor", "siliniyor"] } },
             { $set: { durum: "isleniyor", islemeId: yeniIslemeId, islemeHatasi: "" } },
             { new: true }
         );
@@ -277,7 +377,7 @@ export const materyalMetinCikar = async (req, res) => {
             }
             return res.status(400).json({ hata: "Materyal işlenmeye uygun durumda değil." });
         }
-        
+
         try {
             // 2. Metin çıkarma
             const cikarilanText = await metinCikar(materyal.dosyaYolu, materyal.mimeTuru);
@@ -295,13 +395,13 @@ export const materyalMetinCikar = async (req, res) => {
             // 5. Atomik Taahhüt (Commit)
             const guncellenen = await Materyal.findOneAndUpdate(
                 { _id: materyalId, islemeId: yeniIslemeId, durum: "isleniyor" },
-                { 
-                    $set: { 
-                        durum: "hazir", 
-                        aktifIslemeId: yeniIslemeId, 
-                        cikarilanMetin: cikarilanText, 
-                        islemeHatasi: "" 
-                    } 
+                {
+                    $set: {
+                        durum: "hazir",
+                        aktifIslemeId: yeniIslemeId,
+                        cikarilanMetin: cikarilanText,
+                        islemeHatasi: ""
+                    }
                 },
                 { new: true }
             );
@@ -320,9 +420,7 @@ export const materyalMetinCikar = async (req, res) => {
             }
 
             // Başarılı taahhüt sonrası yeni materyali incremental olarak konu haritasına ekle
-            materyalEklendigindeIncrementalGuncelle(materyalId, materyal.dersId, kullaniciId).catch((hata) => {
-                console.error(`Tekil metin çıkarma sonrası incremental konu haritası tetikleme hatası (Ders ID: ${materyal.dersId}):`, hata.message);
-            });
+            await materyalEklendigindeIncrementalGuncelle(materyalId, materyal.dersId, kullaniciId);
 
             return res.status(200).json({ mesaj: "Metin başarıyla çıkarıldı.", materyal: guncellenen });
         } catch (err) {
@@ -342,6 +440,12 @@ export const materyalMetinCikar = async (req, res) => {
             return res.status(400).json({ hata: "Metin çıkarma başarısız oldu: " + err.message });
         }
     } catch (error) {
-        res.status(500).json({ hata: "Metin çıkarma isteği işlenirken hata oluştu: " + error.message });
+        return res.status(500).json({ hata: "Metin çıkarma isteği işlenirken hata oluştu: " + error.message });
+    } finally {
+        if (kilitliDersId) {
+            await materyalIslemiBitir(kilitliDersId, kullaniciId).catch(hata => {
+                console.error("Materyal işlem kilidi bırakılamadı:", hata);
+            });
+        }
     }
 };

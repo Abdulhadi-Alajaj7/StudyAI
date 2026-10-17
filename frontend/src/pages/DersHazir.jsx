@@ -10,7 +10,7 @@ function DersHazir() {
     const navigate = useNavigate();
     const location = useLocation();
     const { dersId } = useParams();
-    
+
     const [materyalSayisi, setMateryalSayisi] = useState(0);
     const [ders, setDers] = useState(location.state?.ders || null);
     const uiPrefs = location.state?.uiPrefs || { renk: "indigo", simge: "desktop", dersKodu: "" };
@@ -144,7 +144,7 @@ function DersHazir() {
     const cardBg = isDark ? "bg-[#162137] border-[#26334A]" : "bg-white border-[#E7E5EF]";
     const textPrimary = isDark ? "text-[#F8FAFC]" : "text-[#0F172A]";
     const textSecondary = isDark ? "text-[#A7B0C2]" : "text-[#64748B]";
-    
+
     const renkler = [
         { id: "indigo", bg: "bg-[#4F46E5]", text: "text-[#4F46E5]" },
         { id: "cyan", bg: "bg-[#06B6D4]", text: "text-[#06B6D4]" },
@@ -161,7 +161,7 @@ function DersHazir() {
         { id: "calc", icon: CalculatorIcon },
         { id: "science", icon: BeakerIcon }
     ];
-    
+
     const seciliRenk = renkler.find(r => r.id === uiPrefs.renk) || renkler[0];
     const SeciliSimge = simgeler.find(s => s.id === uiPrefs.simge)?.icon || ComputerDesktopIcon;
 
@@ -181,7 +181,7 @@ function DersHazir() {
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
                 {/* Sol Ana İçerik */}
                 <div className="lg:col-span-8 flex flex-col gap-6">
-                    
+
                     {/* Başarı Banner'ı */}
                     <div className={`p-6 rounded-2xl border ${isDark ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-emerald-50 border-emerald-200'} flex items-start gap-4`}>
                         <div className="w-12 h-12 rounded-full bg-emerald-500 flex items-center justify-center shrink-0">
@@ -263,11 +263,10 @@ function DersHazir() {
                                         <p className={`text-[12px] ${textSecondary}`}>Ana ve alt başlıklar</p>
                                     </div>
                                 </div>
-                                <div className={`px-2.5 py-1 rounded text-[11px] font-bold ${
-                                    konuHaritasi?.anaKonular?.length > 0 
-                                        ? "bg-[#4F46E5]/10 text-[#4F46E5]" 
+                                <div className={`px-2.5 py-1 rounded text-[11px] font-bold ${konuHaritasi?.anaKonular?.length > 0
+                                        ? "bg-[#4F46E5]/10 text-[#4F46E5]"
                                         : (isDark ? 'bg-[#1B2942] text-[#7F8AA3]' : 'bg-[#E2E8F0] text-[#64748B]')
-                                }`}>
+                                    }`}>
                                     {konuHaritasi?.anaKonular?.length > 0 ? `${konuHaritasi.anaKonular.length} Ana Konu` : "-- Konu"}
                                 </div>
                             </div>
@@ -321,7 +320,7 @@ function DersHazir() {
                     </div>
 
                     {/* Konu Haritası Bölümü */}
-                    <KonuHaritasiBolumu 
+                    <KonuHaritasiBolumu
                         dersId={dersId}
                         isDark={isDark}
                         konuHaritasi={konuHaritasi}
@@ -330,7 +329,7 @@ function DersHazir() {
                         hata={haritaHatasi}
                         guncelMi={guncelMi}
                         hazirMateryalSayisi={materyalSayisi}
-                        onOlustur={konuHaritasiOlustur}
+                        saltOkunur={true}
                     />
 
                     {/* Artık Neler Yapabilirsin? */}
@@ -380,13 +379,13 @@ function DersHazir() {
                     <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-6 border-t border-[#E7E5EF] dark:border-[#26334A]">
                         <p className={`text-[14px] ${textSecondary} hidden sm:block`}>Ders genel bakışına geçerek öğrenmeye başlayabilirsin.</p>
                         <div className="flex items-center gap-4 w-full sm:w-auto">
-                            <button 
+                            <button
                                 onClick={() => navigate("/panel/dersler")}
                                 className={`w-full sm:w-auto px-6 py-3 rounded-xl font-medium border ${isDark ? 'border-[#26334A] hover:bg-white/5 text-[#F8FAFC]' : 'border-[#E7E5EF] hover:bg-black/5 text-[#0F172A]'} transition-colors`}
                             >
                                 Derslerime Dön
                             </button>
-                            <button 
+                            <button
                                 disabled
                                 className={`w-full sm:w-auto flex items-center justify-center gap-2 px-8 py-3 rounded-xl font-medium transition-colors bg-[#4F46E5] text-white opacity-50 cursor-not-allowed`}
                             >
@@ -400,17 +399,17 @@ function DersHazir() {
                 {/* Sağ Alan - Önizleme ve İpuçları */}
                 <div className="lg:col-span-4 flex flex-col gap-6">
                     <div className="sticky top-28 space-y-6">
-                        
+
                         {/* Önizleme Kartı */}
                         <div>
                             <div className="mb-4">
                                 <h3 className={`text-[18px] font-bold ${textPrimary} flex items-center gap-2`}>
-                                    Önizleme 
+                                    Önizleme
                                     <span className="px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 text-[11px] font-bold tracking-wide uppercase">Canlı</span>
                                 </h3>
                                 <p className={`text-[13px] ${textSecondary} mt-1`}>Ders kartının Derslerim sayfasındaki görünümü</p>
                             </div>
-                            
+
                             <div className={`p-5 rounded-2xl border ${cardBg}`}>
                                 <div className="flex flex-col">
                                     <div className="flex items-start justify-between mb-4">
@@ -435,18 +434,18 @@ function DersHazir() {
                                             </div>
                                         </div>
                                     </div>
-                                    
+
                                     <p className={`text-[13px] line-clamp-2 ${textSecondary} mb-5 h-10`}>
                                         {ders?.aciklama || "Ders açıklaması burada görüntülenecek."}
                                     </p>
-                                    
+
                                     <div className={`flex items-center gap-2 px-3 py-2 rounded-lg border border-dashed mb-5 ${isDark ? 'border-[#26334A] bg-[#0B1120]' : 'border-[#E7E5EF] bg-[#F8F7FC]'}`}>
                                         <BookOpenIcon className={`w-4 h-4 ${textSecondary}`} />
                                         <span className={`text-[12px] font-medium ${textSecondary}`}>
                                             {materyalSayisi > 0 ? `${materyalSayisi} Materyal eklendi` : "Henüz materyal eklenmedi"}
                                         </span>
                                     </div>
-                                    
+
                                     <div className="mb-4">
                                         <div className="flex items-center justify-between text-[12px] font-medium mb-1.5">
                                             <span className={textSecondary}>Müfredat İlerlemesi</span>
@@ -454,7 +453,7 @@ function DersHazir() {
                                         </div>
                                         <div className={`w-full h-1.5 rounded-full ${isDark ? 'bg-[#26334A]' : 'bg-[#E7E5EF]'}`}></div>
                                     </div>
-                                    
+
                                     <button disabled className={`w-full py-2.5 rounded-xl text-[13px] font-medium border flex items-center justify-center gap-1.5 ${isDark ? 'border-[#26334A] text-[#7F8AA3] bg-[#0B1120]' : 'border-[#E7E5EF] text-[#94A3B8] bg-[#F8F7FC]'} opacity-70 cursor-not-allowed`}>
                                         Derse Git <ArrowRightIcon className="w-3.5 h-3.5" />
                                     </button>

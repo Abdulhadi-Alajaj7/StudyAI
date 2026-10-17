@@ -1,3 +1,4 @@
+
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
@@ -9,6 +10,10 @@ import Materyal from "./models/Materyal.js";
 import authRoutes from "./routes/authRoutes.js";
 import dersRoutes from "./routes/dersRoutes.js";
 import materyalRoutes from "./routes/materyalRoutes.js";
+
+import { geciciDersleriTemizle } from "./services/geciciDersTemizlemeService.js";
+import Ders from "./models/Ders.js";
+
 const app = express();
 
 // MongoDB bağlantısı ve sunucu yeniden başlatma kurtarması (Zombie Lock Recovery)
@@ -42,9 +47,29 @@ veritabaninaBaglan().then(async () => {
         if (kurtarilanHaritalar.modifiedCount > 0) {
             console.log(`Sunucu başlangıcı: ${kurtarilanHaritalar.modifiedCount} adet 'olusturuluyor' durumundaki konu haritası 'hata' olarak güncellendi.`);
         }
+
+        // Sunucu yeniden başlatıldığında yarıda kalan materyal işlem sayaçlarını sıfırla
+        const kurtarilanDersler = await Ders.updateMany(
+            { aktifMateryalIslemSayisi: { $gt: 0 } },
+            { $set: { aktifMateryalIslemSayisi: 0 } },
+            { timestamps: false }
+        );
+
+        if (kurtarilanDersler.modifiedCount > 0) {
+            console.log(
+                `Sunucu başlangıcı: ${kurtarilanDersler.modifiedCount} dersin yarıda kalan materyal işlem sayacı sıfırlandı.`
+            );
+        }
+
     } catch (hata) {
         console.error("Başlangıç kurtarma hatası:", hata.message);
     }
+
+    await geciciDersleriTemizle();
+
+    setInterval(() => {
+        void geciciDersleriTemizle();
+    }, 10 * 60 * 1000);
 });
 
 // Middleware

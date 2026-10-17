@@ -130,20 +130,52 @@ export const konuHaritasiniGetir = async (req, res) => {
  * POST /dersler/:id/konu-haritasi
  * Konu haritası üretimini başlatır veya var olan haritayı yeniden üretir.
  */
+
 export const konuHaritasiOlustur = async (req, res) => {
+    const dersId = req.params.id;
+    const kullaniciId = req.user._id;
+
+    let islemKaydedildi = false;
+
     try {
-        const dersId = req.params.id;
-        const kullaniciId = req.user._id;
-
         if (!mongoose.Types.ObjectId.isValid(dersId)) {
-            return res.status(400).json({ hata: "Geçersiz ders kimliği." });
+            return res.status(400).json({
+                hata: "Geçersiz ders kimliği."
+            });
         }
 
-        // 1. Ders varlığı ve yetki kontrolü
-        const ders = await Ders.findOne({ _id: dersId, kullaniciId });
+        // 1. İşlemi atomik olarak başlat.
+        // Ders onaylandıysa işlem başlatılamaz.
+        const ders = await Ders.findOneAndUpdate(
+            {
+                _id: dersId,
+                kullaniciId,
+                materyallerOnaylandi: { $ne: true }
+            },
+            {
+                $inc: { aktifMateryalIslemSayisi: 1 }
+            },
+            { new: true }
+        );
+
         if (!ders) {
-            return res.status(404).json({ hata: "Ders bulunamadı veya yetkiniz yok." });
+            const mevcutDers = await Ders.findOne({
+                _id: dersId,
+                kullaniciId
+            });
+
+            if (!mevcutDers) {
+                return res.status(404).json({
+                    hata: "Ders bulunamadı veya yetkiniz yok."
+                });
+            }
+
+            return res.status(409).json({
+                hata: "Bu dersin materyalleri onaylandığı için konu haritası yeniden oluşturulamaz."
+            });
         }
+
+        islemKaydedildi = true;
 
         // 2. Hazır materyal kontrolü
         const hazirMateryalSayisi = await Materyal.countDocuments({
@@ -162,13 +194,22 @@ export const konuHaritasiOlustur = async (req, res) => {
         // 3. Eşzamanlı istek kontrolü ve kilit tokenı
         const yeniIslemToken = new mongoose.Types.ObjectId();
 
-        // Atomik upsert / lock
-        let harita = await KonuHaritasi.findOne({ dersId, kullaniciId });
+        let harita = await KonuHaritasi.findOne({
+            dersId,
+            kullaniciId
+        });
 
         if (harita && harita.durum === "olusturuluyor") {
             const KILIT_ZAMAN_ASIMI_MS = 5 * 60 * 1000;
-            const sonGuncelleme = harita.updatedAt ? new Date(harita.updatedAt).getTime() : 0;
-            if (Date.now() - sonGuncelleme < KILIT_ZAMAN_ASIMI_MS) {
+
+            const sonGuncelleme = harita.updatedAt
+                ? new Date(harita.updatedAt).getTime()
+                : 0;
+
+            if (
+                Date.now() - sonGuncelleme <
+                KILIT_ZAMAN_ASIMI_MS
+            ) {
                 return res.status(409).json({
                     hata: "Bu ders için şu anda zaten bir konu haritası oluşturuluyor. Lütfen işlemin tamamlanmasını bekleyin."
                 });
@@ -185,8 +226,6 @@ export const konuHaritasiOlustur = async (req, res) => {
                     aktifIslemToken: yeniIslemToken
                 });
             } catch (error) {
-                // Aynı ders için iki eşzamanlı ilk oluşturma isteği
-                // geldiğinde unique index yalnızca bir kayda izin verir.
                 if (error.code === 11000) {
                     return res.status(409).json({
                         hata: "Bu ders için konu haritası oluşturma işlemi zaten başlatılmış. Lütfen mevcut işlemin tamamlanmasını bekleyin."
@@ -196,13 +235,24 @@ export const konuHaritasiOlustur = async (req, res) => {
                 throw error;
             }
         } else {
-            // Var olan harita üzerinde kilidi al (durum: olusturuluyor yap ama eski anaKonulari henüz silme!)
+            // Var olan harita üzerinde kilidi al.
+            // Eski anaKonular henüz silinmez.
             harita = await KonuHaritasi.findOneAndUpdate(
                 {
                     _id: harita._id,
                     $or: [
-                        { durum: { $ne: "olusturuluyor" } },
-                        { updatedAt: { $lt: new Date(Date.now() - 5 * 60 * 1000) } }
+                        {
+                            durum: {
+                                $ne: "olusturuluyor"
+                            }
+                        },
+                        {
+                            updatedAt: {
+                                $lt: new Date(
+                                    Date.now() - 5 * 60 * 1000
+                                )
+                            }
+                        }
                     ]
                 },
                 {
@@ -216,18 +266,31 @@ export const konuHaritasiOlustur = async (req, res) => {
             );
 
             if (!harita) {
-                return res.status(409).json({ hata: "Konu haritası şu anda zaten oluşturuluyor." });
+                return res.status(409).json({
+                    hata: "Konu haritası şu anda zaten oluşturuluyor."
+                });
             }
         }
 
         // 4. Gemini ile analiz ve harita üretimi
         try {
-            const tamamlananHarita = await konuHaritasiUretVeKaydet(ders, kullaniciId, yeniIslemToken);
+            const tamamlananHarita =
+                await konuHaritasiUretVeKaydet(
+                    ders,
+                    kullaniciId,
+                    yeniIslemToken
+                );
+
             if (!tamamlananHarita) {
-                // Analiz sırasında materyal değişti veya işlem iptal edildi
-                const guncel = await KonuHaritasi.findOne({ dersId, kullaniciId });
+                const guncel = await KonuHaritasi.findOne({
+                    dersId,
+                    kullaniciId
+                });
+
                 return res.status(409).json({
-                    hata: guncel?.olusturmaHatasi || "Materyaller işlem sırasında değiştiği için analiz tamamlanamadı.",
+                    hata:
+                        guncel?.olusturmaHatasi ||
+                        "Materyaller işlem sırasında değiştiği için analiz tamamlanamadı.",
                     durum: guncel?.durum || "hata",
                     harita: guncel
                 });
@@ -238,21 +301,42 @@ export const konuHaritasiOlustur = async (req, res) => {
                 durum: "hazir",
                 harita: tamamlananHarita
             });
+
         } catch (uretmeHatasi) {
-            // Hata detayını güvenli ve hassas bilgi içermeyen Türkçe hata mesajı olarak dön
-            let hataMesaji = uretmeHatasi.message || "Konu haritası üretilemedi.";
-            if (uretmeHatasi.kod === "EKSİK_API_KEY" || hataMesaji.includes("GEMINI_API_KEY")) {
-                hataMesaji = "Sistemde Gemini API anahtarı yapılandırılmamış. Lütfen yöneticiye başvurun.";
-            } else if (hataMesaji.includes("429") || hataMesaji.toLowerCase().includes("quota")) {
-                hataMesaji = "Gemini API istek kotası aşıldı. Lütfen birkaç dakika sonra tekrar deneyin.";
-            } else if (hataMesaji.includes("503") || hataMesaji.toLowerCase().includes("unavailable")) {
-                hataMesaji = "Gemini servisi şu anda geçici olarak kullanılamıyor. Lütfen daha sonra tekrar deneyin.";
-            } else if (hataMesaji.toLowerCase().includes("timeout")) {
-                hataMesaji = "Gemini analiz isteği zaman aşımına uğradı. Lütfen tekrar deneyin.";
+            let hataMesaji =
+                uretmeHatasi.message ||
+                "Konu haritası üretilemedi.";
+
+            if (
+                uretmeHatasi.kod === "EKSİK_API_KEY" ||
+                hataMesaji.includes("GEMINI_API_KEY")
+            ) {
+                hataMesaji =
+                    "Sistemde Gemini API anahtarı yapılandırılmamış. Lütfen yöneticiye başvurun.";
+            } else if (
+                hataMesaji.includes("429") ||
+                hataMesaji.toLowerCase().includes("quota")
+            ) {
+                hataMesaji =
+                    "Gemini API istek kotası aşıldı. Lütfen birkaç dakika sonra tekrar deneyin.";
+            } else if (
+                hataMesaji.includes("503") ||
+                hataMesaji.toLowerCase().includes("unavailable")
+            ) {
+                hataMesaji =
+                    "Gemini servisi şu anda geçici olarak kullanılamıyor. Lütfen daha sonra tekrar deneyin.";
+            } else if (
+                hataMesaji.toLowerCase().includes("timeout")
+            ) {
+                hataMesaji =
+                    "Gemini analiz isteği zaman aşımına uğradı. Lütfen tekrar deneyin.";
             }
 
-            // Mevcut harita durumunu sorgula (varsa önceki başarılı konuları da dönebilmek için)
-            const guncelHarita = await KonuHaritasi.findOne({ dersId, kullaniciId });
+            const guncelHarita =
+                await KonuHaritasi.findOne({
+                    dersId,
+                    kullaniciId
+                });
 
             return res.status(400).json({
                 hata: hataMesaji,
@@ -262,10 +346,44 @@ export const konuHaritasiOlustur = async (req, res) => {
         }
 
     } catch (error) {
-        console.error("Konu haritası oluşturma endpoint hatası:", error);
-        return res.status(500).json({ hata: "Konu haritası isteği işlenirken sunucu hatası oluştu: " + error.message });
+        console.error(
+            "Konu haritası oluşturma endpoint hatası:",
+            error
+        );
+
+        return res.status(500).json({
+            hata:
+                "Konu haritası isteği işlenirken sunucu hatası oluştu: " +
+                error.message
+        });
+
+    } finally {
+        // Başarılı, hatalı veya erken biten tüm işlemlerde
+        // sayaç güvenli şekilde azaltılır.
+        if (islemKaydedildi) {
+            try {
+                await Ders.findOneAndUpdate(
+                    {
+                        _id: dersId,
+                        kullaniciId,
+                        aktifMateryalIslemSayisi: { $gt: 0 }
+                    },
+                    {
+                        $inc: {
+                            aktifMateryalIslemSayisi: -1
+                        }
+                    }
+                );
+            } catch (sayacHatasi) {
+                console.error(
+                    "Konu haritası işlem sayacı azaltılamadı:",
+                    sayacHatasi
+                );
+            }
+        }
     }
 };
+
 
 /**
  * GET /dersler/gemini-durum

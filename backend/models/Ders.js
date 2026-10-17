@@ -1,3 +1,4 @@
+
 import mongoose from "mongoose";
 
 const dersSchema = new mongoose.Schema(
@@ -41,11 +42,31 @@ const dersSchema = new mongoose.Schema(
             type: String,
             default: "desktop",
         },
+
+        materyallerOnaylandi: {
+            type: Boolean,
+            default: false,
+        },
+
+        aktifMateryalIslemSayisi: {
+            type: Number,
+            default: 0,
+            min: 0,
+        },
+        temizleniyor: {
+            type: Boolean,
+            default: false,
+        },
     },
     {
         timestamps: true,
     }
 );
+
+dersSchema.index({
+    materyallerOnaylandi: 1,
+    updatedAt: 1
+});
 
 const Ders = mongoose.model("Ders", dersSchema);
 

@@ -1,16 +1,17 @@
+
 import React, { useState } from "react";
-import { 
-    SparklesIcon, 
-    ArrowPathIcon, 
-    ChevronDownIcon, 
-    ChevronRightIcon, 
-    ExclamationTriangleIcon, 
+import {
+    SparklesIcon,
+    ArrowPathIcon,
+    ChevronDownIcon,
+    ChevronRightIcon,
+    ExclamationTriangleIcon,
     BookOpenIcon
 } from "@heroicons/react/24/outline";
 
 /**
  * Ders Konu Haritası Bileşeni
- * 
+ *
  * Durumları destekler:
  * - Henüz harita oluşturulmadı
  * - Hazır materyal bulunmuyor
@@ -19,17 +20,21 @@ import {
  * - Harita oluşturma başarısız
  * - Daha önce oluşturulmuş harita mevcut
  * - Materyaller değiştiği için harita güncelliğini kaybetti
+ *
+ * saltOkunur:
+ * true olduğunda harita görüntülenir, oluşturma butonları gizlenir.
  */
-function KonuHaritasiBolumu({ 
-    dersId, 
-    isDark, 
-    konuHaritasi, 
-    yukleniyor, 
-    olusturuluyor, 
-    hata, 
-    guncelMi, 
-    hazirMateryalSayisi, 
-    onOlustur 
+function KonuHaritasiBolumu({
+    dersId,
+    isDark,
+    konuHaritasi,
+    yukleniyor,
+    olusturuluyor,
+    hata,
+    guncelMi,
+    hazirMateryalSayisi,
+    onOlustur,
+    saltOkunur = false
 }) {
     // Açık/kapalı ana konular state'i (tümü başlangıçta açık olsun)
     const [acikKonular, setAcikKonular] = useState({});
@@ -58,7 +63,7 @@ function KonuHaritasiBolumu({
                         <h3 className={`text-[18px] font-bold ${textPrimary}`}>Ders Konu Haritası</h3>
                         {konuHaritasi?.durum === "hazir" && (
                             <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold tracking-wide uppercase ${
-                                guncelMi 
+                                guncelMi
                                     ? (isDark ? "bg-emerald-500/20 text-emerald-400" : "bg-emerald-100 text-emerald-700")
                                     : (isDark ? "bg-amber-500/20 text-amber-400" : "bg-amber-100 text-amber-700")
                             }`}>
@@ -72,36 +77,38 @@ function KonuHaritasiBolumu({
                 </div>
 
                 {/* Butonlar */}
-                <div className="flex items-center gap-3">
-                    {hazirMateryalSayisi > 0 && (
-                        <button
-                            onClick={onOlustur}
-                            disabled={olusturuluyor || yukleniyor}
-                            className={`flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-medium text-[13px] transition-all shadow-sm ${
-                                olusturuluyor
-                                    ? "bg-[#4F46E5]/60 text-white cursor-wait"
-                                    : "bg-[#4F46E5] hover:bg-[#4338CA] text-white active:scale-95"
-                            }`}
-                        >
-                            {olusturuluyor ? (
-                                <>
-                                    <ArrowPathIcon className="w-4 h-4 animate-spin" />
-                                    <span>Yapay Zekâ Analiz Ediyor...</span>
-                                </>
-                            ) : anaKonular.length > 0 ? (
-                                <>
-                                    <ArrowPathIcon className="w-4 h-4" />
-                                    <span>{guncelMi ? "Yeniden Oluştur" : "Haritayı Güncelle"}</span>
-                                </>
-                            ) : (
-                                <>
-                                    <SparklesIcon className="w-4 h-4" />
-                                    <span>Konu Haritası Oluştur</span>
-                                </>
-                            )}
-                        </button>
-                    )}
-                </div>
+                {!saltOkunur && (
+                    <div className="flex items-center gap-3">
+                        {hazirMateryalSayisi > 0 && (
+                            <button
+                                onClick={onOlustur}
+                                disabled={olusturuluyor || yukleniyor}
+                                className={`flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-medium text-[13px] transition-all shadow-sm ${
+                                    olusturuluyor
+                                        ? "bg-[#4F46E5]/60 text-white cursor-wait"
+                                        : "bg-[#4F46E5] hover:bg-[#4338CA] text-white active:scale-95"
+                                }`}
+                            >
+                                {olusturuluyor ? (
+                                    <>
+                                        <ArrowPathIcon className="w-4 h-4 animate-spin" />
+                                        <span>Yapay Zekâ Analiz Ediyor...</span>
+                                    </>
+                                ) : anaKonular.length > 0 ? (
+                                    <>
+                                        <ArrowPathIcon className="w-4 h-4" />
+                                        <span>{guncelMi ? "Yeniden Oluştur" : "Haritayı Güncelle"}</span>
+                                    </>
+                                ) : (
+                                    <>
+                                        <SparklesIcon className="w-4 h-4" />
+                                        <span>Konu Haritası Oluştur</span>
+                                    </>
+                                )}
+                            </button>
+                        )}
+                    </div>
+                )}
             </div>
 
             {/* Güncellik Uyarısı (Materyaller değiştiyse) */}
@@ -113,7 +120,9 @@ function KonuHaritasiBolumu({
                     <div className="text-[13px]">
                         <p className="font-bold">Yeni veya değişen materyal tespit edildi!</p>
                         <p className="opacity-90 mt-0.5">
-                            Dersteki hazır materyaller veya sürümler değiştiği için bu konu haritası güncelliğini kaybetmiş olabilir. Yukarıdaki "Haritayı Güncelle" butonuyla yeni haritayı oluşturabilirsiniz.
+                            {saltOkunur
+                                ? "Dersin konu haritası güncel görünmüyor. Onaylanmış dersin konu haritası bu ekrandan yeniden oluşturulamaz."
+                                : 'Dersteki hazır materyaller veya sürümler değiştiği için bu konu haritası güncelliğini kaybetmiş olabilir. Yukarıdaki "Haritayı Güncelle" butonuyla yeni haritayı oluşturabilirsiniz.'}
                         </p>
                     </div>
                 </div>
@@ -172,15 +181,19 @@ function KonuHaritasiBolumu({
                     </div>
                     <h4 className={`text-[15px] font-bold ${textPrimary} mb-1`}>Henüz Konu Haritası Oluşturulmadı</h4>
                     <p className={`text-[13px] ${textSecondary} max-w-md mb-4`}>
-                        {hazirMateryalSayisi} adet hazır materyaliniz mevcut. Yapay zekâ destekli konu hiyerarşisini çıkarmak için oluşturma işlemini başlatabilirsiniz.
+                        {saltOkunur
+                            ? "Bu ders için görüntülenebilecek bir konu haritası bulunmuyor."
+                            : `${hazirMateryalSayisi} adet hazır materyaliniz mevcut. Yapay zekâ destekli konu hiyerarşisini çıkarmak için oluşturma işlemini başlatabilirsiniz.`}
                     </p>
-                    <button
-                        onClick={onOlustur}
-                        className="flex items-center gap-2 px-5 py-2.5 rounded-xl font-medium text-[13px] bg-[#4F46E5] hover:bg-[#4338CA] text-white transition-all shadow-sm active:scale-95"
-                    >
-                        <SparklesIcon className="w-4 h-4" />
-                        Konu Haritası Oluştur
-                    </button>
+                    {!saltOkunur && (
+                        <button
+                            onClick={onOlustur}
+                            className="flex items-center gap-2 px-5 py-2.5 rounded-xl font-medium text-[13px] bg-[#4F46E5] hover:bg-[#4338CA] text-white transition-all shadow-sm active:scale-95"
+                        >
+                            <SparklesIcon className="w-4 h-4" />
+                            Konu Haritası Oluştur
+                        </button>
+                    )}
                 </div>
             ) : (
                 /* BAŞARILI KONU LİSTESİ */
@@ -191,22 +204,22 @@ function KonuHaritasiBolumu({
                         </span>
                         {konuHaritasi?.sonOlusturmaTarihi && (
                             <span className={`${textSecondary}`}>
-                                Son analiz: {new Date(konuHaritasi.sonOlusturmaTarihi).toLocaleDateString("tr-TR", { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                                Son analiz: {new Date(konuHaritasi.sonOlusturmaTarihi).toLocaleDateString("tr-TR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
                             </span>
                         )}
                     </div>
 
                     {anaKonular.map((ana, index) => {
-                        const isAcik = acikKonular[ana.konuId] !== false; // Varsayılan açık
+                        const isAcik = acikKonular[ana.konuId] !== false;
                         const altSayisi = ana.altKonular?.length || 0;
 
                         return (
-                            <div 
-                                key={ana.konuId || index} 
+                            <div
+                                key={ana.konuId || index}
                                 className={`rounded-xl border overflow-hidden transition-all ${itemBg}`}
                             >
                                 {/* Ana Konu Başlığı */}
-                                <div 
+                                <div
                                     onClick={() => toggleKonu(ana.konuId)}
                                     className="p-4 flex items-center justify-between cursor-pointer hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
                                 >
@@ -246,7 +259,7 @@ function KonuHaritasiBolumu({
                                         isDark ? "border-[#26334A]/60 bg-[#0B1120]/40" : "border-[#E7E5EF]/60 bg-white"
                                     }`}>
                                         {ana.altKonular.map((alt, sIndex) => (
-                                            <div 
+                                            <div
                                                 key={alt.konuId || sIndex}
                                                 className={`p-2.5 rounded-lg border flex items-start gap-2.5 transition-colors ${
                                                     isDark ? "bg-[#162137]/60 border-[#26334A]/80" : "bg-[#F8F7FC] border-[#E7E5EF]"
