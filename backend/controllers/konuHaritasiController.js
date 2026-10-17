@@ -7,6 +7,10 @@ import {
     konuHaritasiGuncellikKontrolu
 } from "../services/konuHaritasiService.js";
 import { geminiBaglantisiniDogrula, VARSAYILAN_GEMINI_MODELI } from "../services/geminiService.js";
+import {
+    konuHaritasiKilidiAktifMi,
+    konuHaritasiKilitAlmaKosulu
+} from "../services/konuHaritasiKilitService.js";
 
 /**
  * GET /dersler/:id/konu-haritasi
@@ -150,7 +154,8 @@ export const konuHaritasiOlustur = async (req, res) => {
             {
                 _id: dersId,
                 kullaniciId,
-                materyallerOnaylandi: { $ne: true }
+                materyallerOnaylandi: { $ne: true },
+                temizleniyor: { $ne: true }
             },
             {
                 $inc: { aktifMateryalIslemSayisi: 1 }
@@ -171,7 +176,9 @@ export const konuHaritasiOlustur = async (req, res) => {
             }
 
             return res.status(409).json({
-                hata: "Bu dersin materyalleri onaylandığı için konu haritası yeniden oluşturulamaz."
+                hata: mevcutDers.temizleniyor
+                    ? "Bu ders temizlendiği için konu haritası oluşturulamaz."
+                    : "Bu dersin materyalleri onaylandığı için konu haritası yeniden oluşturulamaz."
             });
         }
 
@@ -193,6 +200,7 @@ export const konuHaritasiOlustur = async (req, res) => {
 
         // 3. Eşzamanlı istek kontrolü ve kilit tokenı
         const yeniIslemToken = new mongoose.Types.ObjectId();
+        const kilitBaslangici = new Date();
 
         let harita = await KonuHaritasi.findOne({
             dersId,
@@ -200,16 +208,7 @@ export const konuHaritasiOlustur = async (req, res) => {
         });
 
         if (harita && harita.durum === "olusturuluyor") {
-            const KILIT_ZAMAN_ASIMI_MS = 5 * 60 * 1000;
-
-            const sonGuncelleme = harita.updatedAt
-                ? new Date(harita.updatedAt).getTime()
-                : 0;
-
-            if (
-                Date.now() - sonGuncelleme <
-                KILIT_ZAMAN_ASIMI_MS
-            ) {
+            if (konuHaritasiKilidiAktifMi(harita)) {
                 return res.status(409).json({
                     hata: "Bu ders için şu anda zaten bir konu haritası oluşturuluyor. Lütfen işlemin tamamlanmasını bekleyin."
                 });
@@ -223,7 +222,9 @@ export const konuHaritasiOlustur = async (req, res) => {
                     kullaniciId,
                     durum: "olusturuluyor",
                     olusturmaHatasi: "",
-                    aktifIslemToken: yeniIslemToken
+                    aktifIslemToken: yeniIslemToken,
+                    kilitSonYenilemeTarihi: kilitBaslangici,
+                    degisikliklereKilitli: false
                 });
             } catch (error) {
                 if (error.code === 11000) {
@@ -240,27 +241,16 @@ export const konuHaritasiOlustur = async (req, res) => {
             harita = await KonuHaritasi.findOneAndUpdate(
                 {
                     _id: harita._id,
-                    $or: [
-                        {
-                            durum: {
-                                $ne: "olusturuluyor"
-                            }
-                        },
-                        {
-                            updatedAt: {
-                                $lt: new Date(
-                                    Date.now() - 5 * 60 * 1000
-                                )
-                            }
-                        }
-                    ]
+                    degisikliklereKilitli: { $ne: true },
+                    ...konuHaritasiKilitAlmaKosulu()
                 },
                 {
                     $set: {
                         durum: "olusturuluyor",
                         olusturmaHatasi: "",
                         aktifIslemToken: yeniIslemToken
-                    }
+                    },
+                    $currentDate: { kilitSonYenilemeTarihi: true }
                 },
                 { new: true }
             );
@@ -338,7 +328,11 @@ export const konuHaritasiOlustur = async (req, res) => {
                     kullaniciId
                 });
 
-            return res.status(400).json({
+            return res.status(
+                uretmeHatasi.kod === "KONU_HARITASI_KILIDI_KAYBEDILDI"
+                    ? 409
+                    : 400
+            ).json({
                 hata: hataMesaji,
                 durum: guncelHarita?.durum || "hata",
                 harita: guncelHarita

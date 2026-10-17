@@ -140,24 +140,6 @@ export const metniParcalaraAyir = (
         }
 
         baslangic = yeniBaslangic;
-
-        // Kelime ortasından başlamamaya çalış.
-        // Ancak ileri giderek metin kaybına neden olma.
-        if (yeniBaslangic > baslangic + 1) {
-            while (
-                yeniBaslangic > baslangic + 1 &&
-                !/\s/.test(metin[yeniBaslangic - 1])
-            ) {
-                yeniBaslangic--;
-            }
-        }
-
-        // Yeni başlangıç, bitişten önce olmalı.
-        if (yeniBaslangic >= bitis) {
-            yeniBaslangic = bitis;
-        }
-
-        baslangic = yeniBaslangic;
     }
 
     return parcalar;

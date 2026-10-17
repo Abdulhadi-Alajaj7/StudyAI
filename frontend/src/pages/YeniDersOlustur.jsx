@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { useOutletContext, useNavigate } from "react-router-dom";
-import axios from "axios";
+import api from "../api";
 import DersOlusturmaAdimlari from "../components/DersOlusturmaAdimlari";
 import { ArrowRightIcon, Bars3BottomLeftIcon, BookOpenIcon, ComputerDesktopIcon, CodeBracketIcon, CircleStackIcon, CalculatorIcon, BeakerIcon } from "@heroicons/react/24/outline";
 import DersKarti from "../components/DersKarti";
@@ -59,7 +59,7 @@ function YeniDersOlustur() {
                 simge: form.simge
             };
             
-            const res = await axios.post("http://localhost:5000/dersler", payload, { withCredentials: true });
+            const res = await api.post("/dersler", payload, { withCredentials: true });
             const yeniDers = res.data.ders;
             
             // Seçilen renk ve simge (frontend state) de sonraki sayfaya aktarılabilir

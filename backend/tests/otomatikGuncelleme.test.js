@@ -74,6 +74,13 @@ mock.module("../models/KonuHaritasi.js", {
             // konuHaritasiUretVeKaydet içindeki kilit doğrulama çağrısı
             if (sorgu && sorgu.aktifIslemToken) {
                 if (haritaDurum === "olusturuluyor") {
+                    if (
+                        haritaAktifIslemToken &&
+                        String(haritaAktifIslemToken) !== String(sorgu.aktifIslemToken)
+                    ) {
+                        return null;
+                    }
+                    haritaAktifIslemToken = sorgu.aktifIslemToken;
                     return {
                         _id: new mongoose.Types.ObjectId(),
                         dersId,
@@ -120,6 +127,18 @@ mock.module("../models/KonuHaritasi.js", {
                 sonOlusturmaTarihi: new Date()
             };
         },
+        updateOne: async (filtre, guncelleme) => {
+            if (
+                haritaDurum !== "olusturuluyor" ||
+                String(filtre.aktifIslemToken) !== String(haritaAktifIslemToken)
+            ) {
+                return { matchedCount: 0 };
+            }
+            if (guncelleme.$set?.kilitSonYenilemeTarihi) {
+                return { matchedCount: 1 };
+            }
+            return { matchedCount: 1 };
+        },
         findOneAndUpdate: async (_filtre, guncelleme) => {
             findOneAndUpdateCalls++;
             sonGuncellemeSet = guncelleme.$set;
@@ -148,6 +167,25 @@ mock.module("../models/KonuHaritasi.js", {
 mock.module("../models/Ders.js", {
     namedExports: {},
     defaultExport: {
+        findOne: async () => ({
+            _id: dersId,
+            kullaniciId,
+            dersAdi: "Veri Yapıları",
+            aciklama: "Test dersi",
+            donem: "Güz 2024",
+            materyallerOnaylandi: false,
+            temizleniyor: false
+        }),
+        findOneAndUpdate: async () => ({
+            _id: dersId,
+            kullaniciId,
+            dersAdi: "Veri Yapıları",
+            aciklama: "Test dersi",
+            donem: "Güz 2024",
+            materyallerOnaylandi: false,
+            temizleniyor: false,
+            aktifMateryalIslemSayisi: 1
+        }),
         findById: async () => ({
             _id: dersId,
             dersAdi: "Veri Yapıları",

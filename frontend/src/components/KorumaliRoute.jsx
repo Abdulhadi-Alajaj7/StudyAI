@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Navigate, Outlet } from "react-router-dom";
-import axios from "axios";
+import api from "../api";
 
 function KorumaliRoute() {
     const [dogrulaniyor, setDogrulaniyor] = useState(true);
@@ -9,8 +9,8 @@ function KorumaliRoute() {
     useEffect(() => {
         const oturumuKontrolEt = async () => {
             try {
-                await axios.get(
-                    "http://localhost:5000/auth/profil",
+                await api.get(
+                    "/auth/profil",
                     {
                         withCredentials: true,
                     }

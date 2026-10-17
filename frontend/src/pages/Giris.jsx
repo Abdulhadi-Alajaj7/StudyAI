@@ -12,7 +12,7 @@ import {
     ChartBarIcon,
 } from "@heroicons/react/24/outline";
 
-import axios from "axios";
+import api from "../api";
 
 function Giris() {
     const navigate = useNavigate();
@@ -43,8 +43,8 @@ function Giris() {
         try {
             setYukleniyor(true);
 
-            await axios.post(
-                "http://localhost:5000/auth/giris",
+            await api.post(
+                "/auth/giris",
                 {
                     email: formData.email,
                     sifre: formData.sifre,

@@ -254,7 +254,11 @@ export const materyalleriOnayla = async (req, res) => {
         kullaniciId,
       }).session(session);
 
-      if (!konuHaritasi || konuHaritasi.durum !== "hazir") {
+      if (
+        !konuHaritasi ||
+        konuHaritasi.durum !== "hazir" ||
+        konuHaritasi.aktifIslemToken != null
+      ) {
         const hata = new Error("Konu haritası henüz hazır değil.");
         hata.status = 409;
         throw hata;
@@ -286,6 +290,33 @@ export const materyalleriOnayla = async (req, res) => {
       if (!kaynaklarGuncel) {
         const hata = new Error(
           "Konu haritası güncel değil. Lütfen analizin tamamlanmasını bekleyin."
+        );
+        hata.status = 409;
+        throw hata;
+      }
+
+      const kilitlenenHarita = await KonuHaritasi.findOneAndUpdate(
+        {
+          _id: konuHaritasi._id,
+          dersId,
+          kullaniciId,
+          durum: "hazir",
+          aktifIslemToken: null,
+          degisikliklereKilitli: { $ne: true },
+          updatedAt: konuHaritasi.updatedAt,
+        },
+        {
+          $set: {
+            degisikliklereKilitli: true,
+            kilitSonYenilemeTarihi: null,
+          },
+        },
+        { new: true, session }
+      );
+
+      if (!kilitlenenHarita) {
+        const hata = new Error(
+          "Konu haritası onay sırasında değişti. Lütfen tekrar deneyin."
         );
         hata.status = 409;
         throw hata;
@@ -345,39 +376,105 @@ export const materyalleriOnayla = async (req, res) => {
    Ders Sil
 ========================= */
 export const dersSil = async (req, res) => {
-  try {
-    const ders = await Ders.findOne({
-      _id: req.params.id,
-      kullaniciId: req.user._id,
-      temizleniyor: { $ne: true },
-    });
+  let kilitliDers = null;
+  let kaliciTemizlikBasladi = false;
+  const temizlikIslemToken = new mongoose.Types.ObjectId();
 
-    if (!ders) {
-      return res.status(404).json({
-        hata: "Ders bulunamadı veya temizleniyor.",
+  try {
+    kilitliDers = await Ders.findOneAndUpdate(
+      {
+        _id: req.params.id,
+        kullaniciId: req.user._id,
+        temizleniyor: { $ne: true },
+        aktifMateryalIslemSayisi: 0,
+      },
+      {
+        $set: {
+          temizleniyor: true,
+          temizlikIslemToken,
+        },
+        $currentDate: { temizlikKilitSonYenilemeTarihi: true },
+      },
+      { new: true }
+    );
+
+    if (!kilitliDers) {
+      const mevcutDers = await Ders.findOne({
+        _id: req.params.id,
+        kullaniciId: req.user._id,
+      }).select("temizleniyor aktifMateryalIslemSayisi");
+
+      if (!mevcutDers) {
+        return res.status(404).json({
+          hata: "Ders bulunamadı veya yetkiniz yok.",
+        });
+      }
+
+      return res.status(409).json({
+        hata: mevcutDers.temizleniyor
+          ? "Ders silme işlemi zaten devam ediyor."
+          : "Aktif materyal işlemleri tamamlanmadan ders silinemez.",
       });
     }
 
+    const temizlikLeaseYenile = async () => {
+      const sonuc = await Ders.updateOne(
+        {
+          _id: kilitliDers._id,
+          kullaniciId: req.user._id,
+          temizleniyor: true,
+          temizlikIslemToken,
+          aktifMateryalIslemSayisi: 0,
+        },
+        {
+          $currentDate: { temizlikKilitSonYenilemeTarihi: true },
+        },
+        { timestamps: false }
+      );
+
+      if ((sonuc.matchedCount ?? sonuc.modifiedCount ?? 0) !== 1) {
+        throw new Error("Ders silme işlem sahipliği kaybedildi.");
+      }
+    };
+
     const materyaller = await Materyal.find({
-      dersId: ders._id,
+      dersId: kilitliDers._id,
     }).select("_id dosyaYolu");
 
+    await temizlikLeaseYenile();
+    kaliciTemizlikBasladi = true;
+
     await Materyal.updateMany(
-      { dersId: ders._id },
+      { dersId: kilitliDers._id },
       { $set: { durum: "siliniyor" } }
     );
 
-    await Promise.all([
-      MetinParcasi.deleteMany({ dersId: ders._id }),
-      KonuHaritasi.deleteMany({ dersId: ders._id }),
-      Materyal.deleteMany({ dersId: ders._id }),
-    ]);
+    await temizlikLeaseYenile();
 
+    // Dosyaları kayıtlarından önce sil; hata olursa yollar mevcut kalır ve
+    // geçici ders temizleyicisi temizleniyor kilidini devralıp tekrar deneyebilir.
     for (const mat of materyaller) {
+      await temizlikLeaseYenile();
       guvenliDosyaSil(mat.dosyaYolu);
     }
 
-    await ders.deleteOne();
+    await temizlikLeaseYenile();
+
+    await Promise.all([
+      MetinParcasi.deleteMany({ dersId: kilitliDers._id }),
+      KonuHaritasi.deleteMany({ dersId: kilitliDers._id }),
+      Materyal.deleteMany({ dersId: kilitliDers._id }),
+    ]);
+
+    await temizlikLeaseYenile();
+
+    await Ders.deleteOne({
+      _id: kilitliDers._id,
+      kullaniciId: req.user._id,
+      temizleniyor: true,
+      temizlikIslemToken,
+      aktifMateryalIslemSayisi: 0,
+    });
 
     return res.status(200).json({
       basarili: true,
@@ -385,6 +482,29 @@ export const dersSil = async (req, res) => {
     });
   } catch (hata) {
     console.error("Ders silme hatası:", hata);
+
+    if (kilitliDers && !kaliciTemizlikBasladi) {
+      try {
+        await Ders.updateOne(
+          {
+            _id: kilitliDers._id,
+            kullaniciId: req.user._id,
+            temizleniyor: true,
+            temizlikIslemToken,
+            aktifMateryalIslemSayisi: 0,
+          },
+          {
+            $set: {
+              temizleniyor: false,
+              temizlikIslemToken: null,
+              temizlikKilitSonYenilemeTarihi: null,
+            },
+          }
+        );
+      } catch (kilitHatasi) {
+        console.error("Ders silme kilidi bırakılamadı:", kilitHatasi);
+      }
+    }
 
     return res.status(500).json({
       hata: hata.message,

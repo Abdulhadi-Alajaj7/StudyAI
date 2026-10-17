@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useOutletContext, useNavigate, useLocation, useParams } from "react-router-dom";
-import axios from "axios";
+import api from "../api";
 import DersOlusturmaAdimlari from "../components/DersOlusturmaAdimlari";
 import KonuHaritasiBolumu from "../components/KonuHaritasiBolumu";
 import { CheckBadgeIcon, ArrowRightIcon, BookOpenIcon, DocumentTextIcon, CheckIcon, CpuChipIcon, ListBulletIcon, ChatBubbleBottomCenterTextIcon, PuzzlePieceIcon, SparklesIcon, ComputerDesktopIcon, CodeBracketIcon, CircleStackIcon, CalculatorIcon, BeakerIcon } from "@heroicons/react/24/outline";
@@ -28,7 +28,7 @@ function DersHazir() {
     const konuHaritasiniGetir = async () => {
         setHaritaYukleniyor(true);
         try {
-            const res = await axios.get(`http://localhost:5000/dersler/${dersId}/konu-haritasi`, { withCredentials: true });
+            const res = await api.get(`/dersler/${dersId}/konu-haritasi`, { withCredentials: true });
             setKonuHaritasi(res.data.harita);
             setGuncelMi(res.data.guncelMi);
             setHaritaHatasi(res.data.olusturmaHatasi || "");
@@ -46,7 +46,7 @@ function DersHazir() {
         setHaritaOlusturuluyor(true);
         setHaritaHatasi("");
         try {
-            const res = await axios.post(`http://localhost:5000/dersler/${dersId}/konu-haritasi`, {}, { withCredentials: true });
+            const res = await api.post(`/dersler/${dersId}/konu-haritasi`, {}, { withCredentials: true });
             setKonuHaritasi(res.data.harita);
             setGuncelMi(true);
         } catch (err) {
@@ -60,7 +60,7 @@ function DersHazir() {
     useEffect(() => {
         const materyalleriGetir = async () => {
             try {
-                const res = await axios.get(`http://localhost:5000/materyaller/ders/${dersId}`, { withCredentials: true });
+                const res = await api.get(`/materyaller/ders/${dersId}`, { withCredentials: true });
                 setMateryalSayisi(res.data.materyaller?.filter(m => m.durum === 'hazir').length || 0);
             } catch (err) {
                 console.error("Materyaller alınamadı", err);
@@ -68,7 +68,7 @@ function DersHazir() {
         };
         const dersGetir = async () => {
             try {
-                const res = await axios.get(`http://localhost:5000/dersler/${dersId}`, { withCredentials: true });
+                const res = await api.get(`/dersler/${dersId}`, { withCredentials: true });
                 if (res.data.ders) {
                     setDers(res.data.ders);
                 }
@@ -111,8 +111,8 @@ function DersHazir() {
 
             try {
                 const [haritaRes, matRes] = await Promise.all([
-                    axios.get(`http://localhost:5000/dersler/${dersId}/konu-haritasi`, { withCredentials: true }),
-                    axios.get(`http://localhost:5000/materyaller/ders/${dersId}`, { withCredentials: true }).catch(() => null)
+                    api.get(`/dersler/${dersId}/konu-haritasi`, { withCredentials: true }),
+                    api.get(`/materyaller/ders/${dersId}`, { withCredentials: true }).catch(() => null)
                 ]);
 
                 if (!isMounted) return;

@@ -131,6 +131,16 @@ const konuHaritasiSchema = new mongoose.Schema(
             type: mongoose.Schema.Types.ObjectId,
             default: null,
         },
+        // Uzun süren analizlerde aktif işlem lease'inin son yenilenme zamanı.
+        kilitSonYenilemeTarihi: {
+            type: Date,
+            default: null,
+        },
+        // Materyaller kesin olarak onaylandıktan sonra harita değiştirilemez.
+        degisikliklereKilitli: {
+            type: Boolean,
+            default: false,
+        },
     },
     {
         timestamps: true,

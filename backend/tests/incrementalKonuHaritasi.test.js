@@ -67,6 +67,8 @@ function haritaObjesi(dId = dersId1) {
         gecmisKonular: mockGecmisKonular,
         kaynakMateryaller: mockKaynakMateryaller,
         aktifIslemToken: null,
+        degisikliklereKilitli: false,
+        updatedAt: new Date("2026-01-01T00:00:00.000Z"),
         toObject() { return this; }
     };
 }
@@ -193,6 +195,23 @@ mock.module("../models/KonuHaritasi.js", {
 
 mock.module("../models/Ders.js", {
     defaultExport: {
+        findOne: () => {
+            const ders = {
+                _id: dersId1,
+                kullaniciId,
+                dersAdi: "Veri Yapıları",
+                aciklama: "Test dersi",
+                donem: "Güz 2024",
+                materyallerOnaylandi: false,
+                temizleniyor: false
+            };
+
+            return {
+                select: () => Promise.resolve(ders),
+                then: (resolve, reject) =>
+                    Promise.resolve(ders).then(resolve, reject)
+            };
+        },
         findById: async () => ({
             _id: dersId1,
             dersAdi: "Veri Yapıları",

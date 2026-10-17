@@ -57,6 +57,14 @@ const dersSchema = new mongoose.Schema(
             type: Boolean,
             default: false,
         },
+        temizlikIslemToken: {
+            type: mongoose.Schema.Types.ObjectId,
+            default: null,
+        },
+        temizlikKilitSonYenilemeTarihi: {
+            type: Date,
+            default: null,
+        },
     },
     {
         timestamps: true,

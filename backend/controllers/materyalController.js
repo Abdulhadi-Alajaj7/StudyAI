@@ -15,6 +15,7 @@ import mongoose from "mongoose";
 
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
+import { dosyaIceriginiDogrula } from "../services/dosyaTuruDogrulamaService.js";
 
 /**
  * Ders onayıyla yarışmayan atomik materyal işlem kaydı.
@@ -167,14 +168,10 @@ export const materyalYukle = async (req, res) => {
 
         const yuklenenMateryaller = [];
         const tekrarEdenDosyalar = [];
+        const dogrulananDosyalar = [];
 
         for (const file of req.files) {
             const dosyaIcerigi = await fs.readFile(file.path);
-
-            const dosyaHash = crypto
-                .createHash("sha256")
-                .update(dosyaIcerigi)
-                .digest("hex");
 
             const ext = path.extname(file.originalname).substring(1).toLowerCase();
             const dosyaTuru =
@@ -182,6 +179,21 @@ export const materyalYukle = async (req, res) => {
                     ext === "pptx" ? "pptx" :
                         ext === "txt" ? "txt" : "pdf";
 
+            // Uzantı/MIME filtresine ek olarak, diske yazılmış gerçek içeriği
+            // kalıcı Materyal kaydı oluşturmadan önce doğrula.
+            dosyaIceriginiDogrula(dosyaIcerigi, dosyaTuru);
+
+            const dosyaHash = crypto
+                .createHash("sha256")
+                .update(dosyaIcerigi)
+                .digest("hex");
+
+            dogrulananDosyalar.push({ file, dosyaTuru, dosyaHash });
+        }
+
+        // Toplu yüklemede tek bir geçersiz dosya varsa hiçbir kalıcı kayıt
+        // oluşturmamak için veritabanı yazılarına ancak tüm doğrulamalar geçince başla.
+        for (const { file, dosyaTuru, dosyaHash } of dogrulananDosyalar) {
             try {
                 const yeniMateryal = await Materyal.create({
                     kullaniciId,
@@ -238,11 +250,19 @@ export const materyalYukle = async (req, res) => {
                 console.error("Materyal kayıt temizleme hatası:", temizlemeHatasi);
             }
         }
-        return res.status(500).json({ hata: error.message || "Materyal yüklenirken bir hata oluştu." });
+        return res.status(error.statusCode === 400 ? 400 : 500).json({
+            hata: error.message || "Materyal yüklenirken bir hata oluştu."
+        });
     } finally {
         if (!arkaPlanaDevredildi) {
             if (req.files) {
-                req.files.forEach(file => guvenliDosyaSil(file.path));
+                for (const file of req.files) {
+                    try {
+                        guvenliDosyaSil(file.path);
+                    } catch (temizlemeHatasi) {
+                        console.error(`Geçici dosya temizlenemedi (${file.path}):`, temizlemeHatasi);
+                    }
+                }
             }
             if (islemKaydedildi) {
                 await materyalIslemiBitir(dersId, kullaniciId).catch(hata => {
@@ -419,8 +439,15 @@ export const materyalMetinCikar = async (req, res) => {
                 // Taahhüt edilmiş aktif versiyonu BOZMA; catch bloğuna düşüp aktif parçaları silmesini engelle!
             }
 
-            // Başarılı taahhüt sonrası yeni materyali incremental olarak konu haritasına ekle
-            await materyalEklendigindeIncrementalGuncelle(materyalId, materyal.dersId, kullaniciId);
+            // Başarılı taahhüt sonrası konu haritası hatası aktif metin sürümünü bozmamalı.
+            try {
+                await materyalEklendigindeIncrementalGuncelle(materyalId, materyal.dersId, kullaniciId);
+            } catch (konuHaritasiHatasi) {
+                console.error(
+                    `Incremental konu haritası güncelleme hatası (Materyal ID: ${materyalId}):`,
+                    konuHaritasiHatasi.message
+                );
+            }
 
             return res.status(200).json({ mesaj: "Metin başarıyla çıkarıldı.", materyal: guncellenen });
         } catch (err) {
@@ -431,7 +458,7 @@ export const materyalMetinCikar = async (req, res) => {
                 { _id: materyalId, islemeId: yeniIslemeId, durum: "isleniyor" },
                 {
                     $set: {
-                        durum: "hata",
+                        durum: mevcutMateryal.aktifIslemeId ? "hazir" : "hata",
                         islemeHatasi: err.message
                     }
                 }

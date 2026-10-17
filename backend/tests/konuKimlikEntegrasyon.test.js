@@ -59,11 +59,28 @@ mock.module("../models/MetinParcasi.js", {
     }
 });
 
+mock.module("../models/Ders.js", {
+    defaultExport: {
+        async findOne() {
+            return {
+                _id: "ders-1",
+                kullaniciId: "kullanici-1",
+                materyallerOnaylandi: false,
+                temizleniyor: false
+            };
+        }
+    }
+});
+
 mock.module("../models/KonuHaritasi.js", {
     namedExports: {},
     defaultExport: {
         async findOne() {
             return eskiHarita;
+        },
+
+        async updateOne() {
+            return { matchedCount: 1 };
         },
 
         async findOneAndUpdate(filtre, guncelleme) {

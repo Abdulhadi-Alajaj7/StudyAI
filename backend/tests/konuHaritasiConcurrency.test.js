@@ -13,7 +13,19 @@ let geminiCalls = 0;
 mock.module("../models/Ders.js", {
     namedExports: {},
     defaultExport: {
-        findOne: async () => ({ _id: dersId, kullaniciId })
+        findOne: async () => ({
+            _id: dersId,
+            kullaniciId,
+            materyallerOnaylandi: false,
+            temizleniyor: false
+        }),
+        findOneAndUpdate: async () => ({
+            _id: dersId,
+            kullaniciId,
+            materyallerOnaylandi: false,
+            temizleniyor: false,
+            aktifMateryalIslemSayisi: 1
+        })
     }
 });
 

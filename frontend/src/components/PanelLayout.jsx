@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
-import axios from "axios";
+import api from "../api";
 
 import {
     AcademicCapIcon,
@@ -49,7 +49,7 @@ function PanelLayout() {
     useEffect(() => {
         const profilGetir = async () => {
             try {
-                const res = await axios.get("http://localhost:5000/auth/profil", {
+                const res = await api.get("/auth/profil", {
                     withCredentials: true,
                 });
                 setKullanici(res.data.kullanici || res.data);
@@ -74,8 +74,8 @@ function PanelLayout() {
 
     const cikisYap = async () => {
         try {
-            await axios.post(
-                "http://localhost:5000/auth/cikis",
+            await api.post(
+                "/auth/cikis",
                 {},
                 {
                     withCredentials: true,

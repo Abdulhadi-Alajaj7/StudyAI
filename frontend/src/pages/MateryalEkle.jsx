@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useOutletContext, useNavigate, useLocation, useParams } from "react-router-dom";
-import axios from "axios";
+import api from "../api";
 import DersOlusturmaAdimlari from "../components/DersOlusturmaAdimlari";
 import { CloudArrowUpIcon, ArrowRightIcon, CpuChipIcon, DocumentIcon, TrashIcon, ArrowPathIcon } from "@heroicons/react/24/outline";
 
@@ -72,8 +72,8 @@ function MateryalEkle() {
 
         const durumuGetir = async () => {
             try {
-                const res = await axios.get(
-                    `http://localhost:5000/dersler/${dersId}/konu-haritasi`,
+                const res = await api.get(
+                    `/dersler/${dersId}/konu-haritasi`,
                     { withCredentials: true }
                 );
 
@@ -105,8 +105,8 @@ function MateryalEkle() {
 
     const dersGetir = async () => {
         try {
-            const res = await axios.get(
-                `http://localhost:5000/dersler/${dersId}`,
+            const res = await api.get(
+                `/dersler/${dersId}`,
                 { withCredentials: true }
             );
 
@@ -142,7 +142,7 @@ function MateryalEkle() {
 
     const materyalleriGetir = async () => {
         try {
-            const res = await axios.get(`http://localhost:5000/materyaller/ders/${dersId}`, { withCredentials: true });
+            const res = await api.get(`/materyaller/ders/${dersId}`, { withCredentials: true });
             setMateryaller(res.data.materyaller || []);
         } catch (err) {
             console.error("Materyaller getirilemedi", err);
@@ -166,7 +166,7 @@ function MateryalEkle() {
         setHata("");
 
         try {
-            await axios.post(`http://localhost:5000/materyaller/ders/${dersId}`, formData, {
+            await api.post(`/materyaller/ders/${dersId}`, formData, {
                 withCredentials: true
             });
             // Yukleme sonrasi dosyaları tekrar getir
@@ -183,7 +183,7 @@ function MateryalEkle() {
         if (!window.confirm("Bu materyali silmek istediğinize emin misiniz?")) return;
 
         try {
-            await axios.delete(`http://localhost:5000/materyaller/${id}`, { withCredentials: true });
+            await api.delete(`/materyaller/${id}`, { withCredentials: true });
             setMateryaller(materyaller.filter(m => m._id !== id));
         } catch (err) {
             alert("Materyal silinirken bir hata oluştu.");
@@ -192,7 +192,7 @@ function MateryalEkle() {
 
     const handleMetinCikarYenidenDene = async (id) => {
         try {
-            await axios.post(`http://localhost:5000/materyaller/${id}/metin-cikar`, {}, { withCredentials: true });
+            await api.post(`/materyaller/${id}/metin-cikar`, {}, { withCredentials: true });
             materyalleriGetir();
         } catch (err) {
             alert(err.response?.data?.hata || "Yeniden deneme başarısız.");
@@ -204,7 +204,7 @@ function MateryalEkle() {
         setMetinYukleniyor(true);
         setSeciliMetin("");
         try {
-            const res = await axios.get(`http://localhost:5000/materyaller/${id}`, { withCredentials: true });
+            const res = await api.get(`/materyaller/${id}`, { withCredentials: true });
             setSeciliMetin(res.data.materyal.cikarilanMetin || "Bu dosyadan metin çıkarılamamış veya boş.");
         } catch (err) {
             setSeciliMetin("Metin getirilirken hata oluştu.");
@@ -232,12 +232,12 @@ function MateryalEkle() {
 
         try {
             const [materyalRes, haritaRes] = await Promise.all([
-                axios.get(
-                    `http://localhost:5000/materyaller/ders/${dersId}`,
+                api.get(
+                    `/materyaller/ders/${dersId}`,
                     { withCredentials: true }
                 ),
-                axios.get(
-                    `http://localhost:5000/dersler/${dersId}/konu-haritasi`,
+                api.get(
+                    `/dersler/${dersId}/konu-haritasi`,
                     { withCredentials: true }
                 )
             ]);
@@ -304,8 +304,8 @@ function MateryalEkle() {
         setHata("");
 
         try {
-            const res = await axios.post(
-                `http://localhost:5000/dersler/${dersId}/materyaller/onayla`,
+            const res = await api.post(
+                `/dersler/${dersId}/materyaller/onayla`,
                 {},
                 { withCredentials: true }
             );

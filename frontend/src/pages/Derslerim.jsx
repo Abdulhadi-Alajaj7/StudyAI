@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useOutletContext, useNavigate } from "react-router-dom";
-import axios from "axios";
+import api from "../api";
 import { 
     PlusIcon, 
     MagnifyingGlassIcon, 
@@ -42,7 +42,7 @@ function Derslerim() {
     const dersleriGetir = async () => {
         setLoading(true);
         try {
-            const res = await axios.get("http://localhost:5000/dersler", { withCredentials: true });
+            const res = await api.get("/dersler", { withCredentials: true });
             setDersler(res.data.dersler);
             setHata(null);
         } catch (err) {
@@ -83,9 +83,9 @@ function Derslerim() {
         e.preventDefault();
         try {
             if (modalModu === "olustur") {
-                await axios.post("http://localhost:5000/dersler", form, { withCredentials: true });
+                await api.post("/dersler", form, { withCredentials: true });
             } else {
-                await axios.put(`http://localhost:5000/dersler/${seciliDers._id}`, form, { withCredentials: true });
+                await api.put(`/dersler/${seciliDers._id}`, form, { withCredentials: true });
             }
             modalKapat();
             dersleriGetir();
@@ -103,7 +103,7 @@ function Derslerim() {
     const handleSil = async () => {
         if (!silinecekDers) return;
         try {
-            await axios.delete(`http://localhost:5000/dersler/${silinecekDers._id}`, { withCredentials: true });
+            await api.delete(`/dersler/${silinecekDers._id}`, { withCredentials: true });
             setSilModalAcik(false);
             setSilinecekDers(null);
             dersleriGetir();

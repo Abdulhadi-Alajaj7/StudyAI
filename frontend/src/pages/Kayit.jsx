@@ -11,7 +11,7 @@ import {
     UserIcon,
     ChartBarIcon,
 } from "@heroicons/react/24/outline";
-import axios from "axios";
+import api from "../api";
 
 function Kayit() {
     const navigate = useNavigate();
@@ -50,7 +50,7 @@ function Kayit() {
         try {
             setYukleniyor(true);
 
-            await axios.post("http://localhost:5000/auth/kayit", {
+            await api.post("/auth/kayit", {
                 kullaniciAdi: formData.kullaniciAdi,
                 email: formData.email,
                 sifre: formData.sifre,
