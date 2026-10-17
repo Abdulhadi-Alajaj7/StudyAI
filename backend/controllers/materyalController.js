@@ -97,9 +97,13 @@ const arkaPlandaMetinCikar = async (materyalIds, dersId, kullaniciId) => {
                 continue;
             }
 
-            // 6. Başarılı taahhüt sonrası eski parçaları güvenle temizle
+            // 6. Yalnızca işlem başında aktif olan eski sürümü temizle. Materyal
+            // hazir olduktan sonra başlayabilecek daha yeni staging sürümlerine dokunma.
             try {
-                await MetinParcasi.deleteMany({ materyalId: id, islemeId: { $ne: yeniIslemeId } });
+                await MetinParcasi.deleteMany({
+                    materyalId: id,
+                    islemeId: materyal.aktifIslemeId ?? null
+                });
             } catch (eskiSilmeHatasi) {
                 console.error(`Eski parçaları temizleme uyarısı (Materyal ID: ${id}):`, eskiSilmeHatasi.message);
                 // Taahhüt edilmiş aktif versiyonu BOZMA; catch bloğuna düşüp aktif versiyonu silmesini engelle!
@@ -431,9 +435,13 @@ export const materyalMetinCikar = async (req, res) => {
                 return res.status(409).json({ hata: "Materyal işleme tamamlanırken silindi veya iptal edildi." });
             }
 
-            // 6. Eski parçaları temizle
+            // 6. Yalnızca işlem başında aktif olan eski sürümü temizle. Materyal
+            // hazir olduktan sonra başlayabilecek daha yeni staging sürümlerine dokunma.
             try {
-                await MetinParcasi.deleteMany({ materyalId: materyalId, islemeId: { $ne: yeniIslemeId } });
+                await MetinParcasi.deleteMany({
+                    materyalId: materyalId,
+                    islemeId: materyal.aktifIslemeId ?? null
+                });
             } catch (eskiSilmeHatasi) {
                 console.error(`Eski parçaları temizleme uyarısı (Materyal ID: ${materyalId}):`, eskiSilmeHatasi.message);
                 // Taahhüt edilmiş aktif versiyonu BOZMA; catch bloğuna düşüp aktif parçaları silmesini engelle!

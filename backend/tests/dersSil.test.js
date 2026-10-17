@@ -24,6 +24,10 @@ const dersFiltreyeUyuyor = (filtre) => {
   if (filtre.temizleniyor?.$ne === true && ders.temizleniyor === true) return false;
   if (filtre.temizleniyor === true && ders.temizleniyor !== true) return false;
   if (
+    typeof filtre.silmeNiyeti === "string" &&
+    filtre.silmeNiyeti !== ders.silmeNiyeti
+  ) return false;
+  if (
     filtre.aktifMateryalIslemSayisi !== undefined &&
     filtre.aktifMateryalIslemSayisi !== ders.aktifMateryalIslemSayisi
   ) return false;
@@ -122,7 +126,9 @@ beforeEach(() => {
   ders = {
     _id: dersId,
     kullaniciId,
+    materyallerOnaylandi: true,
     temizleniyor: false,
+    silmeNiyeti: null,
     aktifMateryalIslemSayisi: 0
   };
   materyaller = [{ _id: new mongoose.Types.ObjectId(), dosyaYolu: "test.pdf", durum: "hazir" }];
@@ -146,7 +152,7 @@ test("aktif materyal işlemi varken ders silme 409 ile reddedilir", async () => 
   assert.equal(materyaller.length, 1);
 });
 
-test("aktif işlem yokken ders ve ilişkili kayıtlar silinir", async () => {
+test("kullanıcı tarafından silinmesi istenen onaylanmış ders ve ilişkili kayıtlar silinir", async () => {
   const res = responseMock();
 
   await dersSil(istek(), res);
@@ -166,6 +172,7 @@ test("silme kilidi alındıktan sonra yeni materyal işlemi başlatılamaz", asy
 
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(ders.temizleniyor, true);
+  assert.equal(ders.silmeNiyeti, "kullanici");
 
   const yeniIslem = await DersMock.findOneAndUpdate(
     {
@@ -208,6 +215,7 @@ test("dosya silme hatasında kayıtlar korunur ve temizleme kilidi kurtarma serv
 
   assert.equal(res.statusCode, 500);
   assert.equal(ders.temizleniyor, true);
+  assert.equal(ders.silmeNiyeti, "kullanici");
   assert.equal(materyaller.length, 1);
   assert.equal(materyaller[0].durum, "siliniyor");
   assert.equal(silinenMetinParcasi, false);
@@ -221,6 +229,7 @@ test("yıkıcı temizlik başlamadan oluşan veritabanı hatasında kilit geri a
 
   assert.equal(res.statusCode, 500);
   assert.equal(ders.temizleniyor, false);
+  assert.equal(ders.silmeNiyeti, null);
   assert.equal(materyaller.length, 1);
 });
 

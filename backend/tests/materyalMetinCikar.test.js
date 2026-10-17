@@ -13,6 +13,7 @@ let metinCikarmaHatasi;
 let parcalamaHatasi;
 let incrementalHata;
 let metinCikarmaHook;
+let eskiParcaTemizlemeHook;
 let dersIslemSayisi;
 let dersOnaylandi;
 
@@ -71,6 +72,15 @@ mock.module("../models/Materyal.js", {
 mock.module("../models/MetinParcasi.js", {
     defaultExport: {
         async deleteMany(filtre) {
+            if (
+                eskiParcaTemizlemeHook &&
+                (
+                    filtre.islemeId?.$ne !== undefined ||
+                    ayniId(filtre.islemeId, eskiIslemeId)
+                )
+            ) {
+                eskiParcaTemizlemeHook();
+            }
             parcalar = parcalar.filter((parca) => {
                 if (!ayniId(parca.materyalId, filtre.materyalId)) return true;
                 if (filtre.islemeId?.$ne !== undefined) {
@@ -165,6 +175,7 @@ beforeEach(() => {
     parcalamaHatasi = null;
     incrementalHata = null;
     metinCikarmaHook = null;
+    eskiParcaTemizlemeHook = null;
     dersIslemSayisi = 0;
     dersOnaylandi = false;
 });
@@ -206,6 +217,27 @@ test("yeniden işleme başarılıysa yalnızca yeni aktif sürümün parçaları
     assert.notEqual(String(materyal.aktifIslemeId), String(eskiIslemeId));
     assert.equal(parcalar.length, 1);
     assert.equal(String(parcalar[0].islemeId), String(materyal.aktifIslemeId));
+});
+
+test("eski parçalar temizlenirken başlayan yeni işlemin staging parçaları korunur", async () => {
+    eskiBasariliSurumuKur();
+    materyal.durum = "hazir";
+    const ikinciIslemeId = new mongoose.Types.ObjectId();
+    eskiParcaTemizlemeHook = () => {
+        materyal.durum = "isleniyor";
+        materyal.islemeId = ikinciIslemeId;
+        parcalar.push({ materyalId, islemeId: ikinciIslemeId, icerik: "ikinci staging parça" });
+        eskiParcaTemizlemeHook = null;
+    };
+    const res = responseMock();
+
+    await materyalMetinCikar(istek(), res);
+
+    assert.equal(res.statusCode, 200);
+    assert.ok(
+        parcalar.some((parca) => ayniId(parca.islemeId, ikinciIslemeId)),
+        "Yeni işlemin staging parçası eski sürüm temizliği tarafından silinmemeli"
+    );
 });
 
 test("yeniden işleme başarısızsa yeni staging parçaları silinir ve önceki başarılı sürüm korunur", async () => {

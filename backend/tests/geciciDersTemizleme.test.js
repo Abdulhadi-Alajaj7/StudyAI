@@ -181,6 +181,7 @@ const dersEkle = ({
     onaylandi = false,
     aktifIslem = 0,
     temizleniyor = false,
+    silmeNiyeti,
     token,
     leaseTarihi
 } = {}) => {
@@ -192,6 +193,7 @@ const dersEkle = ({
         temizleniyor,
         updatedAt: new Date(temelZaman.getTime() - yasDakika * 60 * 1000)
     };
+    if (silmeNiyeti !== undefined) ders.silmeNiyeti = silmeNiyeti;
     if (token !== undefined) ders.temizlikIslemToken = token;
     if (leaseTarihi !== undefined) {
         ders.temizlikKilitSonYenilemeTarihi = leaseTarihi;
@@ -267,6 +269,96 @@ test("onaylanmış ders otomatik temizlenmez", async () => {
 
     assert.equal(sonuc.temizlenenDersSayisi, 0);
     assert.equal(dersler.length, 1);
+});
+
+test("temizleniyor işaretli fakat kullanıcı niyeti olmayan onaylanmış ders silinmez", async () => {
+    dersEkle({
+        onaylandi: true,
+        temizleniyor: true,
+        leaseTarihi: new Date(temelZaman.getTime() - 10 * 60 * 1000)
+    });
+
+    const sonuc = await temizlikCalistir();
+
+    assert.equal(sonuc.temizlenenDersSayisi, 0);
+    assert.equal(dersler.length, 1);
+    assert.equal(dosyaSilmeCagrilari.length, 0);
+});
+
+test("kullanıcı silme niyeti olan onaylanmış dersin süresi dolan lease'i kurtarılır", async () => {
+    const eskiToken = new mongoose.Types.ObjectId();
+    dersEkle({
+        onaylandi: true,
+        temizleniyor: true,
+        silmeNiyeti: "kullanici",
+        token: eskiToken,
+        leaseTarihi: new Date(temelZaman.getTime() - 6 * 60 * 1000)
+    });
+
+    const sonuc = await temizlikCalistir();
+
+    assert.equal(sonuc.temizlenenDersSayisi, 1);
+    assert.equal(dersler.length, 0);
+    assert.equal(materyaller.length, 0);
+});
+
+test("iki instance onaylanmış kullanıcı silmesini eşzamanlı sahiplenemez", async () => {
+    dersEkle({
+        onaylandi: true,
+        temizleniyor: true,
+        silmeNiyeti: "kullanici",
+        token: new mongoose.Types.ObjectId(),
+        leaseTarihi: new Date(temelZaman.getTime() - 6 * 60 * 1000)
+    });
+    let dosyaSilmeDevam;
+    dosyaSilmeBeklemesi = new Promise((resolve) => {
+        dosyaSilmeDevam = resolve;
+    });
+
+    const ilkCalisan = temizlikCalistir();
+    await new Promise((resolve) => setImmediate(resolve));
+    const ikinciCalisan = temizlikCalistir();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.equal(dosyaSilmeCagrilari.length, 1);
+    dosyaSilmeDevam();
+    const [ilkSonuc, ikinciSonuc] = await Promise.all([ilkCalisan, ikinciCalisan]);
+
+    assert.equal(
+        ilkSonuc.temizlenenDersSayisi + ikinciSonuc.temizlenenDersSayisi,
+        1
+    );
+    assert.equal(dersler.length, 0);
+});
+
+test("onaylanmış kullanıcı silmesi hata sonrası yeniden başlatmada tamamlanır ve diğer derse dokunmaz", async () => {
+    const silinecekDers = dersEkle({
+        onaylandi: true,
+        temizleniyor: true,
+        silmeNiyeti: "kullanici",
+        token: new mongoose.Types.ObjectId(),
+        leaseTarihi: new Date(temelZaman.getTime() - 6 * 60 * 1000)
+    });
+    const korunacakDers = dersEkle({ onaylandi: true });
+    dosyaSilmeHatasi = new Error("disk geçici hatası");
+
+    const hataliSonuc = await temizlikCalistir();
+    assert.equal(hataliSonuc.temizlenenDersSayisi, 0);
+    assert.ok(dersler.some((ders) => ayni(ders._id, silinecekDers._id)));
+    assert.equal(silinecekDers.silmeNiyeti, "kullanici");
+
+    dosyaSilmeHatasi = null;
+    const kurtarmaSonucu = await temizlikCalistir(
+        new Date(temelZaman.getTime() + 6 * 60 * 1000)
+    );
+
+    assert.equal(kurtarmaSonucu.temizlenenDersSayisi, 1);
+    assert.ok(!dersler.some((ders) => ayni(ders._id, silinecekDers._id)));
+    assert.ok(dersler.some((ders) => ayni(ders._id, korunacakDers._id)));
+    assert.equal(
+        materyaller.filter((materyal) => ayni(materyal.dersId, korunacakDers._id)).length,
+        1
+    );
 });
 
 test("iki temizlik çalışanından yalnızca biri aynı dersin lease'ini alır", async () => {

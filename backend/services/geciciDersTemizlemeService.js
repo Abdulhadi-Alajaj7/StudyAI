@@ -9,6 +9,7 @@ const BIR_SAAT = 60 * 60 * 1000;
 const TEMIZLIK_LIMITI = 50;
 const TEMIZLIK_LEASE_SURESI = 5 * 60 * 1000;
 const TEMIZLIK_HEARTBEAT_ARALIGI = 60 * 1000;
+const KULLANICI_SILME_NIYETI = "kullanici";
 
 let temizlikCalisiyor = false;
 
@@ -27,10 +28,16 @@ const temizlikLeaseYenile = async (dersId, islemToken) => {
     const sonuc = await Ders.updateOne(
         {
             _id: dersId,
-            materyallerOnaylandi: { $ne: true },
             temizleniyor: true,
             temizlikIslemToken: islemToken,
-            aktifMateryalIslemSayisi: 0
+            aktifMateryalIslemSayisi: 0,
+            $or: [
+                { silmeNiyeti: KULLANICI_SILME_NIYETI },
+                {
+                    materyallerOnaylandi: { $ne: true },
+                    silmeNiyeti: { $ne: KULLANICI_SILME_NIYETI }
+                }
+            ]
         },
         {
             $currentDate: { temizlikKilitSonYenilemeTarihi: true }
@@ -88,32 +95,46 @@ const temizlikHeartbeatBaslat = async (
     };
 };
 
+const leaseSuresiDolmusKosulu = () => ({
+    $expr: {
+        $lt: [
+            {
+                $ifNull: [
+                    "$temizlikKilitSonYenilemeTarihi",
+                    "$updatedAt"
+                ]
+            },
+            { $subtract: ["$$NOW", TEMIZLIK_LEASE_SURESI] }
+        ]
+    }
+});
+
 const temizlikAdayiKosulu = () => ({
-    materyallerOnaylandi: { $ne: true },
     aktifMateryalIslemSayisi: 0,
     $or: [
         {
-            temizleniyor: { $ne: true },
-            $expr: {
-                $lt: [
-                    "$updatedAt",
-                    { $subtract: ["$$NOW", BIR_SAAT] }
-                ]
-            }
+            materyallerOnaylandi: { $ne: true },
+            silmeNiyeti: { $ne: KULLANICI_SILME_NIYETI },
+            $or: [
+                {
+                    temizleniyor: { $ne: true },
+                    $expr: {
+                        $lt: [
+                            "$updatedAt",
+                            { $subtract: ["$$NOW", BIR_SAAT] }
+                        ]
+                    }
+                },
+                {
+                    temizleniyor: true,
+                    ...leaseSuresiDolmusKosulu()
+                }
+            ]
         },
         {
+            silmeNiyeti: KULLANICI_SILME_NIYETI,
             temizleniyor: true,
-            $expr: {
-                $lt: [
-                    {
-                        $ifNull: [
-                            "$temizlikKilitSonYenilemeTarihi",
-                            "$updatedAt"
-                        ]
-                    },
-                    { $subtract: ["$$NOW", TEMIZLIK_LEASE_SURESI] }
-                ]
-            }
+            ...leaseSuresiDolmusKosulu()
         }
     ]
 });
@@ -190,10 +211,16 @@ export const geciciDersTemizlemeTuruCalistir = async ({
 
             const silmeSonucu = await Ders.deleteOne({
                 _id: kilit._id,
-                materyallerOnaylandi: { $ne: true },
                 temizleniyor: true,
                 temizlikIslemToken: islemToken,
-                aktifMateryalIslemSayisi: 0
+                aktifMateryalIslemSayisi: 0,
+                $or: [
+                    { silmeNiyeti: KULLANICI_SILME_NIYETI },
+                    {
+                        materyallerOnaylandi: { $ne: true },
+                        silmeNiyeti: { $ne: KULLANICI_SILME_NIYETI }
+                    }
+                ]
             });
 
             if ((silmeSonucu?.deletedCount ?? 0) !== 1) {

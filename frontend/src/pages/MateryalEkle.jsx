@@ -185,7 +185,7 @@ function MateryalEkle() {
         try {
             await api.delete(`/materyaller/${id}`, { withCredentials: true });
             setMateryaller(materyaller.filter(m => m._id !== id));
-        } catch (err) {
+        } catch {
             alert("Materyal silinirken bir hata oluştu.");
         }
     };
@@ -206,7 +206,7 @@ function MateryalEkle() {
         try {
             const res = await api.get(`/materyaller/${id}`, { withCredentials: true });
             setSeciliMetin(res.data.materyal.cikarilanMetin || "Bu dosyadan metin çıkarılamamış veya boş.");
-        } catch (err) {
+        } catch {
             setSeciliMetin("Metin getirilirken hata oluştu.");
         } finally {
             setMetinYukleniyor(false);

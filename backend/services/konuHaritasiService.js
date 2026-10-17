@@ -52,10 +52,12 @@ const geminiTekrarlariniTemizle = (konular = []) => {
     const temelBaslik = (baslik) => {
         return konuBasliginiNormalizeEt(baslik || "")
             .replace(/\s+tanimi$/i, "")
+            .replace(/\s+ve\s+problemler$/i, "")
             .trim();
     };
 
     const sonuc = [];
+    const gorulenAltlar = new Map();
 
     for (const ana of konular) {
         if (!ana?.baslik?.trim()) continue;
@@ -64,8 +66,6 @@ const geminiTekrarlariniTemizle = (konular = []) => {
             ...ana,
             altKonular: []
         };
-
-        const gorulenAltlar = new Map();
 
         for (const alt of ana.altKonular || []) {
             if (!alt?.baslik?.trim()) continue;

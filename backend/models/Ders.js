@@ -57,6 +57,11 @@ const dersSchema = new mongoose.Schema(
             type: Boolean,
             default: false,
         },
+        silmeNiyeti: {
+            type: String,
+            enum: ["kullanici"],
+            default: null,
+        },
         temizlikIslemToken: {
             type: mongoose.Schema.Types.ObjectId,
             default: null,

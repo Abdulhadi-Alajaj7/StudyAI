@@ -1,5 +1,6 @@
 import Materyal from "../models/Materyal.js";
 import MetinParcasi from "../models/MetinParcasi.js";
+import { baslangicKurtarmaEtkinMi } from "./baslangicKurtarmaService.js";
 
 const kimliklerEsit = (sol, sag) => (
     sol != null && sag != null && String(sol) === String(sag)
@@ -28,13 +29,16 @@ export const metinParcasiKullaniliyorMu = (parca, materyal) => {
 };
 
 /**
- * Aktif veya geçerli staging olmayan metin parçalarını küçük gruplarla temizler.
- * Silme yalnızca daha önce incelenmiş parça _id'leriyle yapıldığı için eşzamanlı
- * başka bir instance'ın sonradan eklediği staging kayıtları sorguya yakalanmaz.
+ * Metin parçalarını küçük gruplarla temizler. Çoklu-instance varsayılanında
+ * yalnızca materyali artık bulunmayan gerçek yetimler silinir. Eski sürüm ve
+ * terk edilmiş staging temizliği, başlangıç kurtarmasıyla aynı açık
+ * single-instance güvenlik sınırı içinde çalışır. Her aday silme öncesi tekrar
+ * doğrulanır; sonradan eklenen kayıtlar incelenen _id listesi dışında kalır.
  */
 export const kullanilmayanMetinParcalariniTemizle = async ({
     batchSize = 500,
-    logger = console
+    logger = console,
+    mod = process.env.STUDYAI_STARTUP_RECOVERY_MODE
 } = {}) => {
     if (!Number.isInteger(batchSize) || batchSize < 1) {
         throw new Error("Metin parçası temizleme batchSize değeri pozitif bir tam sayı olmalıdır.");
@@ -43,6 +47,26 @@ export const kullanilmayanMetinParcalariniTemizle = async ({
     let sonParcaId = null;
     let incelenenParcaSayisi = 0;
     let silinenParcaSayisi = 0;
+    const tekInstanceTemizligi = baslangicKurtarmaEtkinMi(mod);
+
+    const materyalHaritasiGetir = async (materyalIds) => {
+        const materyaller = await Materyal.find({ _id: { $in: materyalIds } })
+            .select("_id durum islemeId aktifIslemeId")
+            .lean();
+        return new Map(
+            materyaller.map((materyal) => [String(materyal._id), materyal])
+        );
+    };
+
+    const silinebilir = (parca, materyalHaritasi) => {
+        const materyal = materyalHaritasi.get(String(parca.materyalId));
+
+        // Çoklu instance modunda işlem sahipliği/liveness bilgisi bulunmadığı için
+        // mevcut bir materyalin hiçbir sürümü terk edilmiş varsayılmaz. Materyali
+        // tamamen silinmiş gerçek yetimler ise tüm modlarda güvenle temizlenebilir.
+        if (!materyal) return true;
+        return tekInstanceTemizligi && !metinParcasiKullaniliyorMu(parca, materyal);
+    };
 
     while (true) {
         const filtre = sonParcaId
@@ -64,25 +88,30 @@ export const kullanilmayanMetinParcalariniTemizle = async ({
         const materyalIds = [...new Set(
             parcalar.map((parca) => String(parca.materyalId))
         )];
-        const materyaller = await Materyal.find({ _id: { $in: materyalIds } })
-            .select("_id durum islemeId aktifIslemeId")
-            .lean();
-        const materyalHaritasi = new Map(
-            materyaller.map((materyal) => [String(materyal._id), materyal])
-        );
+        const materyalHaritasi = await materyalHaritasiGetir(materyalIds);
 
-        const silinecekParcaIds = parcalar
-            .filter((parca) => !metinParcasiKullaniliyorMu(
-                parca,
-                materyalHaritasi.get(String(parca.materyalId))
-            ))
-            .map((parca) => parca._id);
+        const silmeAdaylari = parcalar.filter((parca) => (
+            silinebilir(parca, materyalHaritasi)
+        ));
 
-        if (silinecekParcaIds.length > 0) {
-            const sonuc = await MetinParcasi.deleteMany({
-                _id: { $in: silinecekParcaIds }
-            });
-            silinenParcaSayisi += sonuc.deletedCount || 0;
+        if (silmeAdaylari.length > 0) {
+            // Aday seçimi ile silme arasındaki durum değişikliklerini yakala.
+            // Tek-instance modunda bu ikinci okuma savunma katmanıdır; çoklu
+            // instance modunda yalnızca hâlâ materyalsiz olan yetimler silinir.
+            const adayMateryalIds = [...new Set(
+                silmeAdaylari.map((parca) => String(parca.materyalId))
+            )];
+            const guncelMateryalHaritasi = await materyalHaritasiGetir(adayMateryalIds);
+            const silinecekParcaIds = silmeAdaylari
+                .filter((parca) => silinebilir(parca, guncelMateryalHaritasi))
+                .map((parca) => parca._id);
+
+            if (silinecekParcaIds.length > 0) {
+                const sonuc = await MetinParcasi.deleteMany({
+                    _id: { $in: silinecekParcaIds }
+                });
+                silinenParcaSayisi += sonuc.deletedCount || 0;
+            }
         }
 
         if (parcalar.length < batchSize) {

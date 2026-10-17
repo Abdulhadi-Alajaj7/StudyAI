@@ -25,7 +25,6 @@ import {
  * true olduğunda harita görüntülenir, oluşturma butonları gizlenir.
  */
 function KonuHaritasiBolumu({
-    dersId,
     isDark,
     konuHaritasi,
     yukleniyor,

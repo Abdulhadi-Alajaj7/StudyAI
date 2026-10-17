@@ -18,7 +18,7 @@ function DersHazir() {
     // Konu Haritası Durumları
     const [konuHaritasi, setKonuHaritasi] = useState(null);
     const [haritaYukleniyor, setHaritaYukleniyor] = useState(true);
-    const [haritaOlusturuluyor, setHaritaOlusturuluyor] = useState(false);
+    const haritaOlusturuluyor = false;
     const [haritaHatasi, setHaritaHatasi] = useState("");
     const [guncelMi, setGuncelMi] = useState(true);
 
@@ -37,23 +37,6 @@ function DersHazir() {
             setHaritaHatasi(err.response?.data?.hata || "Konu haritası yüklenemedi.");
         } finally {
             setHaritaYukleniyor(false);
-        }
-    };
-
-    const konuHaritasiOlustur = async () => {
-        hataSayisiRef.current = 0;
-        pollSayisiRef.current = 0;
-        setHaritaOlusturuluyor(true);
-        setHaritaHatasi("");
-        try {
-            const res = await api.post(`/dersler/${dersId}/konu-haritasi`, {}, { withCredentials: true });
-            setKonuHaritasi(res.data.harita);
-            setGuncelMi(true);
-        } catch (err) {
-            console.error("Konu haritası oluşturma hatası:", err);
-            setHaritaHatasi(err.response?.data?.hata || "Konu haritası oluşturulurken bir hata oluştu.");
-        } finally {
-            setHaritaOlusturuluyor(false);
         }
     };
 
@@ -321,7 +304,6 @@ function DersHazir() {
 
                     {/* Konu Haritası Bölümü */}
                     <KonuHaritasiBolumu
-                        dersId={dersId}
                         isDark={isDark}
                         konuHaritasi={konuHaritasi}
                         yukleniyor={haritaYukleniyor}

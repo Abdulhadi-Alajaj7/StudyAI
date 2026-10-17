@@ -4,6 +4,8 @@ import assert from "node:assert/strict";
 let materyaller;
 let parcalar;
 let silmeCagrilari;
+let materyalOkumaSayisi;
+let materyalOkumaHook;
 
 const sorguZinciri = (sonucUret) => {
     let limit = Infinity;
@@ -48,7 +50,12 @@ mock.module("../models/Materyal.js", {
         find(filtre) {
             return sorguZinciri(() => {
                 const ids = new Set(filtre._id.$in.map(String));
-                return materyaller.filter((materyal) => ids.has(String(materyal._id)));
+                const sonuc = structuredClone(
+                    materyaller.filter((materyal) => ids.has(String(materyal._id)))
+                );
+                materyalOkumaSayisi++;
+                materyalOkumaHook?.(materyalOkumaSayisi);
+                return sonuc;
             });
         }
     }
@@ -108,6 +115,8 @@ beforeEach(() => {
         { _id: "10", materyalId: "mat-ilk-yarim", islemeId: "staging-5" }
     ];
     silmeCagrilari = [];
+    materyalOkumaSayisi = 0;
+    materyalOkumaHook = null;
 });
 
 test("aktif, geçerli staging ve belirsiz eski sürüm parçalarını korur", () => {
@@ -132,7 +141,8 @@ test("aktif, geçerli staging ve belirsiz eski sürüm parçalarını korur", ()
 test("terk edilmiş staging, eski sürüm ve silinmiş materyal parçalarını temizler", async () => {
     const sonuc = await kullanilmayanMetinParcalariniTemizle({
         batchSize: 2,
-        logger: sessizLogger
+        logger: sessizLogger,
+        mod: "single-instance"
     });
 
     assert.deepEqual(sonuc, {
@@ -147,7 +157,10 @@ test("terk edilmiş staging, eski sürüm ve silinmiş materyal parçalarını t
 });
 
 test("başarısız yeniden işlemenin staging parçalarını silerken önceki aktif sürümü korur", async () => {
-    await kullanilmayanMetinParcalariniTemizle({ logger: sessizLogger });
+    await kullanilmayanMetinParcalariniTemizle({
+        logger: sessizLogger,
+        mod: "single-instance"
+    });
 
     assert.ok(parcalar.some((parca) => parca._id === "06"));
     assert.ok(!parcalar.some((parca) => parca._id === "07"));
@@ -160,11 +173,15 @@ test("çoklu instance sırasında güncel işleme tokenına ait staging parçala
 });
 
 test("temizlik tekrar çalıştırıldığında idempotent kalır", async () => {
-    await kullanilmayanMetinParcalariniTemizle({ logger: sessizLogger });
+    await kullanilmayanMetinParcalariniTemizle({
+        logger: sessizLogger,
+        mod: "single-instance"
+    });
     const ilkTemizlikSonrasi = structuredClone(parcalar);
 
     const ikinciSonuc = await kullanilmayanMetinParcalariniTemizle({
-        logger: sessizLogger
+        logger: sessizLogger,
+        mod: "single-instance"
     });
 
     assert.deepEqual(ikinciSonuc, {
@@ -172,4 +189,33 @@ test("temizlik tekrar çalıştırıldığında idempotent kalır", async () => 
         silinenParcaSayisi: 0
     });
     assert.deepEqual(parcalar, ilkTemizlikSonrasi);
+});
+
+test("temizlik aday seçimi sonrasında aktif sürüm değişirse yeni aktif parçayı silmez", async () => {
+    materyalOkumaHook = (okumaSayisi) => {
+        if (okumaSayisi === 1) {
+            materyaller[0].aktifIslemeId = "eski-1";
+        }
+    };
+
+    await kullanilmayanMetinParcalariniTemizle({
+        logger: sessizLogger,
+        mod: "single-instance"
+    });
+
+    assert.ok(parcalar.some((parca) => parca._id === "02"));
+});
+
+test("iki instance eşzamanlı temizlerken mevcut materyallerin tüm sürümlerini korur", async () => {
+    const [birinci, ikinci] = await Promise.all([
+        kullanilmayanMetinParcalariniTemizle({ logger: sessizLogger }),
+        kullanilmayanMetinParcalariniTemizle({ logger: sessizLogger })
+    ]);
+
+    assert.ok(!parcalar.some((parca) => parca._id === "08"));
+    assert.ok(parcalar.some((parca) => parca._id === "01"));
+    assert.ok(parcalar.some((parca) => parca._id === "02"));
+    assert.ok(parcalar.some((parca) => parca._id === "03"));
+    assert.ok(parcalar.some((parca) => parca._id === "07"));
+    assert.equal(birinci.silinenParcaSayisi + ikinci.silinenParcaSayisi, 1);
 });

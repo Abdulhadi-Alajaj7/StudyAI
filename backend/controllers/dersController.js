@@ -391,6 +391,7 @@ export const dersSil = async (req, res) => {
       {
         $set: {
           temizleniyor: true,
+          silmeNiyeti: "kullanici",
           temizlikIslemToken,
         },
         $currentDate: { temizlikKilitSonYenilemeTarihi: true },
@@ -423,6 +424,7 @@ export const dersSil = async (req, res) => {
           _id: kilitliDers._id,
           kullaniciId: req.user._id,
           temizleniyor: true,
+          silmeNiyeti: "kullanici",
           temizlikIslemToken,
           aktifMateryalIslemSayisi: 0,
         },
@@ -468,13 +470,18 @@ export const dersSil = async (req, res) => {
 
     await temizlikLeaseYenile();
 
-    await Ders.deleteOne({
+    const silmeSonucu = await Ders.deleteOne({
       _id: kilitliDers._id,
       kullaniciId: req.user._id,
       temizleniyor: true,
+      silmeNiyeti: "kullanici",
       temizlikIslemToken,
       aktifMateryalIslemSayisi: 0,
     });
+
+    if ((silmeSonucu?.deletedCount ?? 0) !== 1) {
+      throw new Error("Ders silme işlem sahipliği kaybedildi.");
+    }
 
     return res.status(200).json({
       basarili: true,
@@ -490,12 +497,14 @@ export const dersSil = async (req, res) => {
             _id: kilitliDers._id,
             kullaniciId: req.user._id,
             temizleniyor: true,
+            silmeNiyeti: "kullanici",
             temizlikIslemToken,
             aktifMateryalIslemSayisi: 0,
           },
           {
             $set: {
               temizleniyor: false,
+              silmeNiyeti: null,
               temizlikIslemToken: null,
               temizlikKilitSonYenilemeTarihi: null,
             },

@@ -2,20 +2,6 @@ import React from "react";
 import { CheckIcon } from "@heroicons/react/24/outline";
 
 function DersOlusturmaAdimlari({ aktifAdim, isDark }) {
-    const cardBg = isDark ? "bg-[#162137] border-[#26334A]" : "bg-white border-[#E7E5EF]";
-    const textPrimary = isDark ? "text-[#F8FAFC]" : "text-[#0F172A]";
-    const textSecondary = isDark ? "text-[#A7B0C2]" : "text-[#64748B]";
-    
-    // Active colors
-    const activeCircleBg = "bg-[#4F46E5] text-white";
-    
-    // Completed colors
-    const completedCircleBg = isDark ? "bg-[#10B981]/20 text-[#10B981]" : "bg-[#10B981]/10 text-[#10B981]";
-    
-    // Inactive colors
-    const inactiveCircleBg = isDark ? "bg-[#1B2942] text-[#7F8AA3]" : "bg-[#F1F5F9] text-[#94A3B8]";
-    const inactiveText = isDark ? "text-[#7F8AA3]" : "text-[#94A3B8]";
-
     const adimlar = [
         { no: 1, baslik: "1. Ders Bilgileri", aciklama: "Temel tanım ve görsel kimlik" },
         { no: 2, baslik: "2. Materyal Ekle", aciklama: "Slayt, PDF ve ders notları" },
