@@ -2,8 +2,9 @@ import React, { useState } from "react";
 import { useOutletContext, useNavigate } from "react-router-dom";
 import api from "../api";
 import DersOlusturmaAdimlari from "../components/DersOlusturmaAdimlari";
-import { ArrowRightIcon, Bars3BottomLeftIcon, BookOpenIcon, ComputerDesktopIcon, CodeBracketIcon, CircleStackIcon, CalculatorIcon, BeakerIcon } from "@heroicons/react/24/outline";
+import { ArrowRightIcon, Bars3BottomLeftIcon } from "@heroicons/react/24/outline";
 import DersKarti from "../components/DersKarti";
+import { DERS_RENKLERI, DERS_SIMGELERI } from "../utils/dersGorunumu";
 
 function YeniDersOlustur() {
     const { isDark } = useOutletContext();
@@ -25,23 +26,6 @@ function YeniDersOlustur() {
     const textSecondary = isDark ? "text-[#A7B0C2]" : "text-[#64748B]";
     const inputBg = isDark ? "bg-[#0B1120] border-[#26334A] text-[#F8FAFC]" : "bg-white border-[#E7E5EF] text-[#0F172A]";
     const buttonPrimary = "bg-[#4F46E5] hover:bg-[#4338CA] text-white";
-
-    const renkler = [
-        { id: "indigo", bg: "bg-[#4F46E5]" },
-        { id: "cyan", bg: "bg-[#06B6D4]" },
-        { id: "emerald", bg: "bg-[#10B981]" },
-        { id: "amber", bg: "bg-[#F59E0B]" },
-        { id: "rose", bg: "bg-[#F43F5E]" }
-    ];
-
-    const simgeler = [
-        { id: "book", icon: BookOpenIcon, label: "Kitap" },
-        { id: "desktop", icon: ComputerDesktopIcon, label: "Bilgisayar" },
-        { id: "code", icon: CodeBracketIcon, label: "Kod" },
-        { id: "database", icon: CircleStackIcon, label: "Veritabanı" },
-        { id: "calc", icon: CalculatorIcon, label: "Hesap" },
-        { id: "science", icon: BeakerIcon, label: "Bilim" }
-    ];
 
     const handleNext = async (e) => {
         e.preventDefault();
@@ -168,12 +152,13 @@ function YeniDersOlustur() {
                                 <div>
                                     <label className={`block text-[13px] font-medium mb-3 ${textPrimary}`}>Ders Rengi</label>
                                     <div className="flex flex-wrap items-center gap-3">
-                                        {renkler.map(r => (
+                                        {DERS_RENKLERI.map(r => (
                                             <button
                                                 key={r.id}
                                                 type="button"
                                                 onClick={() => setForm({...form, renk: r.id})}
-                                                className={`w-10 h-10 rounded-full flex items-center justify-center ${r.bg} ${form.renk === r.id ? 'ring-2 ring-offset-2 ring-[#4F46E5] dark:ring-offset-[#0B1120]' : 'opacity-80 hover:opacity-100'} transition-all`}
+                                                aria-label={`${r.etiket} ders rengini seç`}
+                                                className={`w-10 h-10 rounded-full flex items-center justify-center ${r.secim} ${form.renk === r.id ? 'ring-2 ring-offset-2 ring-[#4F46E5] dark:ring-offset-[#0B1120]' : 'opacity-80 hover:opacity-100'} transition-all`}
                                             >
                                                 {form.renk === r.id && <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>}
                                             </button>
@@ -184,7 +169,7 @@ function YeniDersOlustur() {
                                 <div>
                                     <label className={`block text-[13px] font-medium mb-3 ${textPrimary}`}>Ders Simgesi</label>
                                     <div className="flex flex-wrap items-center gap-3">
-                                        {simgeler.map(s => {
+                                        {DERS_SIMGELERI.map(s => {
                                             const Icon = s.icon;
                                             const isSelected = form.simge === s.id;
                                             return (
@@ -200,7 +185,7 @@ function YeniDersOlustur() {
                                                     `}
                                                 >
                                                     <Icon className="w-6 h-6 mb-2" />
-                                                    <span className="text-[11px] font-medium">{s.label}</span>
+                                                    <span className="text-[11px] font-medium">{s.etiket}</span>
                                                 </button>
                                             );
                                         })}

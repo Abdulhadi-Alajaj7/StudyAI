@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import api from "../api";
 
@@ -19,7 +19,8 @@ import {
     ChevronDownIcon,
     ChevronLeftIcon,
     ChevronRightIcon,
-    ArrowRightStartOnRectangleIcon
+    ArrowRightStartOnRectangleIcon,
+    XMarkIcon
 } from "@heroicons/react/24/outline";
 
 const menu = [
@@ -42,11 +43,63 @@ function PanelLayout() {
     }, [isDark]);
     const [profilMenuAcik, setProfilMenuAcik] = useState(false);
     const [sidebarAcik, setSidebarAcik] = useState(true);
+    const [mobilMenuAcik, setMobilMenuAcik] = useState(false);
     const [kullanici, setKullanici] = useState(null);
+    const mobilMenuButonuRef = useRef(null);
+    const mobilSidebarRef = useRef(null);
 
     const navigate = useNavigate();
     const location = useLocation();
     const dersDetayinda = /^\/dersler\/[^/]+(?:\/.*)?$/.test(location.pathname);
+    const sidebarGenis = sidebarAcik || mobilMenuAcik;
+
+    useEffect(() => {
+        if (!mobilMenuAcik) return undefined;
+
+        const oncekiOverflow = document.body.style.overflow;
+        const menuButonu = mobilMenuButonuRef.current;
+        document.body.style.overflow = "hidden";
+        const drawer = mobilSidebarRef.current;
+        drawer?.querySelector("a, button")?.focus();
+
+        const klavyeKontrolu = (event) => {
+            if (event.key === "Escape") {
+                setMobilMenuAcik(false);
+                return;
+            }
+            if (event.key !== "Tab" || !drawer) return;
+
+            const odaklanabilirler = [...drawer.querySelectorAll(
+                'a[href], button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])'
+            )].filter((eleman) => !eleman.hasAttribute("hidden"));
+            if (odaklanabilirler.length === 0) return;
+            const ilk = odaklanabilirler[0];
+            const son = odaklanabilirler[odaklanabilirler.length - 1];
+            if (event.shiftKey && document.activeElement === ilk) {
+                event.preventDefault();
+                son.focus();
+            } else if (!event.shiftKey && document.activeElement === son) {
+                event.preventDefault();
+                ilk.focus();
+            }
+        };
+
+        document.addEventListener("keydown", klavyeKontrolu);
+        return () => {
+            document.body.style.overflow = oncekiOverflow;
+            document.removeEventListener("keydown", klavyeKontrolu);
+            menuButonu?.focus();
+        };
+    }, [mobilMenuAcik]);
+
+    useEffect(() => {
+        const masaustuSorgusu = window.matchMedia("(min-width: 1024px)");
+        const ekranDegisiminiYakala = (event) => {
+            if (event.matches) setMobilMenuAcik(false);
+        };
+        masaustuSorgusu.addEventListener("change", ekranDegisiminiYakala);
+        return () => masaustuSorgusu.removeEventListener("change", ekranDegisiminiYakala);
+    }, []);
 
     useEffect(() => {
         const profilGetir = async () => {
@@ -103,16 +156,29 @@ function PanelLayout() {
             className={`min-h-screen ${themeBg} ${themeText} transition-colors duration-200`}
         >
 
-            {/* Sidebar */}
+            {mobilMenuAcik && (
+                <div
+                    className="fixed inset-0 z-50 bg-slate-950/55 backdrop-blur-[2px] lg:hidden"
+                    onClick={() => setMobilMenuAcik(false)}
+                    aria-hidden="true"
+                />
+            )}
+
+            {/* Masaüstü sidebar ve mobil drawer */}
             <aside
+                id="panel-sidebar"
+                ref={mobilSidebarRef}
+                aria-label="Ana menü"
+                role={mobilMenuAcik ? "dialog" : undefined}
+                aria-modal={mobilMenuAcik ? "true" : undefined}
                 className={`
-                    fixed left-0 top-0 hidden lg:flex h-screen
-                    ${sidebarAcik ? "w-[260px]" : "w-[80px]"}
-                    flex-col
+                    fixed left-0 top-0 flex h-[100dvh] w-[min(86vw,300px)] flex-col
+                    ${sidebarAcik ? "lg:w-[260px]" : "lg:w-[80px]"}
                     ${sidebarBg}
                     border-r ${sidebarBorder}
-                    transition-[width] duration-300 ease-in-out
-                    z-40
+                    ${mobilMenuAcik ? "visible translate-x-0" : "invisible -translate-x-full lg:visible lg:translate-x-0"}
+                    transition-[transform,width,visibility] duration-300 ease-in-out
+                    z-[60] shadow-2xl lg:z-40 lg:shadow-none
                 `}
             >
 
@@ -122,10 +188,10 @@ function PanelLayout() {
                         h-[80px] flex items-center
                         border-b ${sidebarBorder}
                         transition-all duration-300
-                        ${sidebarAcik ? "px-6" : "px-3 justify-center"}
+                        ${sidebarGenis ? "px-5 lg:px-6" : "px-3 justify-center"}
                     `}
                 >
-                    {sidebarAcik ? (
+                    {sidebarGenis ? (
                         <div
                             className={`
                                 ${isDark ? "bg-white/10" : "bg-transparent"}
@@ -136,8 +202,18 @@ function PanelLayout() {
                             <img
                                 src="/images/studyai-logo.png"
                                 alt="StudyAI Logo"
-                                className="object-contain h-auto w-[200px]"
+                                className="h-auto w-[150px] object-contain sm:w-[180px] lg:w-[200px]"
                             />
+                            <button
+                                type="button"
+                                onClick={() => setMobilMenuAcik(false)}
+                                aria-label="Menüyü kapat"
+                                className={`ml-auto flex h-9 w-9 shrink-0 items-center justify-center rounded-lg lg:hidden ${
+                                    isDark ? "text-[#A7B0C2] hover:bg-white/10" : "text-[#64748B] hover:bg-black/5"
+                                }`}
+                            >
+                                <XMarkIcon className="h-6 w-6" />
+                            </button>
                         </div>
                     ) : (
                         <div
@@ -165,7 +241,7 @@ function PanelLayout() {
                     className={`
                         flex-1 py-6 space-y-1.5 overflow-y-auto
                         transition-all duration-300
-                        ${sidebarAcik ? "px-4" : "px-3"}
+                        ${sidebarGenis ? "px-4" : "px-3"}
                     `}
                 >
                     {menu.map((item) => {
@@ -176,7 +252,8 @@ function PanelLayout() {
                                 key={item.yol}
                                 to={item.yol}
                                 end={item.end}
-                                title={!sidebarAcik ? item.isim : undefined}
+                                title={!sidebarGenis ? item.isim : undefined}
+                                onClick={() => setMobilMenuAcik(false)}
                                 className={({ isActive }) => {
                                     const aktif = isActive || (item.yol === "/panel/dersler" && dersDetayinda);
                                     return `
@@ -186,7 +263,7 @@ function PanelLayout() {
                                     transition-colors
 
                                     ${
-                                        sidebarAcik
+                                        sidebarGenis
                                             ? "gap-3.5 px-4"
                                             : "justify-center px-0"
                                     }
@@ -205,7 +282,7 @@ function PanelLayout() {
                             >
                                 <Icon className="w-[22px] h-[22px] shrink-0" />
 
-                                {sidebarAcik && (
+                                {sidebarGenis && (
                                     <span className="whitespace-nowrap">
                                         {item.isim}
                                     </span>
@@ -220,10 +297,10 @@ function PanelLayout() {
                     className={`
                         mt-auto
                         transition-all duration-300
-                        ${sidebarAcik ? "p-5" : "p-3"}
+                        ${sidebarGenis ? "p-5" : "p-3"}
                     `}
                 >
-                    {sidebarAcik ? (
+                    {sidebarGenis ? (
                         <div
                             className={`
                                 ${
@@ -358,6 +435,11 @@ function PanelLayout() {
                     {/* Mobile Menu Button */}
                     <button
                         type="button"
+                        ref={mobilMenuButonuRef}
+                        onClick={() => setMobilMenuAcik(true)}
+                        aria-label="Menüyü aç"
+                        aria-controls="panel-sidebar"
+                        aria-expanded={mobilMenuAcik}
                         className={`
                             lg:hidden
                             w-10 h-10

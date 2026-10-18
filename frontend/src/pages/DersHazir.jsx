@@ -4,8 +4,9 @@ import api from "../api";
 import DersOlusturmaAdimlari from "../components/DersOlusturmaAdimlari";
 import KonuHaritasiBolumu from "../components/KonuHaritasiBolumu";
 import SemantikAramaBolumu from "../components/SemantikAramaBolumu";
+import DersGorunumSimgesi from "../components/DersGorunumSimgesi";
 import { dersDetayYolu } from "../utils/dersDetayYollari.mjs";
-import { CheckBadgeIcon, ArrowRightIcon, BookOpenIcon, DocumentTextIcon, CheckIcon, CpuChipIcon, ListBulletIcon, ChatBubbleBottomCenterTextIcon, PuzzlePieceIcon, SparklesIcon, ComputerDesktopIcon, CodeBracketIcon, CircleStackIcon, CalculatorIcon, BeakerIcon } from "@heroicons/react/24/outline";
+import { CheckBadgeIcon, ArrowRightIcon, BookOpenIcon, DocumentTextIcon, CheckIcon, CpuChipIcon, ListBulletIcon, ChatBubbleBottomCenterTextIcon, PuzzlePieceIcon, SparklesIcon } from "@heroicons/react/24/outline";
 
 function DersHazir() {
     const { isDark } = useOutletContext();
@@ -15,7 +16,6 @@ function DersHazir() {
 
     const [materyalSayisi, setMateryalSayisi] = useState(0);
     const [ders, setDers] = useState(location.state?.ders || null);
-    const uiPrefs = location.state?.uiPrefs || { renk: "indigo", simge: "desktop", dersKodu: "" };
 
     // Konu Haritası Durumları
     const [konuHaritasi, setKonuHaritasi] = useState(null);
@@ -127,26 +127,6 @@ function DersHazir() {
     const textPrimary = isDark ? "text-[#F8FAFC]" : "text-[#0F172A]";
     const textSecondary = isDark ? "text-[#A7B0C2]" : "text-[#64748B]";
 
-    const renkler = [
-        { id: "indigo", bg: "bg-[#4F46E5]", text: "text-[#4F46E5]" },
-        { id: "cyan", bg: "bg-[#06B6D4]", text: "text-[#06B6D4]" },
-        { id: "emerald", bg: "bg-[#10B981]", text: "text-[#10B981]" },
-        { id: "amber", bg: "bg-[#F59E0B]", text: "text-[#F59E0B]" },
-        { id: "rose", bg: "bg-[#F43F5E]", text: "text-[#F43F5E]" }
-    ];
-
-    const simgeler = [
-        { id: "book", icon: BookOpenIcon },
-        { id: "desktop", icon: ComputerDesktopIcon },
-        { id: "code", icon: CodeBracketIcon },
-        { id: "database", icon: CircleStackIcon },
-        { id: "calc", icon: CalculatorIcon },
-        { id: "science", icon: BeakerIcon }
-    ];
-
-    const seciliRenk = renkler.find(r => r.id === uiPrefs.renk) || renkler[0];
-    const SeciliSimge = simgeler.find(s => s.id === uiPrefs.simge)?.icon || ComputerDesktopIcon;
-
     return (
         <div className="max-w-[1200px] mx-auto pb-10">
             <div className="mb-8 flex items-center justify-between">
@@ -183,13 +163,11 @@ function DersHazir() {
                     {/* Ders Kartı Banner */}
                     <div className={`p-6 rounded-2xl border ${isDark ? 'bg-[#10192C] border-[#26334A]' : 'bg-indigo-50 border-indigo-100'} flex items-center justify-between`}>
                         <div className="flex items-center gap-4">
-                            <div className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 ${seciliRenk.bg} bg-opacity-10`}>
-                                <SeciliSimge className={`w-6 h-6 ${seciliRenk.text}`} />
-                            </div>
+                            <DersGorunumSimgesi renk={ders?.renk} simge={ders?.simge} isDark={isDark} />
                             <div>
                                 <div className="flex items-center gap-2 mb-1">
                                     <h3 className={`text-[18px] font-bold ${textPrimary}`}>{ders?.dersAdi || "Ders Adı"}</h3>
-                                    {uiPrefs.dersKodu && <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${isDark ? 'bg-white/10 text-[#A7B0C2]' : 'bg-indigo-200 text-indigo-800'}`}>{uiPrefs.dersKodu}</span>}
+                                    {ders?.dersKodu && <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${isDark ? 'bg-white/10 text-[#A7B0C2]' : 'bg-indigo-200 text-indigo-800'}`}>{ders.dersKodu}</span>}
                                 </div>
                                 <p className={`text-[13px] ${textSecondary}`}>Dönem: {ders?.donem || "Belirtilmedi"}</p>
                             </div>
@@ -374,7 +352,7 @@ function DersHazir() {
                             </button>
                             <button
                                 type="button"
-                                onClick={() => navigate(dersDetayYolu(dersId))}
+                                onClick={() => navigate(dersDetayYolu(dersId), { state: ders ? { ders } : null })}
                                 disabled={!dersId}
                                 className={`w-full sm:w-auto flex items-center justify-center gap-2 px-8 py-3 rounded-xl font-medium transition-colors bg-[#4F46E5] text-white hover:bg-[#4338CA] ${!dersId ? "opacity-50 cursor-not-allowed" : ""}`}
                             >
@@ -403,14 +381,12 @@ function DersHazir() {
                                 <div className="flex flex-col">
                                     <div className="flex items-start justify-between mb-4">
                                         <div className="flex items-center gap-3">
-                                            <div className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 ${seciliRenk.bg} bg-opacity-10`}>
-                                                <SeciliSimge className={`w-6 h-6 ${seciliRenk.text}`} />
-                                            </div>
+                                            <DersGorunumSimgesi renk={ders?.renk} simge={ders?.simge} isDark={isDark} />
                                             <div>
                                                 <div className="flex gap-1.5 mb-1">
-                                                    {uiPrefs.dersKodu && (
+                                                    {ders?.dersKodu && (
                                                         <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${isDark ? 'bg-white/10 text-white' : 'bg-black/5 text-[#0F172A]'}`}>
-                                                            {uiPrefs.dersKodu}
+                                                            {ders.dersKodu}
                                                         </span>
                                                     )}
                                                     {ders?.donem && (
@@ -445,7 +421,7 @@ function DersHazir() {
 
                                     <button
                                         type="button"
-                                        onClick={() => navigate(dersDetayYolu(dersId))}
+                                        onClick={() => navigate(dersDetayYolu(dersId), { state: ders ? { ders } : null })}
                                         disabled={!dersId}
                                         className={`w-full py-2.5 rounded-xl text-[13px] font-medium border flex items-center justify-center gap-1.5 transition-colors ${isDark ? 'border-[#33415C] text-[#F8FAFC] hover:bg-[#162137]' : 'border-[#D8D5E2] text-[#4F46E5] hover:bg-[#F8F7FC]'} ${!dersId ? "opacity-50 cursor-not-allowed" : ""}`}
                                     >

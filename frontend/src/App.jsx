@@ -24,6 +24,7 @@ import DersOzet from "./pages/DersOzet.jsx";
 import DersSohbet from "./pages/DersSohbet.jsx";
 import DersTestler from "./pages/DersTestler.jsx";
 import DersCalismaKartlari from "./pages/DersCalismaKartlari.jsx";
+import DersDuzenle from "./pages/DersDuzenle.jsx";
 
 import DersAdimScroll from "./components/DersAdimScroll.jsx";
 import DersDetayLayout from "./components/DersDetayLayout.jsx";
@@ -62,6 +63,7 @@ function App() {
                             <Route path="profil" element={<Profil />} />
                         </Route>
 
+                        <Route path="/dersler/:dersId/duzenle" element={<DersDuzenle />} />
                         <Route path="/dersler/:dersId" element={<DersDetayLayout />}>
                             <Route index element={<DersGenelBakis />} />
                             <Route path="konular" element={<DersKonular />} />

@@ -4,30 +4,10 @@ import {
     EllipsisVerticalIcon,
     PencilSquareIcon,
     TrashIcon,
-    ArrowRightIcon,
-    ComputerDesktopIcon, 
-    CodeBracketIcon, 
-    CircleStackIcon, 
-    CalculatorIcon, 
-    BeakerIcon
+    ArrowRightIcon
 } from "@heroicons/react/24/outline";
-
-const renkMap = {
-    indigo: { bg: "bg-indigo-500/10", text: "text-indigo-500", textDark: "text-indigo-400" },
-    cyan: { bg: "bg-cyan-500/10", text: "text-cyan-600", textDark: "text-cyan-400" },
-    emerald: { bg: "bg-emerald-500/10", text: "text-emerald-500", textDark: "text-emerald-400" },
-    amber: { bg: "bg-amber-500/10", text: "text-amber-500", textDark: "text-amber-400" },
-    rose: { bg: "bg-rose-500/10", text: "text-rose-500", textDark: "text-rose-400" }
-};
-
-const simgeMap = {
-    book: BookOpenIcon,
-    desktop: ComputerDesktopIcon,
-    code: CodeBracketIcon,
-    database: CircleStackIcon,
-    calc: CalculatorIcon,
-    science: BeakerIcon
-};
+import DersGorunumSimgesi from "./DersGorunumSimgesi";
+import { dersRengiGetir } from "../utils/dersGorunumu";
 
 function DersKarti({ 
     ders, 
@@ -44,18 +24,15 @@ function DersKarti({
     const textPrimary = isDark ? "text-[#F8FAFC]" : "text-[#0F172A]";
     const textSecondary = isDark ? "text-[#A7B0C2]" : "text-[#64748B]";
     
-    const IconComponent = simgeMap[ders.simge] || BookOpenIcon;
-    const renkSiniflari = renkMap[ders.renk] || renkMap.indigo;
-    const iconColor = isDark ? renkSiniflari.textDark : renkSiniflari.text;
+    const renkSiniflari = dersRengiGetir(ders.renk);
+    const iconColor = isDark ? renkSiniflari.metinKoyu : renkSiniflari.metin;
 
     return (
         <div className={`flex flex-col p-6 rounded-2xl border ${cardBg} transition-colors relative`}>
             {/* Card Header */}
             <div className="flex items-start justify-between mb-4">
                 <div className="flex items-center gap-3">
-                    <div className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 ${renkSiniflari.bg}`}>
-                        <IconComponent className={`w-6 h-6 ${iconColor}`} />
-                    </div>
+                    <DersGorunumSimgesi renk={ders.renk} simge={ders.simge} isDark={isDark} />
                     <div>
                         <div className="flex gap-1.5 mb-1">
                             {ders.dersKodu && (
@@ -64,7 +41,7 @@ function DersKarti({
                                 </span>
                             )}
                             {ders.donem && (
-                                <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${renkSiniflari.bg} ${iconColor}`}>
+                                <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${renkSiniflari.zemin} ${iconColor}`}>
                                     {ders.donem}
                                 </span>
                             )}

@@ -9,7 +9,7 @@ export default function DersAdimScroll() {
         const dersAdimiMi =
             pathname === "/panel/dersler/yeni" ||
             /^\/panel\/dersler\/[^/]+\/(materyal|hazir)$/.test(pathname) ||
-            /^\/dersler\/[^/]+(?:\/(konular|ozet|sohbet|testler|calisma-kartlari))?$/.test(pathname);
+            /^\/dersler\/[^/]+(?:\/(konular|ozet|sohbet|testler|calisma-kartlari|duzenle))?$/.test(pathname);
 
         if (!dersAdimiMi) return;
 

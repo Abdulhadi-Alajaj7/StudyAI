@@ -1,12 +1,11 @@
 import React, { useState, useEffect } from "react";
-import { useLocation, useOutletContext, useNavigate } from "react-router-dom";
+import { useOutletContext, useNavigate } from "react-router-dom";
 import api from "../api";
-import { dersDetayYolu } from "../utils/dersDetayYollari.mjs";
+import { dersDetayYolu, dersDuzenlemeYolu } from "../utils/dersDetayYollari.mjs";
 import { 
     PlusIcon, 
     MagnifyingGlassIcon, 
     BookOpenIcon, 
-    XMarkIcon,
     ChartPieIcon,
     CalendarDaysIcon,
     TrashIcon,
@@ -16,17 +15,11 @@ import DersKarti from "../components/DersKarti";
 function Derslerim() {
     const { isDark } = useOutletContext();
     const navigate = useNavigate();
-    const location = useLocation();
     
     const [dersler, setDersler] = useState([]);
     const [loading, setLoading] = useState(true);
     const [hata, setHata] = useState(null);
     const [aramaMetni, setAramaMetni] = useState("");
-
-    const [modalAcik, setModalAcik] = useState(false);
-    const [modalModu, setModalModu] = useState("olustur"); // "olustur" | "duzenle"
-    const [seciliDers, setSeciliDers] = useState(null);
-    const [form, setForm] = useState({ dersAdi: "", aciklama: "", donem: "" });
 
     const [silModalAcik, setSilModalAcik] = useState(false);
     const [silinecekDers, setSilinecekDers] = useState(null);
@@ -58,63 +51,9 @@ function Derslerim() {
         dersleriGetir();
     }, []);
 
-    useEffect(() => {
-        const duzenlenecekDersId = location.state?.duzenlenecekDersId;
-        if (!duzenlenecekDersId || loading) return;
-
-        const duzenlenecekDers = dersler.find((ders) => ders._id === duzenlenecekDersId);
-        if (duzenlenecekDers) {
-            setModalModu("duzenle");
-            setSeciliDers(duzenlenecekDers);
-            setForm({
-                dersAdi: duzenlenecekDers.dersAdi,
-                aciklama: duzenlenecekDers.aciklama || "",
-                donem: duzenlenecekDers.donem || "",
-            });
-            setAktifMenuId(null);
-            setModalAcik(true);
-        }
-
-        navigate(location.pathname, { replace: true, state: null });
-    }, [dersler, loading, location.pathname, location.state, navigate]);
-
     const filtreliDersler = dersler.filter(d => 
         d.dersAdi.toLowerCase().includes(aramaMetni.toLowerCase())
     );
-
-    const modalAc = (mod, ders = null) => {
-        setModalModu(mod);
-        if (mod === "duzenle" && ders) {
-            setSeciliDers(ders);
-            setForm({ dersAdi: ders.dersAdi, aciklama: ders.aciklama, donem: ders.donem });
-        } else {
-            setSeciliDers(null);
-            setForm({ dersAdi: "", aciklama: "", donem: "" });
-        }
-        setModalAcik(true);
-        setAktifMenuId(null);
-    };
-
-    const modalKapat = () => {
-        setModalAcik(false);
-        setForm({ dersAdi: "", aciklama: "", donem: "" });
-        setSeciliDers(null);
-    };
-
-    const handleFormSubmit = async (e) => {
-        e.preventDefault();
-        try {
-            if (modalModu === "olustur") {
-                await api.post("/dersler", form, { withCredentials: true });
-            } else {
-                await api.put(`/dersler/${seciliDers._id}`, form, { withCredentials: true });
-            }
-            modalKapat();
-            dersleriGetir();
-        } catch (err) {
-            alert(err.response?.data?.hata || "Bir hata oluştu.");
-        }
-    };
 
     const silOnayAc = (ders) => {
         setSilinecekDers(ders);
@@ -245,9 +184,9 @@ function Derslerim() {
                             isDark={isDark}
                             isMenuOpen={aktifMenuId === ders._id}
                             onToggleMenu={() => toggleMenu(ders._id)}
-                            onEdit={() => modalAc("duzenle", ders)}
+                            onEdit={() => navigate(dersDuzenlemeYolu(ders._id))}
                             onDelete={() => silOnayAc(ders)}
-                            onClick={() => navigate(dersDetayYolu(ders._id))}
+                            onClick={() => navigate(dersDetayYolu(ders._id), { state: { ders } })}
                         />
                     ))}
                     {filtreliDersler.length === 0 && (
@@ -255,72 +194,6 @@ function Derslerim() {
                             Aramanızla eşleşen ders bulunamadı.
                         </div>
                     )}
-                </div>
-            )}
-
-            {/* Create / Edit Modal */}
-            {modalAcik && (
-                <div className={`fixed inset-0 z-50 flex items-center justify-center p-4 ${modalOverlay}`}>
-                    <div className={`w-full max-w-md rounded-2xl border shadow-xl overflow-hidden ${cardBg}`} onClick={e => e.stopPropagation()}>
-                        <div className={`px-6 py-4 flex items-center justify-between border-b ${isDark ? 'border-[#26334A]' : 'border-[#E7E5EF]'}`}>
-                            <h3 className={`text-[18px] font-bold ${textPrimary}`}>
-                                {modalModu === "olustur" ? "Yeni Ders Oluştur" : "Dersi Düzenle"}
-                            </h3>
-                            <button onClick={modalKapat} className={`p-1 rounded-lg hover:bg-black/5 dark:hover:bg-white/5 ${textSecondary}`}>
-                                <XMarkIcon className="w-5 h-5" />
-                            </button>
-                        </div>
-                        <form onSubmit={handleFormSubmit} className="p-6">
-                            <div className="space-y-4">
-                                <div>
-                                    <label className={`block text-sm font-medium mb-1.5 ${textPrimary}`}>Ders Adı *</label>
-                                    <input 
-                                        type="text"
-                                        required
-                                        value={form.dersAdi}
-                                        onChange={e => setForm({...form, dersAdi: e.target.value})}
-                                        className={`w-full px-3 py-2 rounded-xl border focus:outline-none focus:ring-2 focus:ring-[#4F46E5] ${inputBg}`}
-                                        placeholder="Örn: İşletim Sistemleri"
-                                    />
-                                </div>
-                                <div>
-                                    <label className={`block text-sm font-medium mb-1.5 ${textPrimary}`}>Dönem (İsteğe Bağlı)</label>
-                                    <input 
-                                        type="text"
-                                        value={form.donem}
-                                        onChange={e => setForm({...form, donem: e.target.value})}
-                                        className={`w-full px-3 py-2 rounded-xl border focus:outline-none focus:ring-2 focus:ring-[#4F46E5] ${inputBg}`}
-                                        placeholder="Örn: Güz 2024"
-                                    />
-                                </div>
-                                <div>
-                                    <label className={`block text-sm font-medium mb-1.5 ${textPrimary}`}>Açıklama (İsteğe Bağlı)</label>
-                                    <textarea 
-                                        rows="3"
-                                        value={form.aciklama}
-                                        onChange={e => setForm({...form, aciklama: e.target.value})}
-                                        className={`w-full px-3 py-2 rounded-xl border focus:outline-none focus:ring-2 focus:ring-[#4F46E5] resize-none ${inputBg}`}
-                                        placeholder="Ders hakkında kısa bir bilgi..."
-                                    ></textarea>
-                                </div>
-                            </div>
-                            <div className="mt-8 flex items-center justify-end gap-3">
-                                <button 
-                                    type="button" 
-                                    onClick={modalKapat}
-                                    className={`px-4 py-2 rounded-xl font-medium ${isDark ? 'hover:bg-white/5' : 'hover:bg-black/5'} ${textSecondary}`}
-                                >
-                                    İptal
-                                </button>
-                                <button 
-                                    type="submit"
-                                    className={`px-5 py-2 rounded-xl font-medium transition-colors ${buttonPrimary}`}
-                                >
-                                    {modalModu === "olustur" ? "Oluştur" : "Kaydet"}
-                                </button>
-                            </div>
-                        </form>
-                    </div>
                 </div>
             )}
 
