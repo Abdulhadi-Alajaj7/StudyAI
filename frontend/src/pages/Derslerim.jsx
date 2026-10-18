@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
-import { useOutletContext, useNavigate } from "react-router-dom";
+import { useLocation, useOutletContext, useNavigate } from "react-router-dom";
 import api from "../api";
+import { dersDetayYolu } from "../utils/dersDetayYollari.mjs";
 import { 
     PlusIcon, 
     MagnifyingGlassIcon, 
@@ -15,6 +16,7 @@ import DersKarti from "../components/DersKarti";
 function Derslerim() {
     const { isDark } = useOutletContext();
     const navigate = useNavigate();
+    const location = useLocation();
     
     const [dersler, setDersler] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -55,6 +57,26 @@ function Derslerim() {
     useEffect(() => {
         dersleriGetir();
     }, []);
+
+    useEffect(() => {
+        const duzenlenecekDersId = location.state?.duzenlenecekDersId;
+        if (!duzenlenecekDersId || loading) return;
+
+        const duzenlenecekDers = dersler.find((ders) => ders._id === duzenlenecekDersId);
+        if (duzenlenecekDers) {
+            setModalModu("duzenle");
+            setSeciliDers(duzenlenecekDers);
+            setForm({
+                dersAdi: duzenlenecekDers.dersAdi,
+                aciklama: duzenlenecekDers.aciklama || "",
+                donem: duzenlenecekDers.donem || "",
+            });
+            setAktifMenuId(null);
+            setModalAcik(true);
+        }
+
+        navigate(location.pathname, { replace: true, state: null });
+    }, [dersler, loading, location.pathname, location.state, navigate]);
 
     const filtreliDersler = dersler.filter(d => 
         d.dersAdi.toLowerCase().includes(aramaMetni.toLowerCase())
@@ -225,7 +247,7 @@ function Derslerim() {
                             onToggleMenu={() => toggleMenu(ders._id)}
                             onEdit={() => modalAc("duzenle", ders)}
                             onDelete={() => silOnayAc(ders)}
-                            onClick={() => navigate(`/panel/dersler/${ders._id}/hazir`)}
+                            onClick={() => navigate(dersDetayYolu(ders._id))}
                         />
                     ))}
                     {filtreliDersler.length === 0 && (

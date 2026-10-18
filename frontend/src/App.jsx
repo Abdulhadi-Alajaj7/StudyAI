@@ -18,8 +18,15 @@ import Sinavlarim from "./pages/Sinavlarim.jsx";
 import YeniDersOlustur from "./pages/YeniDersOlustur.jsx";
 import MateryalEkle from "./pages/MateryalEkle.jsx";
 import DersHazir from "./pages/DersHazir.jsx";
+import DersGenelBakis from "./pages/DersGenelBakis.jsx";
+import DersKonular from "./pages/DersKonular.jsx";
+import DersOzet from "./pages/DersOzet.jsx";
+import DersSohbet from "./pages/DersSohbet.jsx";
+import DersTestler from "./pages/DersTestler.jsx";
+import DersCalismaKartlari from "./pages/DersCalismaKartlari.jsx";
 
 import DersAdimScroll from "./components/DersAdimScroll.jsx";
+import DersDetayLayout from "./components/DersDetayLayout.jsx";
 function App() {
     return (
         <BrowserRouter>
@@ -41,62 +48,29 @@ function App() {
 
                 {/* Korumalı Sayfalar */}
                 <Route element={<KorumaliRoute />}>
+                    <Route element={<PanelLayout />}>
+                        <Route path="/panel">
+                            <Route index element={<KontrolPaneli />} />
+                            <Route path="dersler" element={<Derslerim />} />
+                            <Route path="dersler/yeni" element={<YeniDersOlustur />} />
+                            <Route path="dersler/:dersId/materyal" element={<MateryalEkle />} />
+                            <Route path="dersler/:dersId/hazir" element={<DersHazir />} />
+                            <Route path="calisma-plani" element={<CalismaPlani />} />
+                            <Route path="yanlislarim" element={<Yanlislarim />} />
+                            <Route path="sinavlarim" element={<Sinavlarim />} />
+                            <Route path="ilerleme" element={<Ilerleme />} />
+                            <Route path="profil" element={<Profil />} />
+                        </Route>
 
-                    <Route
-                        path="/panel"
-                        element={<PanelLayout />}
-                    >
-                        <Route
-                            index
-                            element={<KontrolPaneli />}
-                        />
-
-                        <Route
-                            path="dersler"
-                            element={<Derslerim />}
-                        />
-                        
-                        <Route
-                            path="dersler/yeni"
-                            element={<YeniDersOlustur />}
-                        />
-                        
-                        <Route
-                            path="dersler/:dersId/materyal"
-                            element={<MateryalEkle />}
-                        />
-                        
-                        <Route
-                            path="dersler/:dersId/hazir"
-                            element={<DersHazir />}
-                        />
-
-                        <Route
-                            path="calisma-plani"
-                            element={<CalismaPlani />}
-                        />
-
-                        <Route
-                            path="yanlislarim"
-                            element={<Yanlislarim />}
-                        />
-
-                        <Route
-                            path="sinavlarim"
-                            element={<Sinavlarim />}
-                        />
-
-                        <Route
-                            path="ilerleme"
-                            element={<Ilerleme />}
-                        />
-
-                        <Route
-                            path="profil"
-                            element={<Profil />}
-                        />
+                        <Route path="/dersler/:dersId" element={<DersDetayLayout />}>
+                            <Route index element={<DersGenelBakis />} />
+                            <Route path="konular" element={<DersKonular />} />
+                            <Route path="ozet" element={<DersOzet />} />
+                            <Route path="sohbet" element={<DersSohbet />} />
+                            <Route path="testler" element={<DersTestler />} />
+                            <Route path="calisma-kartlari" element={<DersCalismaKartlari />} />
+                        </Route>
                     </Route>
-
                 </Route>
 
             </Routes>

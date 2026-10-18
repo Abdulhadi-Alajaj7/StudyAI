@@ -8,7 +8,8 @@ export default function DersAdimScroll() {
     useEffect(() => {
         const dersAdimiMi =
             pathname === "/panel/dersler/yeni" ||
-            /^\/panel\/dersler\/[^/]+\/(materyal|hazir)$/.test(pathname);
+            /^\/panel\/dersler\/[^/]+\/(materyal|hazir)$/.test(pathname) ||
+            /^\/dersler\/[^/]+(?:\/(konular|ozet|sohbet|testler|calisma-kartlari))?$/.test(pathname);
 
         if (!dersAdimiMi) return;
 

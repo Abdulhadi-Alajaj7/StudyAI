@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import api from "../api";
 
 import {
@@ -45,6 +45,8 @@ function PanelLayout() {
     const [kullanici, setKullanici] = useState(null);
 
     const navigate = useNavigate();
+    const location = useLocation();
+    const dersDetayinda = /^\/dersler\/[^/]+(?:\/.*)?$/.test(location.pathname);
 
     useEffect(() => {
         const profilGetir = async () => {
@@ -175,8 +177,9 @@ function PanelLayout() {
                                 to={item.yol}
                                 end={item.end}
                                 title={!sidebarAcik ? item.isim : undefined}
-                                className={({ isActive }) =>
-                                    `
+                                className={({ isActive }) => {
+                                    const aktif = isActive || (item.yol === "/panel/dersler" && dersDetayinda);
+                                    return `
                                     flex items-center h-[52px]
                                     rounded-[10px]
                                     text-[16px] font-medium
@@ -189,7 +192,7 @@ function PanelLayout() {
                                     }
 
                                     ${
-                                        isActive
+                                        aktif
                                             ? isDark
                                                 ? "bg-[#4F46E5] text-white shadow-md shadow-[#4F46E5]/20"
                                                 : "bg-[#EEF2FF] text-[#4F46E5]"
@@ -198,7 +201,7 @@ function PanelLayout() {
                                                 : "text-[#64748B] hover:bg-[#F8F7FC] hover:text-[#0F172A]"
                                     }
                                     `
-                                }
+                                }}
                             >
                                 <Icon className="w-[22px] h-[22px] shrink-0" />
 

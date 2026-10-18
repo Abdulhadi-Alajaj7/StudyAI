@@ -4,6 +4,7 @@ import api from "../api";
 import DersOlusturmaAdimlari from "../components/DersOlusturmaAdimlari";
 import KonuHaritasiBolumu from "../components/KonuHaritasiBolumu";
 import SemantikAramaBolumu from "../components/SemantikAramaBolumu";
+import { dersDetayYolu } from "../utils/dersDetayYollari.mjs";
 import { CheckBadgeIcon, ArrowRightIcon, BookOpenIcon, DocumentTextIcon, CheckIcon, CpuChipIcon, ListBulletIcon, ChatBubbleBottomCenterTextIcon, PuzzlePieceIcon, SparklesIcon, ComputerDesktopIcon, CodeBracketIcon, CircleStackIcon, CalculatorIcon, BeakerIcon } from "@heroicons/react/24/outline";
 
 function DersHazir() {
@@ -372,8 +373,10 @@ function DersHazir() {
                                 Derslerime Dön
                             </button>
                             <button
-                                disabled
-                                className={`w-full sm:w-auto flex items-center justify-center gap-2 px-8 py-3 rounded-xl font-medium transition-colors bg-[#4F46E5] text-white opacity-50 cursor-not-allowed`}
+                                type="button"
+                                onClick={() => navigate(dersDetayYolu(dersId))}
+                                disabled={!dersId}
+                                className={`w-full sm:w-auto flex items-center justify-center gap-2 px-8 py-3 rounded-xl font-medium transition-colors bg-[#4F46E5] text-white hover:bg-[#4338CA] ${!dersId ? "opacity-50 cursor-not-allowed" : ""}`}
                             >
                                 Derse Git
                                 <ArrowRightIcon className="w-5 h-5" />
@@ -440,7 +443,12 @@ function DersHazir() {
                                         <div className={`w-full h-1.5 rounded-full ${isDark ? 'bg-[#26334A]' : 'bg-[#E7E5EF]'}`}></div>
                                     </div>
 
-                                    <button disabled className={`w-full py-2.5 rounded-xl text-[13px] font-medium border flex items-center justify-center gap-1.5 ${isDark ? 'border-[#26334A] text-[#7F8AA3] bg-[#0B1120]' : 'border-[#E7E5EF] text-[#94A3B8] bg-[#F8F7FC]'} opacity-70 cursor-not-allowed`}>
+                                    <button
+                                        type="button"
+                                        onClick={() => navigate(dersDetayYolu(dersId))}
+                                        disabled={!dersId}
+                                        className={`w-full py-2.5 rounded-xl text-[13px] font-medium border flex items-center justify-center gap-1.5 transition-colors ${isDark ? 'border-[#33415C] text-[#F8FAFC] hover:bg-[#162137]' : 'border-[#D8D5E2] text-[#4F46E5] hover:bg-[#F8F7FC]'} ${!dersId ? "opacity-50 cursor-not-allowed" : ""}`}
+                                    >
                                         Derse Git <ArrowRightIcon className="w-3.5 h-3.5" />
                                     </button>
                                 </div>
