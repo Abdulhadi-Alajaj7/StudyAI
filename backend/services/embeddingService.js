@@ -132,6 +132,10 @@ const kotaSirasinaGir = (tahminiToken, ayarlar, beklet) => {
 };
 
 const hataGeciciMi = (hata) => {
+    // Yerel RPD sınırı Pasifik gün dönümüne kadar düzelmez; kısa backoff ile
+    // yeniden denemek yalnızca isteği geciktirir. Sağlayıcı 429'ları ise sınırlı
+    // biçimde retry edilmeye devam eder.
+    if (hata?.kod === "EMBEDDING_GUNLUK_LIMIT") return false;
     const durum = hata?.status ?? hata?.statusCode ?? hata?.code;
     const mesaj = String(hata?.message || "").toLowerCase();
     return durum === 429 || (Number(durum) >= 500 && Number(durum) < 600) ||

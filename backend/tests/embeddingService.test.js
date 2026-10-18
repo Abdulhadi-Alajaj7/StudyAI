@@ -106,6 +106,35 @@ test("geçici 429 hatasında üstel geri çekilme ile yeniden dener", async () =
     assert.deepEqual(sonuc[0], [1, 0, 0]);
 });
 
+test("yerel günlük kota sınırı aynı istek içinde gereksiz yere yeniden denenmez", async () => {
+    let cagri = 0;
+    const beklemeler = [];
+    const istemci = {
+        models: {
+            async embedContent() {
+                cagri += 1;
+                const hata = new Error("Yerel günlük sınır dolu");
+                hata.kod = "EMBEDDING_GUNLUK_LIMIT";
+                hata.status = 429;
+                throw hata;
+            }
+        }
+    };
+
+    await assert.rejects(
+        embeddingleriUret(["sorgu"], {
+            istemci,
+            ayarlar: ayarlar(),
+            limitUygula: false,
+            beklet: async (sure) => { beklemeler.push(sure); },
+        }),
+        (hata) => hata.kod === "EMBEDDING_GUNLUK_LIMIT"
+    );
+
+    assert.equal(cagri, 1);
+    assert.deepEqual(beklemeler, []);
+});
+
 test("geçici 503 hatasında sınırlı sayıda yeniden dener ve hata türünü gizli ayrıntı sızdırmadan sunar", async () => {
     let cagri = 0;
     const istemci = {

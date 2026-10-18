@@ -81,7 +81,7 @@ export const materyalEmbeddingleriniYenile = async (req, res) => {
         }
 
         const sonuc = await materyalEmbeddingleriniOlustur(materyal, materyal.aktifIslemeId);
-        await Materyal.updateOne(
+        const guncelleme = await Materyal.updateOne(
             { _id: materyal._id, kullaniciId, aktifIslemeId: materyal.aktifIslemeId },
             {
                 $set: {
@@ -92,6 +92,15 @@ export const materyalEmbeddingleriniYenile = async (req, res) => {
                 }
             }
         );
+
+        if (guncelleme.matchedCount !== 1) {
+            const surumHatasi = new Error(
+                "Materyal semantik indeks oluşturulurken değişti. Güncel sürüm için işlemi yeniden deneyin."
+            );
+            surumHatasi.kod = "EMBEDDING_SURUM_DEGISTI";
+            surumHatasi.status = 409;
+            throw surumHatasi;
+        }
 
         return res.status(200).json({ mesaj: "Semantik arama dizini güncellendi.", sonuc });
     } catch (hata) {
@@ -108,8 +117,9 @@ export const materyalEmbeddingleriniYenile = async (req, res) => {
                 }
             ).catch(() => {});
         }
-        return res.status(hata.status === 429 ? 429 : 503).json({
-            hata: embeddingKullaniciHatasi(hata),
+        const status = hata.status === 409 ? 409 : (hata.status === 429 ? 429 : 503);
+        return res.status(status).json({
+            hata: status === 409 ? hata.message : embeddingKullaniciHatasi(hata),
             kod: hata.kod || "EMBEDDING_YENILEME_HATASI"
         });
     }

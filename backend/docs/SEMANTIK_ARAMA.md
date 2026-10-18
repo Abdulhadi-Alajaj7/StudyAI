@@ -8,7 +8,7 @@ Embedding verisi ayrı bir koleksiyon yerine `MetinParcasi` belgesinde saklanır
 - Yeniden işlemede staging sürümü hazırlanırken eski aktif sürüm çalışmaya devam eder.
 - Arama yalnızca `Materyal.aktifIslemeId` ile birebir eşleşen parçaları seçer; yarım kalmış veya eski sürümler sonuçlara karışmaz.
 
-MongoDB Atlas Vector Search kullanılmaz. Ücretsiz Atlas katmanına uygun olarak aday aktif parçalar normal sorguyla alınır ve kosinüs benzerliği Node.js içinde hesaplanır. `SEMANTIK_ARAMA_MAKS_ADAY` bu yaklaşımın bellek ve CPU üst sınırıdır. Veri büyüyüp ders başına bu sınır düzenli olarak aşılırsa Atlas Vector Search veya ayrı bir vektör veritabanına geçilmelidir.
+MongoDB Atlas Vector Search kullanılmaz. Ücretsiz Atlas katmanına uygun olarak aktif parçaların önce yalnızca kimlik ve sıra metadatası alınır. `SEMANTIK_ARAMA_MAKS_ADAY` aşılırsa adaylar materyaller arasında dengeli, her materyalin tamamı boyunca eşit aralıklı ve deterministik seçilir; yalnızca seçilen parçaların metin ve vektörleri belleğe taşınır. Kosinüs benzerliği Node.js içinde hesaplanır. Bu sınır CPU ve vektör belleğini sınırlar ancak yaklaşık arama yaptığı için seçilmeyen bir parçanın en iyi sonuç olma riski tamamen ortadan kalkmaz. Veri büyüyüp ders başına bu sınır düzenli olarak aşılırsa Atlas Vector Search veya ayrı bir vektör veritabanına geçilmelidir.
 
 ## Model seçimi
 
@@ -54,7 +54,8 @@ Cookie: token=...
 
 - Varsayılan güvenli sınırlar 90 RPM, yaklaşık 27.000 TPM ve 900 RPD'dir; bunlar uygulama ayarıdır, Google hesabının garantili kotası değildir.
 - Gerçek proje kotaları Google AI Studio'dan kontrol edilmeli ve ortam değişkenleri daha düşük değerlere ayarlanmalıdır.
-- Süreç içi kuyruk RPM/TPM/RPD sınırlarını uygular. 429, zaman aşımı ve 5xx hataları en fazla üç denemeyle üstel geri çekilir.
+- Süreç içi kuyruk RPM/TPM/RPD sınırlarını uygular. Sağlayıcı kaynaklı 429, zaman aşımı ve 5xx hataları en fazla üç denemeyle üstel geri çekilir; yerelde saptanan günlük limit aynı çağrı içinde yeniden denenmez.
+- Sayaçlar süreç belleğindedir ve backend yeniden başladığında sıfırlanır. Tek instance kullanılan bitirme projesinde bu bilinçli bir sadelik tercihidir; gerçek proje kotasını Gemini API yine sunucu tarafında uygular ve aşımda 429 döndürür.
 - Birden fazla backend instance varsa bu sayaçlar instance başınadır. Ortak kota için Redis tabanlı dağıtık limiter eklenmelidir.
 - Ücretsiz katmanda gönderilen verilerin ürün iyileştirmede kullanılabileceğine ilişkin güncel Google koşulları değerlendirilmelidir.
 
@@ -70,4 +71,3 @@ Testler canlı API çağrısı yapmaz; Gemini istemcisi mock'lanır:
 cd backend
 npm test
 ```
-

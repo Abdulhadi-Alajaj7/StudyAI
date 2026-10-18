@@ -18,6 +18,74 @@ const minimumSkorGetir = () => {
     return Number.isFinite(sayi) ? Math.min(1, Math.max(-1, sayi)) : 0.2;
 };
 
+const kimlikMetni = (deger) => String(deger ?? "");
+
+const esitAralikliIndeksler = (uzunluk, adet) => {
+    if (adet >= uzunluk) return Array.from({ length: uzunluk }, (_, index) => index);
+    return Array.from(
+        { length: adet },
+        (_, index) => Math.min(uzunluk - 1, Math.floor(((index + 0.5) * uzunluk) / adet))
+    );
+};
+
+/**
+ * Aday sınırı aşıldığında ilk MongoDB kayıtlarını almak yerine her materyale
+ * dengeli kota verir ve her materyalin başı/ortası/sonu boyunca eşit aralıklı
+ * parçalar seçer. Girdi sırası değişse de aynı kimlikler seçilir.
+ */
+export const dengeliAdayKimlikleriniSec = (kayitlar, limit) => {
+    if (!Array.isArray(kayitlar) || kayitlar.length === 0 || limit < 1) return [];
+
+    const gruplarHaritasi = new Map();
+    for (const kayit of kayitlar) {
+        const anahtar = kimlikMetni(kayit.materyalId);
+        if (!gruplarHaritasi.has(anahtar)) gruplarHaritasi.set(anahtar, []);
+        gruplarHaritasi.get(anahtar).push(kayit);
+    }
+
+    let gruplar = [...gruplarHaritasi.entries()]
+        .sort(([sol], [sag]) => sol.localeCompare(sag))
+        .map(([materyalId, parcalar]) => ({
+            materyalId,
+            kota: 0,
+            parcalar: parcalar.sort((sol, sag) => (
+                (sol.parcaIndex ?? 0) - (sag.parcaIndex ?? 0) ||
+                kimlikMetni(sol._id).localeCompare(kimlikMetni(sag._id))
+            )),
+        }));
+
+    // Teorik olarak materyal sayısı limitten fazlaysa ilk materyalleri kayırma;
+    // materyal kümesinin tamamına eşit aralıklı örnekleme uygula.
+    if (gruplar.length > limit) {
+        gruplar = esitAralikliIndeksler(gruplar.length, limit).map((index) => gruplar[index]);
+    }
+
+    let kalan = Math.min(limit, kayitlar.length);
+    let uygunGruplar = gruplar;
+    while (kalan > 0 && uygunGruplar.length > 0) {
+        const pay = Math.max(1, Math.floor(kalan / uygunGruplar.length));
+        const sonrakiTur = [];
+        for (const grup of uygunGruplar) {
+            if (kalan === 0) break;
+            const bosYer = grup.parcalar.length - grup.kota;
+            const eklenecek = Math.min(pay, bosYer, kalan);
+            grup.kota += eklenecek;
+            kalan -= eklenecek;
+            if (grup.kota < grup.parcalar.length) sonrakiTur.push(grup);
+        }
+        uygunGruplar = sonrakiTur;
+    }
+
+    return gruplar.flatMap((grup) => (
+        esitAralikliIndeksler(grup.parcalar.length, grup.kota)
+            .map((index) => grup.parcalar[index]._id)
+    ));
+};
+
+const aktifSurumAnahtari = (materyalId, islemeId) => (
+    `${kimlikMetni(materyalId)}:${kimlikMetni(islemeId)}`
+);
+
 export const semanticAramaYap = async ({
     kullaniciId,
     dersId,
@@ -65,9 +133,9 @@ export const semanticAramaYap = async ({
         materyalId: materyal._id,
         islemeId: materyal.aktifIslemeId,
     }));
-    const materyalHaritasi = new Map(materyaller.map((materyal) => [String(materyal._id), materyal]));
-
-    const parcalar = await MetinParcasiModel.find({
+    // Önce yalnızca hafif metadata alınır. Böylece aday sınırı uygulanırken
+    // binlerce 768 boyutlu vektör ve metin belleğe taşınmaz.
+    const adayMetadatasi = await MetinParcasiModel.find({
         kullaniciId,
         dersId,
         embeddingDurumu: "hazir",
@@ -75,8 +143,24 @@ export const semanticAramaYap = async ({
         embeddingBoyutu: ayarlar.boyut,
         $or: aktifSurumler,
     })
+        .select("_id materyalId islemeId parcaIndex")
+        .sort({ materyalId: 1, parcaIndex: 1, _id: 1 })
+        .lean();
+
+    const adayKimlikleri = dengeliAdayKimlikleriniSec(adayMetadatasi, adayLimiti);
+    const parcalar = adayKimlikleri.length === 0
+        ? []
+        : await MetinParcasiModel.find({
+            _id: { $in: adayKimlikleri },
+            kullaniciId,
+            dersId,
+            embeddingDurumu: "hazir",
+            embeddingModel: ayarlar.model,
+            embeddingBoyutu: ayarlar.boyut,
+            $or: aktifSurumler,
+        })
         .select("+embedding materyalId islemeId parcaIndex icerik")
-        .limit(adayLimiti)
+        .sort({ materyalId: 1, parcaIndex: 1, _id: 1 })
         .lean();
 
     if (parcalar.length === 0) {
@@ -102,14 +186,36 @@ export const semanticAramaYap = async ({
         throw hata;
     }
 
-    const indeksliMateryalIds = new Set();
+    // Sorgu embedding'i üretilirken materyal silinmiş veya yeniden işlenmiş
+    // olabilir. Yanıt verilmeden hemen önce aktif sürümleri tekrar doğrula.
+    const guncelMateryaller = await MateryalModel.find({
+        kullaniciId,
+        dersId,
+        durum: "hazir",
+        aktifIslemeId: { $ne: null },
+        _id: { $in: materyaller.map((materyal) => materyal._id) },
+    })
+        .select("_id orijinalDosyaAdi dosyaAdi aktifIslemeId embeddingDurumu")
+        .lean();
+    const guncelMateryalHaritasi = new Map(
+        guncelMateryaller.map((materyal) => [kimlikMetni(materyal._id), materyal])
+    );
+    const guncelAktifSurumler = new Set(
+        guncelMateryaller.map((materyal) => aktifSurumAnahtari(materyal._id, materyal.aktifIslemeId))
+    );
+    const indeksliMateryalIds = new Set(
+        adayMetadatasi
+            .filter((parca) => guncelAktifSurumler.has(aktifSurumAnahtari(parca.materyalId, parca.islemeId)))
+            .map((parca) => kimlikMetni(parca.materyalId))
+    );
     const sonuclar = [];
     for (const parca of parcalar) {
-        const materyal = materyalHaritasi.get(String(parca.materyalId));
+        const surumAnahtari = aktifSurumAnahtari(parca.materyalId, parca.islemeId);
+        if (!guncelAktifSurumler.has(surumAnahtari)) continue;
+        const materyal = guncelMateryalHaritasi.get(kimlikMetni(parca.materyalId));
         if (!materyal) continue;
         const skor = kosinusBenzerligi(sorguEmbedding, parca.embedding);
         if (skor == null) continue;
-        indeksliMateryalIds.add(String(parca.materyalId));
         if (skor < minimumSkorGetir()) continue;
         sonuclar.push({
             materyalId: String(parca.materyalId),
@@ -120,17 +226,22 @@ export const semanticAramaYap = async ({
         });
     }
 
-    sonuclar.sort((sol, sag) => sag.skor - sol.skor || sol.parcaIndex - sag.parcaIndex);
+    sonuclar.sort((sol, sag) => (
+        sag.skor - sol.skor ||
+        sol.materyalId.localeCompare(sag.materyalId) ||
+        sol.parcaIndex - sag.parcaIndex
+    ));
 
     return {
         sonuclar: sonuclar.slice(0, sonucLimiti),
         meta: {
             toplamAday: parcalar.length,
-            hazirMateryalSayisi: materyaller.length,
+            toplamUygunParca: adayMetadatasi.length,
+            hazirMateryalSayisi: guncelMateryaller.length,
             indeksliMateryalSayisi: indeksliMateryalIds.size,
-            eksikIndeksSayisi: Math.max(0, materyaller.length - indeksliMateryalIds.size),
+            eksikIndeksSayisi: Math.max(0, guncelMateryaller.length - indeksliMateryalIds.size),
             adayLimiti,
-            adaylarSinirlandi: parcalar.length === adayLimiti,
+            adaylarSinirlandi: adayMetadatasi.length > adayKimlikleri.length,
             model: ayarlar.model,
             boyut: ayarlar.boyut,
         }

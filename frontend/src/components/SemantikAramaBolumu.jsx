@@ -104,6 +104,12 @@ function SemantikAramaBolumu({ dersId, isDark, hazirMateryalSayisi = 0 }) {
                 </div>
             )}
 
+            {!hata && meta?.adaylarSinirlandi && (
+                <div className="mt-4 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-300 text-[11px]">
+                    Arama, tüm materyallere dengeli dağıtılmış en fazla {meta.adayLimiti} bölüm üzerinde yapıldı.
+                </div>
+            )}
+
             {!hata && aramaYapildi && sonuclar.length === 0 && (
                 <div className={`mt-4 p-4 rounded-xl border border-dashed text-center ${isDark ? "border-[#26334A]" : "border-[#D8D5E2]"}`}>
                     <p className={`text-[13px] font-semibold ${anaMetin}`}>İlgili bir bölüm bulunamadı.</p>
@@ -133,8 +139,11 @@ function SemantikAramaBolumu({ dersId, isDark, hazirMateryalSayisi = 0 }) {
                                     <DocumentTextIcon className="w-4 h-4 text-[#4F46E5] shrink-0" />
                                     <span className={`text-[12px] font-semibold truncate ${anaMetin}`}>{sonuc.materyalAdi}</span>
                                 </div>
-                                <span className="text-[10px] font-bold text-[#4F46E5] shrink-0">
-                                    %{Math.round(Math.max(0, Math.min(1, sonuc.skor)) * 100)} eşleşme
+                                <span
+                                    className="text-[10px] font-bold text-[#4F46E5] shrink-0"
+                                    title="Kosinüs benzerliği skorudur; doğruluk oranı değildir."
+                                >
+                                    Benzerlik skoru: {Number(sonuc.skor).toFixed(2).replace(".", ",")}
                                 </span>
                             </div>
                             <p className={`text-[12px] leading-relaxed whitespace-pre-line ${ikincilMetin}`}>{sonuc.icerik}</p>
@@ -147,4 +156,3 @@ function SemantikAramaBolumu({ dersId, isDark, hazirMateryalSayisi = 0 }) {
 }
 
 export default SemantikAramaBolumu;
-

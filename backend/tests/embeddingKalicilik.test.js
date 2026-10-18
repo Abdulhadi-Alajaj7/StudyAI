@@ -1,6 +1,7 @@
 import { test, beforeEach, mock } from "node:test";
 import assert from "node:assert/strict";
 import mongoose from "mongoose";
+import crypto from "node:crypto";
 
 const kullaniciId = new mongoose.Types.ObjectId();
 const dersId = new mongoose.Types.ObjectId();
@@ -86,26 +87,15 @@ test("aynı içerikli parçayı bir kez üretir ve embedding'i tüm staging kay�
     }
 });
 
-test("aynı kullanıcıdaki aynı model/boyut/girdi hash'ini API çağrısı yapmadan yeniden kullanır", async () => {
-    const ilkIstemci = {
-        models: {
-            async embedContent() {
-                return { embeddings: [{ values: [1, 0, 0] }] };
-            }
-        }
-    };
-    await materyalEmbeddingleriniOlustur(materyal, islemeId, {
-        ayarlar,
-        istemci: ilkIstemci,
-        limitUygula: false,
-    });
-
-    const ilkAlanlar = yazmaIslemleri[0].updateOne.update.$set;
+test("sunucu yeniden başlamış olsa da MongoDB'deki embedding'i API çağrısı yapmadan yeniden kullanır", async () => {
+    const embeddingGirdiHash = crypto
+        .createHash("sha256")
+        .update(`${ayarlar.model}\0${ayarlar.boyut}\0${materyal.orijinalDosyaAdi}\0${parcalar[0].icerik}`)
+        .digest("hex");
     onbellek = [{
-        embeddingGirdiHash: ilkAlanlar.embeddingGirdiHash,
-        embedding: ilkAlanlar.embedding,
+        embeddingGirdiHash,
+        embedding: [1, 0, 0],
     }];
-    yazmaIslemleri = [];
 
     const kullanilmamasiGerekenIstemci = {
         models: {
@@ -124,4 +114,3 @@ test("aynı kullanıcıdaki aynı model/boyut/girdi hash'ini API çağrısı yap
     assert.equal(sonuc.onbellektenKullanilan, 2);
     assert.equal(yazmaIslemleri.length, 2);
 });
-
