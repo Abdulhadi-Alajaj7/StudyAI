@@ -17,6 +17,10 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import { dosyaIceriginiDogrula } from "../services/dosyaTuruDogrulamaService.js";
 
+const metinCikarmaKullaniciMesaji = () => (
+    "Dosya içeriğinden metin çıkarılamadı. Dosyanın bozuk olmadığını kontrol edip tekrar deneyin."
+);
+
 /**
  * Ders onayıyla yarışmayan atomik materyal işlem kaydı.
  * Başarılı her kayıt, işlem tamamen bitince bir kez serbest bırakılmalıdır.
@@ -123,7 +127,7 @@ const arkaPlandaMetinCikar = async (materyalIds, dersId, kullaniciId) => {
                 {
                     $set: {
                         durum: "hata",
-                        islemeHatasi: error.message
+                        islemeHatasi: metinCikarmaKullaniciMesaji()
                     }
                 }
             );
@@ -254,8 +258,12 @@ export const materyalYukle = async (req, res) => {
                 console.error("Materyal kayıt temizleme hatası:", temizlemeHatasi);
             }
         }
-        return res.status(error.statusCode === 400 ? 400 : 500).json({
-            hata: error.message || "Materyal yüklenirken bir hata oluştu."
+        const istemciHatasi = error.statusCode === 400;
+        return res.status(istemciHatasi ? 400 : 500).json({
+            hata: istemciHatasi
+                ? error.message
+                : "Materyal yüklenirken bir sorun oluştu. Lütfen tekrar deneyin.",
+            kod: error.code || (istemciHatasi ? "GECERSIZ_DOSYA" : "MATERYAL_YUKLEME_HATASI")
         });
     } finally {
         if (!arkaPlanaDevredildi) {
@@ -350,7 +358,10 @@ export const materyalSil = async (req, res) => {
         return res.status(200).json({ mesaj: "Materyal başarıyla silindi." });
     } catch (error) {
         console.error("Materyal silme hatası:", error);
-        return res.status(500).json({ hata: "Materyal silinirken hata oluştu: " + error.message });
+        return res.status(500).json({
+            hata: "Materyal silinirken bir sorun oluştu. Lütfen tekrar deneyin.",
+            kod: "MATERYAL_SILME_HATASI"
+        });
     } finally {
         if (kilitliDersId) {
             await materyalIslemiBitir(kilitliDersId, kullaniciId).catch(hata => {
@@ -467,15 +478,21 @@ export const materyalMetinCikar = async (req, res) => {
                 {
                     $set: {
                         durum: mevcutMateryal.aktifIslemeId ? "hazir" : "hata",
-                        islemeHatasi: err.message
+                        islemeHatasi: metinCikarmaKullaniciMesaji()
                     }
                 }
             );
 
-            return res.status(400).json({ hata: "Metin çıkarma başarısız oldu: " + err.message });
+            return res.status(400).json({
+                hata: metinCikarmaKullaniciMesaji(),
+                kod: "METIN_CIKARMA_HATASI"
+            });
         }
     } catch (error) {
-        return res.status(500).json({ hata: "Metin çıkarma isteği işlenirken hata oluştu: " + error.message });
+        return res.status(500).json({
+            hata: "Metin çıkarma isteği işlenirken bir sorun oluştu. Lütfen tekrar deneyin.",
+            kod: "METIN_CIKARMA_ISTEK_HATASI"
+        });
     } finally {
         if (kilitliDersId) {
             await materyalIslemiBitir(kilitliDersId, kullaniciId).catch(hata => {

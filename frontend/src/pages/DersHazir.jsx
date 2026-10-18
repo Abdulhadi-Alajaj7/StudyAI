@@ -25,21 +25,6 @@ function DersHazir() {
     const hataSayisiRef = useRef(0);
     const pollSayisiRef = useRef(0);
 
-    const konuHaritasiniGetir = async () => {
-        setHaritaYukleniyor(true);
-        try {
-            const res = await api.get(`/dersler/${dersId}/konu-haritasi`, { withCredentials: true });
-            setKonuHaritasi(res.data.harita);
-            setGuncelMi(res.data.guncelMi);
-            setHaritaHatasi(res.data.olusturmaHatasi || "");
-        } catch (err) {
-            console.error("Konu haritası alınamadı:", err);
-            setHaritaHatasi(err.response?.data?.hata || "Konu haritası yüklenemedi.");
-        } finally {
-            setHaritaYukleniyor(false);
-        }
-    };
-
     useEffect(() => {
         const materyalleriGetir = async () => {
             try {
@@ -59,12 +44,24 @@ function DersHazir() {
                 console.error("Ders bilgisi alınamadı", err);
             }
         };
+        const konuHaritasiniGetir = async () => {
+            setHaritaYukleniyor(true);
+            try {
+                const res = await api.get(`/dersler/${dersId}/konu-haritasi`, { withCredentials: true });
+                setKonuHaritasi(res.data.harita);
+                setGuncelMi(res.data.guncelMi);
+                setHaritaHatasi(res.data.olusturmaHatasi || "");
+            } catch (err) {
+                console.error("Konu haritası alınamadı:", err);
+                setHaritaHatasi(err.response?.data?.hata || "Konu haritası yüklenemedi.");
+            } finally {
+                setHaritaYukleniyor(false);
+            }
+        };
         if (dersId) {
             materyalleriGetir();
             konuHaritasiniGetir();
-            if (!ders) {
-                dersGetir();
-            }
+            dersGetir();
         }
     }, [dersId]);
 

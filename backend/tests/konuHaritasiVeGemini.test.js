@@ -41,20 +41,19 @@ async function main() {
     // -----------------------------------------------------------------
     // TEST 1: Gemini API Anahtarı Durumu ve Canlı Bağlantı Kontrolü (GERÇEK API ÇAĞRISI)
     // -----------------------------------------------------------------
-    await testKos("[GERÇEK API] Gemini API Anahtarı ve Canlı Bağlantı / Hata Yönetimi", async () => {
-        const sonuc = await geminiBaglantisiniDogrula(VARSAYILAN_GEMINI_MODELI);
-        console.log("  -> Gemini Canlı Sağlık Yanıtı:", {
-            model: sonuc.model,
-            basarili: sonuc.basarili,
-            hataTuru: sonuc.hataTuru || "YOK"
-        });
-        if (!process.env.GEMINI_API_KEY) {
-            assert.strictEqual(sonuc.basarili, false);
-            assert.strictEqual(sonuc.hataTuru, "EKSİK_API_KEY");
-        } else {
+    if (process.env.RUN_LIVE_GEMINI_TESTS === "true") {
+        await testKos("[GERÇEK API] Gemini API Anahtarı ve Canlı Bağlantı / Hata Yönetimi", async () => {
+            const sonuc = await geminiBaglantisiniDogrula(VARSAYILAN_GEMINI_MODELI);
+            console.log("  -> Gemini Canlı Sağlık Yanıtı:", {
+                model: sonuc.model,
+                basarili: sonuc.basarili,
+                hataTuru: sonuc.hataTuru || "YOK"
+            });
             assert.strictEqual(sonuc.basarili, true);
-        }
-    });
+        });
+    } else {
+        console.log("\n[ATLANDI] Canlı Gemini testi için RUN_LIVE_GEMINI_TESTS=true ayarlayın.");
+    }
 
     // -----------------------------------------------------------------
     // TEST 2: Deterministik Konu Kimliği Üretimi (MOCK/UNIT TEST)

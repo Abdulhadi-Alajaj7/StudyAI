@@ -16,31 +16,6 @@ export const DURAK_KELIMELER = new Set([
 ]);
 
 /**
- * Zıt / çakışan kavram çiftleri.
- * Eğer bir başlıkta A, diğerinde B varsa bu konular ASLA eşleştirilemez.
- */
-export const ZIT_KAVRAMLAR = [
-    ["tek", "cift"],
-    ["dogrusal", "ikili"],
-    ["linear", "binary"],
-    ["yigin", "kuyruk"],
-    ["stack", "queue"],
-    ["en kucuk", "en buyuk"],
-    ["min", "max"],
-    ["oncelikli", "dairesel"]
-];
-
-/**
- * Belirleyici teknik terim grupları (bağlam/açıklama desteğiyle eşleştirilen özel kavramlar)
- */
-export const AYIRICI_TEKNIK_TERIMLER = [
-    ["preorder", "inorder", "postorder"],
-    ["bfs", "dfs"],
-    ["push", "pop"],
-    ["enqueue", "dequeue"]
-];
-
-/**
  * Türkçe karakterleri, diyakritikleri ve büyük/küçük harf varyasyonlarını
  * güvenli eşleştirme için ASCII taban formuna normalize eder.
  * Veritabanındaki gerçek başlıkları değiştirmez.
@@ -137,7 +112,7 @@ export const metinKokleriniCikar = (metin = "") => {
  * Böylece:
  *   - "gerek" vs "gereksin" → "gerek" ≤ "gereksin" öneki, uzunluk 5 ≥ 5 → eşleşir
  *   - "ver"   vs "veri"     → 3 < 5 → eşleşmez (çok kısa önek, çok genel)
- *   - "stack" vs "stackover" → olası yanlış pozitif yok çünkü ZIT_KAVRAMLAR önce çalışır
+ *   - "ver"   vs "veri"     → kısa ve genel önekler eşleşmez
  *
  * @param {string} kokA
  * @param {string} kokB
@@ -154,23 +129,58 @@ export const koklerEslesiyorMu = (kokA, kokB) => {
 };
 
 /**
- * İki metin arasında zıt / çatışan kavram var mı kontrol eder.
+ * İki kök kümesinin bire bir eşleşen öğelerini ve benzerlik oranlarını hesaplar.
+ * Ders veya alan bilgisi içermez; yalnızca metinsel kanıtı ölçer.
  */
-export const zitKavramVarMi = (metin1 = "", metin2 = "") => {
-    const norm1 = turkceKarakterleriAsciilestir(metin1);
-    const norm2 = turkceKarakterleriAsciilestir(metin2);
+export const kokKumesiBenzerliginiHesapla = (koklerA, koklerB) => {
+    const eslesenB = new Set();
+    let eslesenSayisi = 0;
 
-    for (const [z1, z2] of ZIT_KAVRAMLAR) {
-        const m1HasZ1 = new RegExp(`\\b${z1}\\b`, "i").test(norm1);
-        const m1HasZ2 = new RegExp(`\\b${z2}\\b`, "i").test(norm1);
-        const m2HasZ1 = new RegExp(`\\b${z1}\\b`, "i").test(norm2);
-        const m2HasZ2 = new RegExp(`\\b${z2}\\b`, "i").test(norm2);
-
-        if ((m1HasZ1 && m2HasZ2) || (m1HasZ2 && m2HasZ1)) {
-            return true;
+    for (const kokA of koklerA) {
+        for (const kokB of koklerB) {
+            if (!eslesenB.has(kokB) && koklerEslesiyorMu(kokA, kokB)) {
+                eslesenB.add(kokB);
+                eslesenSayisi++;
+                break;
+            }
         }
     }
-    return false;
+
+    const birlesimSayisi = koklerA.size + koklerB.size - eslesenSayisi;
+    const kucukKumeBoyutu = Math.min(koklerA.size, koklerB.size);
+
+    return {
+        eslesenSayisi,
+        jaccard: birlesimSayisi > 0 ? eslesenSayisi / birlesimSayisi : 0,
+        kucukKumeKapsami: kucukKumeBoyutu > 0 ? eslesenSayisi / kucukKumeBoyutu : 0
+    };
+};
+
+const ustKonuBaglamiUyumluMu = (eskiKonu, baglam) => {
+    const eskiUstBaslik = eskiKonu?.anaBaslik || "";
+    const yeniUstBaslik = baglam?.ustKonuBasligi || "";
+
+    // Ana konular karşılaştırılırken veya eski kayıtta bağlam yokken başlık kanıtı yeterlidir.
+    if (!eskiUstBaslik || !yeniUstBaslik) return true;
+
+    if (konuBasliginiNormalizeEt(eskiUstBaslik) === konuBasliginiNormalizeEt(yeniUstBaslik)) {
+        return true;
+    }
+
+    const benzerlik = kokKumesiBenzerliginiHesapla(
+        metinKokleriniCikar(eskiUstBaslik),
+        metinKokleriniCikar(yeniUstBaslik)
+    );
+
+    return benzerlik.eslesenSayisi >= 2 && benzerlik.kucukKumeKapsami >= 0.75;
+};
+
+const baslikKokleriMetindeDestekleniyorMu = (baslikKokleri, metin) => {
+    const metinKokleri = metinKokleriniCikar(metin);
+    if (baslikKokleri.size === 0 || metinKokleri.size === 0) return false;
+
+    const { eslesenSayisi } = kokKumesiBenzerliginiHesapla(baslikKokleri, metinKokleri);
+    return eslesenSayisi >= Math.min(3, baslikKokleri.size);
 };
 
 /**
@@ -193,27 +203,23 @@ export const semantikEslesmeKontrolu = (yeniKonu, eskiKonu, baglam = {}) => {
     const baslikYeni = yeniKonu?.baslik || "";
     const baslikEski = eskiKonu?.baslik || "";
 
-    // 1. Zıt kavram kontrolü: tek vs çift, doğrusal vs ikili gibi çatışan kavramlar varsa ASLA eşleşemez
-    if (zitKavramVarMi(baslikYeni, baslikEski)) {
+    const baglamUyumlu = ustKonuBaglamiUyumluMu(eskiKonu, baglam);
+    if (!baglamUyumlu) {
         return false;
     }
 
-    // 2. Ayraç öncesi gövde eşleşmesi (Örn: "Tree terminolojisi: root, leaf, height" vs "Tree Terminolojisi")
+    // Tam normalize başlık, yalnızca üst konu bağlamı da uyumluysa eşleşir.
+    if (konuBasliginiNormalizeEt(baslikYeni) === konuBasliginiNormalizeEt(baslikEski)) {
+        return true;
+    }
+
+    // Ayraç öncesi aynı gövde, üst konu veya açıklama kanıtıyla kabul edilir.
     const govdeYeni = ayiracOncesiGovdeyiAl(baslikYeni);
     const govdeEski = ayiracOncesiGovdeyiAl(baslikEski);
 
     if (govdeYeni && govdeEski && govdeYeni === govdeEski) {
         const ayiracVar = /[:\-\(–—]/.test(baslikYeni) || /[:\-\(–—]/.test(baslikEski);
         if (ayiracVar) {
-            // Gövde aynı ise bağlam doğrulaması yap (Requirement 4)
-            const ustYeniKokler = metinKokleriniCikar(baglam.ustKonuBasligi || "");
-            const ustEskiKokler = metinKokleriniCikar(eskiKonu.anaBaslik || "");
-
-            let ustOrtak = 0;
-            for (const k of ustYeniKokler) {
-                if (ustEskiKokler.has(k)) ustOrtak++;
-            }
-
             const uzunBaslik = baslikYeni.length > baslikEski.length ? baslikYeni : baslikEski;
             const ayiracSonrasiMetin = uzunBaslik
                 .split(/[:\-\(–—]/)
@@ -222,107 +228,31 @@ export const semantikEslesmeKontrolu = (yeniKonu, eskiKonu, baglam = {}) => {
             const ayiracKokler = metinKokleriniCikar(ayiracSonrasiMetin);
 
             const aciklamaMetni = `${yeniKonu?.aciklama || ""} ${eskiKonu?.aciklama || ""}`;
-            const aciklamaKokler = metinKokleriniCikar(aciklamaMetni);
-
-            let aciklamaDestegi = 0;
-            for (const k of ayiracKokler) {
-                if (aciklamaKokler.has(k)) aciklamaDestegi++;
-            }
-
-            // Üst konu bağlamı (aynı alan/üst konu altında) veya açıklamadaki kavram desteği doğrulanırsa eşleşir
-            if (ustOrtak > 0 || aciklamaDestegi >= 2) {
+            if (
+                !eskiKonu?.anaBaslik ||
+                konuBasliginiNormalizeEt(eskiKonu.anaBaslik) === konuBasliginiNormalizeEt(baglam.ustKonuBasligi) ||
+                baslikKokleriMetindeDestekleniyorMu(ayiracKokler, aciklamaMetni)
+            ) {
                 return true;
             }
-
-            // Bağlam yeterli değilse eşleştirmeyi kesinlikle reddet (Requirement 4)
             return false;
         }
     }
 
-    // 3. Belirleyici teknik terim grubu kontrolü (Örn: "Preorder, inorder, postorder dolaşma" vs "Ağaç Dolaşma Yöntemleri")
-    for (const terimGrubu of AYIRICI_TEKNIK_TERIMLER) {
-        const normBaslikEski = turkceKarakterleriAsciilestir(baslikEski).replace(/-/g, "");
-        const normBaslikYeni = turkceKarakterleriAsciilestir(baslikYeni).replace(/-/g, "");
-
-        const eskiTumTerimleriIceriyor = terimGrubu.every((t) =>
-            normBaslikEski.includes(t)
-        );
-        const yeniTumTerimleriIceriyor = terimGrubu.every((t) =>
-            normBaslikYeni.includes(t)
-        );
-
-        if (eskiTumTerimleriIceriyor && yeniTumTerimleriIceriyor) {
-            return true;
-        }
-
-        if (eskiTumTerimleriIceriyor !== yeniTumTerimleriIceriyor) {
-            const terimsizKonu = eskiTumTerimleriIceriyor ? yeniKonu : eskiKonu;
-            const terimsizAciklama = turkceKarakterleriAsciilestir(terimsizKonu?.aciklama || "").replace(/-/g, "");
-
-            // Requirement 5: Açıklamada bu yöntemler açıkça destekleniyorsa eşleşsin
-            const aciklamadaHepsiVar = terimGrubu.every((t) => terimsizAciklama.includes(t));
-
-            // Başlık veya üst konu bağlamı kontrolü
-            const koklerEski = metinKokleriniCikar(baslikEski);
-            const koklerYeni = metinKokleriniCikar(baslikYeni);
-            const ustYeniKokler = metinKokleriniCikar(baglam.ustKonuBasligi || "");
-            const ustEskiKokler = metinKokleriniCikar(eskiKonu.anaBaslik || "");
-
-            let alanBaglamiVar = false;
-            for (const k of koklerEski) {
-                if (koklerYeni.has(k)) {
-                    alanBaglamiVar = true;
-                    break;
-                }
-            }
-            if (!alanBaglamiVar) {
-                for (const k of ustYeniKokler) {
-                    if (ustEskiKokler.has(k)) {
-                        alanBaglamiVar = true;
-                        break;
-                    }
-                }
-            }
-
-            if (aciklamadaHepsiVar && alanBaglamiVar) {
-                return true;
-            }
-        }
-    }
-
-    // 4. Kelime sırası, soru formu ve morfolojik varyasyonlar
-    // Örn: "Veri Yapısı Kavramı ve Gerekliliği" vs "Veri yapısı kavramı ve neden gereklidir?"
-    // Örn: "Veri Yapısı Kavramı ve Gerekliliği" vs "Veri Yapısı Kavramı ve Gereksinimi"
-    //      gerek (gerekliligi kökü) ↔ gereksin (gereksinimi kökü): biri diğerinin öneki → eşleşir
+    // Kelime sırası, soru formu ve morfolojik varyasyonlar.
     const koklerYeni = metinKokleriniCikar(baslikYeni);
     const koklerEski = metinKokleriniCikar(baslikEski);
 
     if (koklerYeni.size >= 2 && koklerEski.size >= 2) {
-        // Önek-duyarlı kesişim: tam eşitlik veya biri diğerinin öneki (≥5 karakter)
-        let kesisimSayisi = 0;
-        const eslesenEskiKokler = new Set();
-        for (const kY of koklerYeni) {
-            for (const kE of koklerEski) {
-                if (!eslesenEskiKokler.has(kE) && koklerEslesiyorMu(kY, kE)) {
-                    kesisimSayisi++;
-                    eslesenEskiKokler.add(kE);
-                    break;
-                }
-            }
-        }
-
-        // Birleşim: iki kümenin toplam benzersiz kök sayısı
-        const birlesimSayisi = koklerYeni.size + koklerEski.size - kesisimSayisi;
-
-        const jaccard = kesisimSayisi / birlesimSayisi;
+        const { eslesenSayisi, jaccard } = kokKumesiBenzerliginiHesapla(koklerYeni, koklerEski);
 
         // Tam kök kümesi eşitliği (kelime sırası, soru formu, ek varyasyonları)
-        if (jaccard === 1.0 && kesisimSayisi >= 2) {
+        if (jaccard === 1.0 && eslesenSayisi >= 2) {
             return true;
         }
 
         // Yüksek eşikli anlam koruyan varyasyon (en az 3 temel kök ortak ve %75+ benzerlik)
-        if (jaccard >= 0.75 && kesisimSayisi >= 3) {
+        if (jaccard >= 0.75 && eslesenSayisi >= 3) {
             return true;
         }
 
@@ -337,21 +267,18 @@ export const semantikEslesmeKontrolu = (yeniKonu, eskiKonu, baglam = {}) => {
         //   2. Başlıklar arasında en az 1 ortak kök olmalı (bağlam filtresi;
         //      tamamen farklı konuların eşleşmesini engeller).
         //   3. Eski başlığın en az min(3, koklerEski.size) kökü yeni açıklamada bulunmalı.
-        if (koklerEski.size >= 3 && kesisimSayisi >= 1) {
-            const aciklamaYeniKokler = metinKokleriniCikar(yeniKonu?.aciklama || "");
-            if (aciklamaYeniKokler.size > 0) {
-                let aciklamadaEskiKokSayisi = 0;
-                for (const kE of koklerEski) {
-                    for (const kA of aciklamaYeniKokler) {
-                        if (koklerEslesiyorMu(kE, kA)) {
-                            aciklamadaEskiKokSayisi++;
-                            break;
-                        }
-                    }
-                }
-                if (aciklamadaEskiKokSayisi >= Math.min(3, koklerEski.size)) {
-                    return true;
-                }
+        if (eslesenSayisi >= 1) {
+            if (
+                koklerEski.size >= 3 &&
+                baslikKokleriMetindeDestekleniyorMu(koklerEski, yeniKonu?.aciklama || "")
+            ) {
+                return true;
+            }
+            if (
+                koklerYeni.size >= 3 &&
+                baslikKokleriMetindeDestekleniyorMu(koklerYeni, eskiKonu?.aciklama || "")
+            ) {
+                return true;
             }
         }
     }
@@ -393,8 +320,8 @@ export const eskiKonuKimliginiBul = (
             }
 
             return (
-                konuBasliginiNormalizeEt(eskiKonu.baslik) ===
-                yeniBaslik
+                konuBasliginiNormalizeEt(eskiKonu.baslik) === yeniBaslik &&
+                ustKonuBaglamiUyumluMu(eskiKonu, baglam)
             );
         });
 

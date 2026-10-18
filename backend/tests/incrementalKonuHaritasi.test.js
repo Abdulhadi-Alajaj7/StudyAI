@@ -1104,7 +1104,7 @@ test("T20: Çalışma Soruları tekrarları tespit edilmeli", async () => {
     );
 });
 
-test("T21: Aynı alt konu farklı ana konularda tekrarlanmamalı", async () => {
+test("T21: Aynı başlıklı alt konu farklı ana konu bağlamlarında ayrı tutulmalı", async () => {
     sifirla({ haritaDurum: "yok" });
 
     mockGeminiCikti = [
@@ -1136,7 +1136,49 @@ test("T21: Aynı alt konu farklı ana konularda tekrarlanmamalı", async () => {
 
     assert.equal(
         binarySearchSayisi,
-        1,
-        "Binary Search iki farklı ana konuda tekrarlanmamalı"
+        2,
+        "Aynı başlık farklı üst konu bağlamlarını otomatik olarak kaybetmemeli"
     );
+});
+
+test("T22: OOP haritasındaki 'Sık Yapılan Hatalar' farklı ana konu bağlamlarını korur", async () => {
+    sifirla({ haritaDurum: "yok" });
+
+    mockGeminiCikti = [
+        {
+            baslik: "Encapsulation ve Erişim Belirleyiciler",
+            altKonular: [{ baslik: "Sık Yapılan Hatalar", aciklama: "Erişim görünürlüğü hataları" }]
+        },
+        {
+            baslik: "Kalıtım ve Metot Ezme",
+            altKonular: [{ baslik: "Sık Yapılan Hatalar", aciklama: "Override imzası hataları" }]
+        }
+    ];
+
+    await materyalEklendigindeIncrementalGuncelle(mat1Id, dersId1, kullaniciId);
+
+    const hatalar = mockAnaKonular.flatMap(ana => ana.altKonular || []);
+    assert.equal(hatalar.length, 2);
+    assert.equal(new Set(hatalar.map(alt => alt.konuId)).size, 2);
+});
+
+test("T23: ana ve alt konu sıra değerleri kararlı ve ardışık normalize edilir", async () => {
+    sifirla({ haritaDurum: "yok" });
+
+    mockGeminiCikti = [
+        {
+            baslik: "Birinci Ana Konu",
+            sira: 9,
+            altKonular: [
+                { baslik: "Birinci Alt", sira: 8 },
+                { baslik: "İkinci Alt", sira: 8 }
+            ]
+        },
+        { baslik: "İkinci Ana Konu", sira: 9, altKonular: [] }
+    ];
+
+    await materyalEklendigindeIncrementalGuncelle(mat1Id, dersId1, kullaniciId);
+
+    assert.deepEqual(mockAnaKonular.map(ana => ana.sira), [1, 2]);
+    assert.deepEqual(mockAnaKonular[0].altKonular.map(alt => alt.sira), [1, 2]);
 });

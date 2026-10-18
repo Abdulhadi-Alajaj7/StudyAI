@@ -48,6 +48,17 @@ export const deterministikKonuIdUret = (
 };
 
 
+export const konuSiralariniDuzenle = (konular = []) => {
+    return konular.map((ana, anaIndex) => ({
+        ...ana,
+        sira: anaIndex + 1,
+        altKonular: (ana.altKonular || []).map((alt, altIndex) => ({
+            ...alt,
+            sira: altIndex + 1
+        }))
+    }));
+};
+
 const geminiTekrarlariniTemizle = (konular = []) => {
     const temelBaslik = (baslik) => {
         return konuBasliginiNormalizeEt(baslik || "")
@@ -57,10 +68,12 @@ const geminiTekrarlariniTemizle = (konular = []) => {
     };
 
     const sonuc = [];
-    const gorulenAltlar = new Map();
-
     for (const ana of konular) {
         if (!ana?.baslik?.trim()) continue;
+
+        // Aynı başlık farklı ana konularda farklı öğrenme hedeflerini temsil edebilir.
+        // Bu yüzden tekilleştirme havuzu her ana konu için yeniden oluşturulur.
+        const gorulenAltlar = new Map();
 
         const anaKopya = {
             ...ana,
@@ -441,15 +454,12 @@ export const konuHaritasiUretVeKaydet = async (
         // 2. Tüm eski alt konular havuzu (ana konu başlığı değişse veya konu taşınsa bile eşleştirebilmek için)
         const tumEskiAltKonular = [];
         const gorulenAltKonuIdler = new Set();
-        const gorulenAltBasliklar = new Set();
 
         for (const ana of birlesikAnaKonular) {
             for (const alt of ana.altKonular || []) {
                 if (!alt || !alt.konuId) continue;
-                const normBaslik = konuBasliginiNormalizeEt(alt.baslik);
-                if (!gorulenAltKonuIdler.has(alt.konuId) && !gorulenAltBasliklar.has(normBaslik)) {
+                if (!gorulenAltKonuIdler.has(alt.konuId)) {
                     gorulenAltKonuIdler.add(alt.konuId);
-                    gorulenAltBasliklar.add(normBaslik);
                     tumEskiAltKonular.push({
                         ...alt,
                         anaKonuId: ana.konuId,
@@ -516,7 +526,7 @@ export const konuHaritasiUretVeKaydet = async (
             {}
         );
 
-        const kaliciAnaKonular = hamKonular.map(
+        const kaliciAnaKonularHam = hamKonular.map(
             (ana, aIndex) => {
                 const anaBaslik = ana.baslik.trim();
                 const anaEslesme = anaEslesmeleri.get(ana);
@@ -612,6 +622,7 @@ export const konuHaritasiUretVeKaydet = async (
                 };
             }
         );
+        const kaliciAnaKonular = konuSiralariniDuzenle(kaliciAnaKonularHam);
 
         // =========================================
         // KONU ID EŞLEŞTİRME SONU
@@ -1202,13 +1213,12 @@ const materyalEklendigindeIncrementalGuncelleIslemi = async (
 
     // Tüm eski alt konular havuzu
     const tumEskiAltKonular = [];
-    const gorulenAltNorms = new Set();
+    const gorulenAltIds = new Set();
     for (const ana of birlesikEskiListe) {
         for (const alt of ana.altKonular || []) {
             if (!alt?.konuId) continue;
-            const normBaslik = konuBasliginiNormalizeEt(alt.baslik);
-            if (!gorulenAltNorms.has(normBaslik)) {
-                gorulenAltNorms.add(normBaslik);
+            if (!gorulenAltIds.has(alt.konuId)) {
+                gorulenAltIds.add(alt.konuId);
                 tumEskiAltKonular.push({
                     ...alt,
                     anaKonuId: ana.konuId,
@@ -1447,7 +1457,7 @@ const materyalEklendigindeIncrementalGuncelleIslemi = async (
         }
     }
 
-    const nihaiAnaKonular = Array.from(nihaiAnaKonuMap.values());
+    const nihaiAnaKonular = konuSiralariniDuzenle(Array.from(nihaiAnaKonuMap.values()));
 
     let toplamAlt = 0;
     for (const ana of nihaiAnaKonular) {
@@ -1731,13 +1741,15 @@ const materyalSilindigindeGuncelleIslemi = async (materyalId, dersId, kullaniciI
         }
     }
 
+    const siraliGuncelAnaKonular = konuSiralariniDuzenle(guncelAnaKonular);
+
     // gecmisKonular güncelle
     const gecmisMap = new Map();
     for (const eski of mevcutGecmis) {
         if (eski?.konuId) gecmisMap.set(eski.konuId, { ...eski });
     }
     // Aktif kalan konuları gecmis'e de yaz
-    for (const aktif of guncelAnaKonular) {
+    for (const aktif of siraliGuncelAnaKonular) {
         if (aktif?.konuId) gecmisMap.set(aktif.konuId, aktif);
     }
     // Arşivlenen alt konuları ana konularına göre gecmis'e ekle
@@ -1764,11 +1776,11 @@ const materyalSilindigindeGuncelleIslemi = async (materyalId, dersId, kullaniciI
     const nihaiGecmis = Array.from(gecmisMap.values());
 
     let toplamAlt = 0;
-    for (const ana of guncelAnaKonular) {
+    for (const ana of siraliGuncelAnaKonular) {
         toplamAlt += (ana.altKonular || []).length;
     }
 
-    const yeniDurum = guncelAnaKonular.length > 0 ? "hazir" : "yok";
+    const yeniDurum = siraliGuncelAnaKonular.length > 0 ? "hazir" : "yok";
 
     return await KonuHaritasi.findOneAndUpdate(
         {
@@ -1780,9 +1792,9 @@ const materyalSilindigindeGuncelleIslemi = async (materyalId, dersId, kullaniciI
             $set: {
                 durum: yeniDurum,
                 olusturmaHatasi: "",
-                anaKonular: guncelAnaKonular,
+                anaKonular: siraliGuncelAnaKonular,
                 gecmisKonular: nihaiGecmis,
-                toplamAnaKonuSayisi: guncelAnaKonular.length,
+                toplamAnaKonuSayisi: siraliGuncelAnaKonular.length,
                 toplamAltKonuSayisi: toplamAlt,
                 kaynakMateryaller: guncelKaynaklar,
                 aktifIslemToken: null

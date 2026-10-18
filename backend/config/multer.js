@@ -6,6 +6,8 @@ import { fileURLToPath } from "url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const uploadDir = path.join(__dirname, "..", "uploads", "materyaller");
+export const MAKSIMUM_DOSYA_BOYUTU = 50 * 1024 * 1024;
+export const MAKSIMUM_DOSYA_SAYISI = 10;
 
 if (!fs.existsSync(uploadDir)) {
     fs.mkdirSync(uploadDir, { recursive: true });
@@ -39,13 +41,15 @@ const fileFilter = (req, file, cb) => {
         return cb(null, true);
     }
 
-    cb(new Error("Sadece PDF, DOCX, PPTX ve TXT dosyaları desteklenir."), false);
+    const hata = new Error("Sadece PDF, DOCX, PPTX ve TXT dosyaları desteklenir.");
+    hata.code = "DESTEKLENMEYEN_DOSYA_TURU";
+    cb(hata, false);
 };
 
 const upload = multer({
     storage,
     fileFilter,
-    limits: { fileSize: 50 * 1024 * 1024 }, // 50MB
+    limits: { fileSize: MAKSIMUM_DOSYA_BOYUTU },
 });
 
 export default upload;

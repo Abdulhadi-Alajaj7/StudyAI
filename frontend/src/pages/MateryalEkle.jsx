@@ -1,6 +1,8 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useOutletContext, useNavigate, useLocation, useParams } from "react-router-dom";
 import api from "../api";
+import { kullaniciHataMesaji } from "../utils/kullaniciHatasi.mjs";
+import { materyalDosyalariniDogrula } from "../utils/materyalDosyalari.mjs";
 import DersOlusturmaAdimlari from "../components/DersOlusturmaAdimlari";
 import { CloudArrowUpIcon, ArrowRightIcon, CpuChipIcon, DocumentIcon, TrashIcon, ArrowPathIcon } from "@heroicons/react/24/outline";
 
@@ -12,12 +14,19 @@ function MateryalEkle() {
 
     // Get created course and uiPrefs from state if available
     const [ders, setDers] = useState(location.state?.ders || null);
-    const uiPrefs = location.state?.uiPrefs || { renk: "indigo", simge: "desktop", dersKodu: "" };
+    const uiPrefsRef = useRef(
+        location.state?.uiPrefs || { renk: "indigo", simge: "desktop", dersKodu: "" }
+    );
+    const uiPrefs = uiPrefsRef.current;
 
     const [materyaller, setMateryaller] = useState([]);
     const [yukleniyor, setYukleniyor] = useState(false);
     const [hata, setHata] = useState("");
+    const [bilgi, setBilgi] = useState("");
+    const [surukleniyor, setSurukleniyor] = useState(false);
     const fileInputRef = useRef(null);
+    const yuklemeDevamEdiyorRef = useRef(false);
+    const suruklemeDerinligiRef = useRef(0);
     const [metinModalAcik, setMetinModalAcik] = useState(false);
     const [seciliMetin, setSeciliMetin] = useState("");
     const [metinYukleniyor, setMetinYukleniyor] = useState(false);
@@ -46,12 +55,50 @@ function MateryalEkle() {
     const textSecondary = isDark ? "text-[#A7B0C2]" : "text-[#64748B]";
     const buttonPrimary = "bg-[#4F46E5] hover:bg-[#4338CA] text-white";
 
+    const dersGetir = useCallback(async () => {
+        try {
+            const res = await api.get(
+                `/dersler/${dersId}`,
+                { withCredentials: true }
+            );
+
+            const guncelDers = res.data.ders;
+
+            if (!guncelDers) {
+                setHata("Ders bulunamadı.");
+                return;
+            }
+
+            if (guncelDers.materyallerOnaylandi === true) {
+                navigate(`/panel/dersler/${dersId}/hazir`, {
+                    replace: true,
+                    state: { ders: guncelDers, uiPrefs }
+                });
+                return;
+            }
+
+            setDers(guncelDers);
+        } catch (err) {
+            console.error("Ders bilgisi getirilemedi:", err);
+            setHata(kullaniciHataMesaji(err, "Ders bilgileri alınamadı."));
+        }
+    }, [dersId, navigate, uiPrefs]);
+
+    const materyalleriGetir = useCallback(async () => {
+        try {
+            const res = await api.get(`/materyaller/ders/${dersId}`, { withCredentials: true });
+            setMateryaller(res.data.materyaller || []);
+        } catch (err) {
+            console.error("Materyaller getirilemedi", err);
+        }
+    }, [dersId]);
+
 
     useEffect(() => {
         // Sayfa her açıldığında dersin güncel onay durumunu kontrol et.
         dersGetir();
         materyalleriGetir();
-    }, [dersId]);
+    }, [dersGetir, materyalleriGetir]);
 
 
     // Polling for processing status
@@ -64,7 +111,7 @@ function MateryalEkle() {
             }, 3000);
         }
         return () => clearInterval(interval);
-    }, [materyaller]);
+    }, [materyaller, materyalleriGetir]);
 
 
     useEffect(() => {
@@ -99,84 +146,102 @@ function MateryalEkle() {
             aktif = false;
             clearInterval(interval);
         };
-    }, [dersId]);
-
-
-
-    const dersGetir = async () => {
-        try {
-            const res = await api.get(
-                `/dersler/${dersId}`,
-                { withCredentials: true }
-            );
-
-            const guncelDers = res.data.ders;
-
-            if (!guncelDers) {
-                setHata("Ders bulunamadı.");
-                return;
-            }
-
-            // Materyaller onaylandıysa yükleme sayfasına geri dönülemez.
-            if (guncelDers.materyallerOnaylandi === true) {
-                navigate(`/panel/dersler/${dersId}/hazir`, {
-                    replace: true,
-                    state: {
-                        ders: guncelDers,
-                        uiPrefs
-                    }
-                });
-                return;
-            }
-
-            setDers(guncelDers);
-        } catch (err) {
-            console.error("Ders bilgisi getirilemedi:", err);
-            setHata(
-                err.response?.data?.hata ||
-                "Ders bilgileri alınamadı."
-            );
-        }
-    };
-
-
-    const materyalleriGetir = async () => {
-        try {
-            const res = await api.get(`/materyaller/ders/${dersId}`, { withCredentials: true });
-            setMateryaller(res.data.materyaller || []);
-        } catch (err) {
-            console.error("Materyaller getirilemedi", err);
-        }
-    };
+    }, [dersId, materyalleriGetir]);
 
     const handleDosyaSec = () => {
-        fileInputRef.current.click();
+        if (!yuklemeDevamEdiyorRef.current) {
+            fileInputRef.current?.click();
+        }
     };
 
-    const handleDosyaYukle = async (e) => {
-        const dosyalar = e.target.files;
-        if (!dosyalar || dosyalar.length === 0) return;
+    const dosyalariYukle = async (dosyaListesi) => {
+        if (yuklemeDevamEdiyorRef.current) return;
 
-        const formData = new FormData();
-        for (let i = 0; i < dosyalar.length; i++) {
-            formData.append("dosyalar", dosyalar[i]);
+        const { gecerliDosyalar, hatalar: dogrulamaHatalari } =
+            materyalDosyalariniDogrula(dosyaListesi);
+        if (gecerliDosyalar.length === 0) {
+            setBilgi("");
+            setHata(dogrulamaHatalari.join("\n"));
+            return;
         }
 
+        yuklemeDevamEdiyorRef.current = true;
         setYukleniyor(true);
         setHata("");
+        setBilgi("");
+
+        const basariliDosyalar = [];
+        const basarisizDosyalar = [...dogrulamaHatalari];
 
         try {
-            await api.post(`/materyaller/ders/${dersId}`, formData, {
-                withCredentials: true
-            });
-            // Yukleme sonrasi dosyaları tekrar getir
-            materyalleriGetir();
-        } catch (err) {
-            setHata(err.response?.data?.hata || "Dosya yüklenirken bir hata oluştu.");
+            for (const dosya of gecerliDosyalar) {
+                const formData = new FormData();
+                formData.append("dosyalar", dosya);
+
+                try {
+                    await api.post(`/materyaller/ders/${dersId}`, formData, {
+                        withCredentials: true
+                    });
+                    basariliDosyalar.push(dosya.name);
+                } catch (err) {
+                    basarisizDosyalar.push(
+                        `${dosya.name}: ${kullaniciHataMesaji(err, "Dosya yüklenemedi. Lütfen tekrar deneyin.")}`
+                    );
+                }
+            }
+
+            await materyalleriGetir();
+
+            if (basariliDosyalar.length > 0) {
+                setBilgi(`${basariliDosyalar.length} dosya başarıyla yüklendi ve işlemeye alındı.`);
+            }
+            if (basarisizDosyalar.length > 0) {
+                setHata(
+                    `Bazı dosyalar yüklenemedi. Başarısız dosyaları kontrol edin:\n${basarisizDosyalar.join("\n")}`
+                );
+            }
         } finally {
+            yuklemeDevamEdiyorRef.current = false;
             setYukleniyor(false);
-            e.target.value = null; // Reset input
+            if (fileInputRef.current) fileInputRef.current.value = "";
         }
+    };
+
+    const handleDosyaYukle = (e) => {
+        void dosyalariYukle(e.target.files);
+    };
+
+    const handleDragEnter = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        suruklemeDerinligiRef.current += 1;
+        if (!yukleniyor) setSurukleniyor(true);
+    };
+
+    const handleDragOver = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.dataTransfer) e.dataTransfer.dropEffect = yukleniyor ? "none" : "copy";
+    };
+
+    const handleDragLeave = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        suruklemeDerinligiRef.current = Math.max(0, suruklemeDerinligiRef.current - 1);
+        if (suruklemeDerinligiRef.current === 0) setSurukleniyor(false);
+    };
+
+    const handleDrop = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        suruklemeDerinligiRef.current = 0;
+        setSurukleniyor(false);
+
+        if (yuklemeDevamEdiyorRef.current) {
+            setHata("Dosya yükleme devam ediyor. Lütfen işlem tamamlandıktan sonra tekrar deneyin.");
+            return;
+        }
+        void dosyalariYukle(e.dataTransfer.files);
     };
 
     const materyalSil = async (id) => {
@@ -185,8 +250,8 @@ function MateryalEkle() {
         try {
             await api.delete(`/materyaller/${id}`, { withCredentials: true });
             setMateryaller(materyaller.filter(m => m._id !== id));
-        } catch {
-            alert("Materyal silinirken bir hata oluştu.");
+        } catch (err) {
+            setHata(kullaniciHataMesaji(err, "Materyal silinirken bir hata oluştu."));
         }
     };
 
@@ -195,7 +260,7 @@ function MateryalEkle() {
             await api.post(`/materyaller/${id}/metin-cikar`, {}, { withCredentials: true });
             materyalleriGetir();
         } catch (err) {
-            alert(err.response?.data?.hata || "Yeniden deneme başarısız.");
+            setHata(kullaniciHataMesaji(err, "Yeniden deneme başarısız."));
         }
     };
 
@@ -288,10 +353,10 @@ function MateryalEkle() {
 
             setOnayModalAcik(true);
         } catch (err) {
-            setHata(
-                err.response?.data?.hata ||
+            setHata(kullaniciHataMesaji(
+                err,
                 "İşlem durumu kontrol edilemedi. Lütfen tekrar deneyin."
-            );
+            ));
         } finally {
             devamKontrolRef.current = false;
             setDevamKontrolEdiliyor(false);
@@ -330,11 +395,10 @@ function MateryalEkle() {
                 }
             });
         } catch (err) {
-            setHata(
-                err.response?.data?.hata ||
-                err.message ||
+            setHata(kullaniciHataMesaji(
+                err,
                 "Materyaller onaylanamadı. Lütfen tekrar deneyin."
-            );
+            ));
 
             setOnayModalAcik(false);
         } finally {
@@ -362,11 +426,28 @@ function MateryalEkle() {
                 <div className="xl:col-span-2 flex flex-col gap-6">
                     <div className={`p-8 md:p-12 rounded-2xl border ${cardBg}`}>
                         {hata && (
-                            <div className="mb-6 p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-500 text-sm">
+                            <div className="mb-6 p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-500 text-sm whitespace-pre-line" role="alert">
                                 {hata}
                             </div>
                         )}
-                        <div className={`border-2 border-dashed rounded-2xl p-10 md:p-16 flex flex-col items-center justify-center text-center ${isDark ? 'border-[#26334A] bg-[#0B1120]/50' : 'border-[#CBD5E1] bg-[#F8F7FC]/50'} transition-all`}>
+                        {bilgi && (
+                            <div className="mb-6 p-4 rounded-xl bg-green-500/10 border border-green-500/20 text-green-600 dark:text-green-400 text-sm" role="status">
+                                {bilgi}
+                            </div>
+                        )}
+                        <div
+                            onDragEnter={handleDragEnter}
+                            onDragOver={handleDragOver}
+                            onDragLeave={handleDragLeave}
+                            onDrop={handleDrop}
+                            aria-disabled={yukleniyor}
+                            className={`border-2 border-dashed rounded-2xl p-10 md:p-16 flex flex-col items-center justify-center text-center transition-all ${surukleniyor && !yukleniyor
+                                ? 'border-[#4F46E5] bg-[#4F46E5]/10 scale-[1.01]'
+                                : isDark
+                                    ? 'border-[#26334A] bg-[#0B1120]/50'
+                                    : 'border-[#CBD5E1] bg-[#F8F7FC]/50'
+                                } ${yukleniyor ? 'opacity-70' : ''}`}
+                        >
                             <div className="w-16 h-16 rounded-full bg-[#4F46E5]/10 flex items-center justify-center mb-6">
                                 <CloudArrowUpIcon className="w-8 h-8 text-[#4F46E5]" />
                             </div>
@@ -379,11 +460,13 @@ function MateryalEkle() {
                                 multiple
                                 ref={fileInputRef}
                                 onChange={handleDosyaYukle}
+                                disabled={yukleniyor}
                                 className="hidden"
                                 accept=".pdf,.docx,.pptx,.txt"
                             />
 
                             <button
+                                type="button"
                                 onClick={handleDosyaSec}
                                 disabled={yukleniyor}
                                 className={`px-8 py-3 rounded-xl font-medium border-2 border-[#4F46E5] text-[#4F46E5] hover:bg-[#4F46E5]/10 transition-colors mb-6 ${yukleniyor ? 'opacity-50 cursor-not-allowed' : ''}`}

@@ -1,6 +1,10 @@
 import express from "express";
 import kimlikDogrula from "../middleware/auth.js";
-import upload from "../config/multer.js";
+import upload, {
+    MAKSIMUM_DOSYA_BOYUTU,
+    MAKSIMUM_DOSYA_SAYISI
+} from "../config/multer.js";
+import { yuklemeHatasiniYanitaCevir } from "../utils/yuklemeHatasi.js";
 import {
     materyalYukle,
     materyalleriGetir,
@@ -15,9 +19,13 @@ router.use(kimlikDogrula);
 
 // Dosya boyutunu veya hata yakalamayı multer upload ile kontrol etmek icin
 router.post("/ders/:dersId", (req, res, next) => {
-    upload.array("dosyalar", 10)(req, res, function(err) {
+    upload.array("dosyalar", MAKSIMUM_DOSYA_SAYISI)(req, res, function(err) {
         if (err) {
-            return res.status(400).json({ hata: err.message });
+            const yanit = yuklemeHatasiniYanitaCevir(err, {
+                maksimumDosyaSayisi: MAKSIMUM_DOSYA_SAYISI,
+                maksimumDosyaBoyutu: MAKSIMUM_DOSYA_BOYUTU
+            });
+            return res.status(400).json({ hata: yanit.mesaj, kod: yanit.kod });
         }
         next();
     });

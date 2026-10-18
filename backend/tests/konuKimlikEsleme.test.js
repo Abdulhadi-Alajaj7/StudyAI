@@ -12,7 +12,7 @@ import {
     turkceKarakterleriAsciilestir,
     konuBasliginiNormalizeEt,
     kelimeKokunuBul,
-    zitKavramVarMi,
+    kokKumesiBenzerliginiHesapla,
     ayiracOncesiGovdeyiAl,
     semantikEslesmeKontrolu,
     eskiKonuKimliginiBul,
@@ -47,11 +47,14 @@ test("Birim: kelimeKokunuBul Türkçe ekleri doğru budar", () => {
     assert.equal(kelimeKokunuBul("yontemleri"), "yontem");
 });
 
-test("Birim: zitKavramVarMi zıt kavramları doğru tespit eder", () => {
-    assert.equal(zitKavramVarMi("Tek bağlı liste", "Çift bağlı liste"), true);
-    assert.equal(zitKavramVarMi("Doğrusal arama", "İkili arama"), true);
-    assert.equal(zitKavramVarMi("Stack yapısı", "Queue yapısı"), true);
-    assert.equal(zitKavramVarMi("Veri yapısı kavramı", "Veri yapısı gerekliliği"), false);
+test("Birim: genel kök benzerliği ders alanından bağımsız hesaplanır", () => {
+    const benzerlik = kokKumesiBenzerliginiHesapla(
+        new Set(["turev", "kural", "uygulama"]),
+        new Set(["uygulama", "turev", "kural"])
+    );
+
+    assert.equal(benzerlik.eslesenSayisi, 3);
+    assert.equal(benzerlik.jaccard, 1);
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -118,7 +121,7 @@ test("Senaryo 2A (Pozitif): 'Tree terminolojisi: root, leaf, height' ile 'Tree T
     assert.equal(eslesenId, "sub-32be614a", "Eski konuId korunmalı");
 });
 
-test("Senaryo 2A (Pozitif - Açıklama Kanıtı): Farklı üst konu olsa bile açıklamada kavramlar varsa eşleşir", () => {
+test("Senaryo 2A (Negatif - Farklı Üst Konu): Açıklama benzer olsa bile farklı üst konu otomatik eşleşmez", () => {
     const eskiKonu = {
         konuId: "sub-32be614a",
         baslik: "Tree terminolojisi: root, leaf, height",
@@ -136,7 +139,7 @@ test("Senaryo 2A (Pozitif - Açıklama Kanıtı): Farklı üst konu olsa bile a�
     };
 
     const semantikUygun = semantikEslesmeKontrolu(yeniKonu, eskiKonu, baglam);
-    assert.equal(semantikUygun, true, "Açıklamada root, leaf, height desteği varsa eşleşmeli");
+    assert.equal(semantikUygun, false, "Farklı üst konu bağlamları arasında otomatik kimlik taşınmamalı");
 });
 
 test("Senaryo 2A (Negatif - Bağlam Yetersiz): 'Tree Terminolojisi' bağlam veya açıklama desteği yoksa REDDEDİLMELİ", () => {
@@ -656,4 +659,45 @@ test("Regresyon: ADT başlığı ile ADT Tanımı aynı konuyu temsil eder", () 
         "adt-eski-id",
         "ADT Tanımı için yeni konuId üretilmemeli"
     );
+});
+
+test("Genel algoritma: matematik başlığındaki kelime sırası değişimi kimliği korur", () => {
+    const eski = { konuId: "mat-1", baslik: "Türev Kuralları ve Uygulamaları" };
+    const yeni = { baslik: "Türev Uygulamaları ve Kuralları" };
+
+    assert.equal(eskiKonuKimliginiBul(yeni, [eski]), "mat-1");
+});
+
+test("Genel algoritma: fizik, biyoloji ve tarih niteleyicileri yanlış birleştirilmez", () => {
+    const farkliKonular = [
+        ["Pozitif Yüklü Parçacıklar", "Negatif Yüklü Parçacıklar"],
+        ["Mitotik Hücre Bölünmesi", "Mayotik Hücre Bölünmesi"],
+        ["Osmanlı Yükselme Dönemi", "Osmanlı Gerileme Dönemi"]
+    ];
+
+    for (const [eskiBaslik, yeniBaslik] of farkliKonular) {
+        const eski = { konuId: `id-${eskiBaslik}`, baslik: eskiBaslik };
+        assert.equal(
+            eskiKonuKimliginiBul({ baslik: yeniBaslik }, [eski]),
+            null,
+            `${eskiBaslik} ile ${yeniBaslik} ayrı kalmalı`
+        );
+    }
+});
+
+test("Bağlam güvenliği: aynı alt başlık farklı ana konularda aynı kimliği almaz", () => {
+    const hukukKaynagi = {
+        konuId: "hukuk-kaynak",
+        baslik: "Kaynaklar",
+        anaBaslik: "Hukuk Kuramı ve Normlar"
+    };
+
+    const eslesenId = eskiKonuKimliginiBul(
+        { baslik: "Kaynaklar" },
+        [hukukKaynagi],
+        new Set(),
+        { ustKonuBasligi: "Tarih Araştırma Yöntemleri" }
+    );
+
+    assert.equal(eslesenId, null);
 });
