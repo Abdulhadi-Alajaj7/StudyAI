@@ -12,6 +12,7 @@ let parcalar;
 let metinCikarmaHatasi;
 let parcalamaHatasi;
 let incrementalHata;
+let embeddingHatasi;
 let metinCikarmaHook;
 let eskiParcaTemizlemeHook;
 let dersIslemSayisi;
@@ -123,6 +124,27 @@ mock.module("../services/konuHaritasiService.js", {
     }
 });
 
+mock.module("../services/embeddingService.js", {
+    namedExports: {
+        embeddingAyarlariGetir() {
+            return { model: "gemini-embedding-001", boyut: 768 };
+        },
+        embeddingKullaniciHatasi() {
+            return "Semantik arama dizini geçici olarak oluşturulamadı.";
+        },
+        async materyalEmbeddingleriniOlustur() {
+            if (embeddingHatasi) throw embeddingHatasi;
+            return {
+                toplam: 1,
+                apiIleOlusturulan: 1,
+                onbellektenKullanilan: 0,
+                model: "gemini-embedding-001",
+                boyut: 768
+            };
+        }
+    }
+});
+
 mock.module("../utils/dosyaIslemleri.js", {
     namedExports: { guvenliDosyaSil() {} }
 });
@@ -174,10 +196,25 @@ beforeEach(() => {
     metinCikarmaHatasi = null;
     parcalamaHatasi = null;
     incrementalHata = null;
+    embeddingHatasi = null;
     metinCikarmaHook = null;
     eskiParcaTemizlemeHook = null;
     dersIslemSayisi = 0;
     dersOnaylandi = false;
+});
+
+test("embedding hatası metin sürümünün hazırlanmasını ve konu haritası akışını bozmaz", async () => {
+    embeddingHatasi = new Error("429 quota");
+    const res = responseMock();
+
+    await materyalMetinCikar(istek(), res);
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(materyal.durum, "hazir");
+    assert.equal(materyal.embeddingDurumu, "hata");
+    assert.match(materyal.embeddingHatasi, /geçici olarak/);
+    assert.ok(materyal.aktifIslemeId);
+    assert.equal(parcalar.length, 1);
 });
 
 test("metin çıkarma başarılı ve konu haritası güncellemesi başarısızsa aktif parçalar korunur", async () => {

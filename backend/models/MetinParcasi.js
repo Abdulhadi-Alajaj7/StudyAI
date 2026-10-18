@@ -32,6 +32,40 @@ const metinParcasiSchema = new mongoose.Schema(
         karakterSayisi: {
             type: Number,
             required: true,
+        },
+        icerikHash: {
+            type: String,
+            required: true,
+        },
+        embedding: {
+            type: [Number],
+            default: undefined,
+            select: false,
+        },
+        embeddingModel: {
+            type: String,
+            default: "",
+        },
+        embeddingBoyutu: {
+            type: Number,
+            default: 0,
+        },
+        embeddingGirdiHash: {
+            type: String,
+            default: "",
+        },
+        embeddingDurumu: {
+            type: String,
+            enum: ["bekliyor", "hazir", "hata"],
+            default: "bekliyor",
+        },
+        embeddingHatasi: {
+            type: String,
+            default: "",
+        },
+        embeddingOlusturulmaTarihi: {
+            type: Date,
+            default: null,
         }
     },
     {
@@ -42,6 +76,8 @@ const metinParcasiSchema = new mongoose.Schema(
 // Yeni çoklu-versiyonlama ve staging uyumlu bileşik tekillik indeksi.
 // Aynı işlem içinde (islemeId) parcaIndex tekrarı olamaz, farklı işlemler (staging) birbirini engellemez.
 metinParcasiSchema.index({ materyalId: 1, islemeId: 1, parcaIndex: 1 }, { unique: true });
+metinParcasiSchema.index({ kullaniciId: 1, embeddingGirdiHash: 1, embeddingModel: 1, embeddingBoyutu: 1 });
+metinParcasiSchema.index({ kullaniciId: 1, dersId: 1, islemeId: 1, embeddingDurumu: 1 });
 
 const MetinParcasi = mongoose.model("MetinParcasi", metinParcasiSchema);
 

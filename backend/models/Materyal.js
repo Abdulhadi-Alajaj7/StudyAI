@@ -59,6 +59,23 @@ const materyalSchema = new mongoose.Schema(
         islemeHatasi: {
             type: String,
             default: "",
+        },
+        embeddingDurumu: {
+            type: String,
+            enum: ["bekliyor", "isleniyor", "hazir", "hata"],
+            default: "bekliyor",
+        },
+        embeddingHatasi: {
+            type: String,
+            default: "",
+        },
+        embeddingModel: {
+            type: String,
+            default: "",
+        },
+        embeddingBoyutu: {
+            type: Number,
+            default: 0,
         }
     },
     {

@@ -12,6 +12,7 @@ import {
     materyalSil,
     materyalMetinCikar
 } from "../controllers/materyalController.js";
+import { materyalEmbeddingleriniYenile } from "../controllers/semanticAramaController.js";
 
 const router = express.Router();
 
@@ -35,5 +36,6 @@ router.get("/ders/:dersId", materyalleriGetir);
 router.get("/:id", materyalGetir);
 router.delete("/:id", materyalSil);
 router.post("/:id/metin-cikar", materyalMetinCikar);
+router.post("/:id/embedding-yenile", materyalEmbeddingleriniYenile);
 
 export default router;

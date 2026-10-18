@@ -16,10 +16,44 @@ import mongoose from "mongoose";
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import { dosyaIceriginiDogrula } from "../services/dosyaTuruDogrulamaService.js";
+import {
+    embeddingAyarlariGetir,
+    embeddingKullaniciHatasi,
+    materyalEmbeddingleriniOlustur,
+} from "../services/embeddingService.js";
 
 const metinCikarmaKullaniciMesaji = () => (
     "Dosya içeriğinden metin çıkarılamadı. Dosyanın bozuk olmadığını kontrol edip tekrar deneyin."
 );
+
+const embeddingleriGuvenleHazirla = async (materyal, islemeId) => {
+    const ayarlar = embeddingAyarlariGetir();
+    try {
+        const sonuc = await materyalEmbeddingleriniOlustur(materyal, islemeId);
+        console.info(
+            `[Embedding] Materyal ${materyal._id}: ${sonuc.toplam} parça hazır ` +
+            `(${sonuc.apiIleOlusturulan} yeni, ${sonuc.onbellektenKullanilan} yeniden kullanıldı; ` +
+            `${sonuc.model}/${sonuc.boyut}).`
+        );
+        return {
+            embeddingDurumu: "hazir",
+            embeddingHatasi: "",
+            embeddingModel: sonuc.model,
+            embeddingBoyutu: sonuc.boyut,
+        };
+    } catch (hata) {
+        console.error(
+            `[Embedding] Materyal ${materyal._id} hazırlanamadı:`,
+            { kod: hata.kod || "EMBEDDING_SERVIS_HATASI", status: hata.status || 503 }
+        );
+        return {
+            embeddingDurumu: "hata",
+            embeddingHatasi: embeddingKullaniciHatasi(hata),
+            embeddingModel: ayarlar.model,
+            embeddingBoyutu: ayarlar.boyut,
+        };
+    }
+};
 
 /**
  * Ders onayıyla yarışmayan atomik materyal işlem kaydı.
@@ -58,7 +92,15 @@ const arkaPlandaMetinCikar = async (materyalIds, dersId, kullaniciId) => {
             // 1. Atomik sahiplik alımı: Yalnızca "siliniyor" olmayan ve "isleniyor" durumda olmayan materyali sahiplen
             const materyal = await Materyal.findOneAndUpdate(
                 { _id: id, durum: { $nin: ["isleniyor", "siliniyor"] } },
-                { $set: { durum: "isleniyor", islemeId: yeniIslemeId, islemeHatasi: "" } },
+                {
+                    $set: {
+                        durum: "isleniyor",
+                        islemeId: yeniIslemeId,
+                        islemeHatasi: "",
+                        embeddingDurumu: "isleniyor",
+                        embeddingHatasi: ""
+                    }
+                },
                 { new: true }
             );
 
@@ -79,6 +121,7 @@ const arkaPlandaMetinCikar = async (materyalIds, dersId, kullaniciId) => {
 
             // 4. Staging olarak metin parçalarını kaydet (eski parçalara dokunulmaz)
             await metinParcalaVeKaydet(cikarilanText, aktifMateryal, yeniIslemeId);
+            const embeddingDurumu = await embeddingleriGuvenleHazirla(aktifMateryal, yeniIslemeId);
 
             // 5. Atomik Taahhüt (Commit): Materyal hâlâ bu işleme mi ait ve "isleniyor" durumunda mı?
             const guncellenen = await Materyal.findOneAndUpdate(
@@ -88,7 +131,8 @@ const arkaPlandaMetinCikar = async (materyalIds, dersId, kullaniciId) => {
                         durum: "hazir",
                         aktifIslemeId: yeniIslemeId,
                         cikarilanMetin: cikarilanText,
-                        islemeHatasi: ""
+                        islemeHatasi: "",
+                        ...embeddingDurumu
                     }
                 },
                 { new: true }
@@ -127,7 +171,9 @@ const arkaPlandaMetinCikar = async (materyalIds, dersId, kullaniciId) => {
                 {
                     $set: {
                         durum: "hata",
-                        islemeHatasi: metinCikarmaKullaniciMesaji()
+                        islemeHatasi: metinCikarmaKullaniciMesaji(),
+                        embeddingDurumu: "hata",
+                        embeddingHatasi: "Metin hazırlanamadığı için semantik arama dizini oluşturulamadı."
                     }
                 }
             );
@@ -394,7 +440,15 @@ export const materyalMetinCikar = async (req, res) => {
         // 1. Atomik sahiplik alımı
         const materyal = await Materyal.findOneAndUpdate(
             { _id: materyalId, kullaniciId, dersId: kilitliDersId, durum: { $nin: ["isleniyor", "siliniyor"] } },
-            { $set: { durum: "isleniyor", islemeId: yeniIslemeId, islemeHatasi: "" } },
+            {
+                $set: {
+                    durum: "isleniyor",
+                    islemeId: yeniIslemeId,
+                    islemeHatasi: "",
+                    embeddingDurumu: "isleniyor",
+                    embeddingHatasi: ""
+                }
+            },
             { new: true }
         );
 
@@ -426,6 +480,7 @@ export const materyalMetinCikar = async (req, res) => {
 
             // 4. Staging olarak metin parçalarını kaydet
             await metinParcalaVeKaydet(cikarilanText, aktifMateryal, yeniIslemeId);
+            const embeddingDurumu = await embeddingleriGuvenleHazirla(aktifMateryal, yeniIslemeId);
 
             // 5. Atomik Taahhüt (Commit)
             const guncellenen = await Materyal.findOneAndUpdate(
@@ -435,7 +490,8 @@ export const materyalMetinCikar = async (req, res) => {
                         durum: "hazir",
                         aktifIslemeId: yeniIslemeId,
                         cikarilanMetin: cikarilanText,
-                        islemeHatasi: ""
+                        islemeHatasi: "",
+                        ...embeddingDurumu
                     }
                 },
                 { new: true }
@@ -478,7 +534,13 @@ export const materyalMetinCikar = async (req, res) => {
                 {
                     $set: {
                         durum: mevcutMateryal.aktifIslemeId ? "hazir" : "hata",
-                        islemeHatasi: metinCikarmaKullaniciMesaji()
+                        islemeHatasi: metinCikarmaKullaniciMesaji(),
+                        embeddingDurumu: mevcutMateryal.aktifIslemeId
+                            ? (mevcutMateryal.embeddingDurumu || "bekliyor")
+                            : "hata",
+                        embeddingHatasi: mevcutMateryal.aktifIslemeId
+                            ? (mevcutMateryal.embeddingHatasi || "")
+                            : "Metin hazırlanamadığı için semantik arama dizini oluşturulamadı."
                     }
                 }
             );

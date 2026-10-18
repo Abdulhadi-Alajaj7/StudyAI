@@ -4,16 +4,20 @@ export const VARSAYILAN_GEMINI_MODELI = "gemini-3.5-flash-lite";
 
 /**
  * Gemini API İstemcisi oluşturucu.
+ * @param {object | undefined} httpOptions İsteğe bağlı SDK HTTP ayarları.
  * @returns {GoogleGenAI}
  */
-export const getGeminiClient = () => {
+export const getGeminiClient = (httpOptions = undefined) => {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey || typeof apiKey !== "string" || !apiKey.trim()) {
         const err = new Error("GEMINI_API_KEY ortam değişkeni tanımlı değil veya boş.");
         err.kod = "EKSİK_API_KEY";
         throw err;
     }
-    return new GoogleGenAI({ apiKey: apiKey.trim() });
+    return new GoogleGenAI({
+        apiKey: apiKey.trim(),
+        ...(httpOptions ? { httpOptions } : {})
+    });
 };
 
 /**

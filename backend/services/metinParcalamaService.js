@@ -1,5 +1,6 @@
 
 import MetinParcasi from "../models/MetinParcasi.js";
+import crypto from "node:crypto";
 
 /**
  * Metni anlamlı sınırları koruyarak parçalara ayırır.
@@ -179,7 +180,9 @@ export const metinParcalaVeKaydet = async (
         islemeId,
         parcaIndex: index,
         icerik,
-        karakterSayisi: icerik.length
+        karakterSayisi: icerik.length,
+        icerikHash: crypto.createHash("sha256").update(icerik).digest("hex"),
+        embeddingDurumu: "bekliyor"
     }));
 
     try {

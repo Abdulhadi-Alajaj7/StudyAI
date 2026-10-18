@@ -16,6 +16,7 @@ import {
 } from "../controllers/konuHaritasiController.js";
 
 import kimlikDogrula from "../middleware/auth.js";
+import { semantikArama } from "../controllers/semanticAramaController.js";
 
 const router = express.Router();
 
@@ -37,5 +38,8 @@ router.post("/:id/materyaller/onayla", kimlikDogrula, materyalleriOnayla);
 // Konu Haritası Endpoint'leri
 router.get("/:id/konu-haritasi", kimlikDogrula, konuHaritasiniGetir);
 router.post("/:id/konu-haritasi", kimlikDogrula, konuHaritasiOlustur);
+
+// Yalnızca kullanıcının kendi dersindeki aktif materyal sürümlerinde arama yapar.
+router.post("/:id/semantic-arama", kimlikDogrula, semantikArama);
 
 export default router;
