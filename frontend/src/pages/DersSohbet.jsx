@@ -116,7 +116,7 @@ function DersSohbet() {
                 const gorunenYukseklik = gorunenAlan?.height || window.innerHeight;
                 const gorunenUst = gorunenAlan?.offsetTop || 0;
                 const kabukUst = Math.max(0, kabuk.getBoundingClientRect().top - gorunenUst);
-                const altBosluk = window.innerWidth < 640 ? 12 : 16;
+                const altBosluk = window.innerWidth < 640 ? 4 : 8;
                 const asgariYukseklik = gorunenYukseklik < 600 ? 280 : window.innerWidth >= 1024 ? 420 : 340;
                 const yeniYukseklik = Math.max(
                     asgariYukseklik,

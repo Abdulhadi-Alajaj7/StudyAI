@@ -725,7 +725,7 @@ function PanelLayout() {
                 {/* Page Content */}
                 <div className={`flex-1 px-4 sm:px-6 lg:px-10 ${
                     sohbetSayfasi
-                        ? "pb-3 pt-4 sm:pb-4 sm:pt-5"
+                        ? "pb-1 pt-3 sm:pb-2 sm:pt-4"
                         : "py-8 pb-20"
                 }`}>
                     <Outlet context={{ isDark, kullanici }} />

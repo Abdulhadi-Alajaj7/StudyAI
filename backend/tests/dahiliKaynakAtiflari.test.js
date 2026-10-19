@@ -10,8 +10,15 @@ test("dahili RAG atıflarını metinden temizler", () => {
     );
 });
 
+test("virgülle ayrılmış çoklu dahili RAG atıflarını tek parça olarak temizler", () => {
+    assert.equal(
+        dahiliKaynakAtiflariniTemizle("Eğitim ve test verileri farklı amaçlarla kullanılır [K1, K3, K5]."),
+        "Eğitim ve test verileri farklı amaçlarla kullanılır."
+    );
+});
+
 test("normal Markdown bağlantılarını ve köşeli parantezleri korur", () => {
-    const icerik = "[Kaynak](https://example.com) ve [önemli] ifade ile [K1](https://example.com/k1).";
+    const icerik = "[Kaynak](https://example.com), [önemli] ifade ve [K1, K3](https://example.com/kaynak).";
     assert.equal(dahiliKaynakAtiflariniTemizle(icerik), icerik);
 });
 

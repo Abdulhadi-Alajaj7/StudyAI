@@ -57,6 +57,7 @@ test("sohbet yüksekliği görsel viewport'a uyar ve yalnızca iç listeler kayd
     assert.match(sayfa, /Mesaj geçmişi/);
     assert.match(sayfa, /overflow-x-hidden overflow-y-auto overscroll-contain/);
     assert.match(liste, /overflow-x-hidden overflow-y-auto overscroll-contain/);
+    assert.match(sayfa, /const altBosluk = window\.innerWidth < 640 \? 4 : 8/);
 });
 
 test("masaüstü sohbet listesi daraltılır ve mesaj okuma alanı genişletilir", () => {

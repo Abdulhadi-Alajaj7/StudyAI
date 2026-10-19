@@ -12,10 +12,10 @@ import {
 } from "../src/utils/sohbetYardimcilari.mjs";
 
 test("eski asistan mesajlarındaki dahili atıfları Markdown içeriğini bozmadan temizler", () => {
-    const icerik = "Yanıt [K1]. [Bağlantı](https://example.com) ve `örnek [K2]`.\n```txt\n[K3]\n```";
+    const icerik = "Yanıt [K1, K3]. [Bağlantı](https://example.com) ve `örnek [K2, K4]`.\n```txt\n[K3, K5]\n```";
     assert.equal(
         dahiliKaynakAtiflariniTemizle(icerik),
-        "Yanıt. [Bağlantı](https://example.com) ve `örnek [K2]`.\n```txt\n[K3]\n```"
+        "Yanıt. [Bağlantı](https://example.com) ve `örnek [K2, K4]`.\n```txt\n[K3, K5]\n```"
     );
 });
 

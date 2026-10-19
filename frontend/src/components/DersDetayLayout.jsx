@@ -132,7 +132,7 @@ function DersDetayLayout() {
 
     return (
         <div className={`mx-auto max-w-[1440px] ${sohbetSayfasi ? "pb-0" : "pb-10"}`}>
-            <header className={`${sohbetSayfasi ? "mb-3 sm:mb-4" : "mb-7"} border-b ${kenarlik}`}>
+            <header className={`${sohbetSayfasi ? "mb-2 sm:mb-3" : "mb-7"} border-b ${kenarlik}`}>
                 <div className="flex flex-col gap-4 pb-5 sm:flex-row sm:items-center sm:justify-between sm:gap-5 sm:pb-6">
                     <div className="flex min-w-0 items-start gap-3 sm:gap-4">
                         <DersGorunumSimgesi

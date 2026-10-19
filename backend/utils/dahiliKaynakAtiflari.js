@@ -1,5 +1,5 @@
 const KOD_PARCASI_DESENI = /(```[\s\S]*?(?:```|$)|~~~[\s\S]*?(?:~~~|$)|`[^`\r\n]*`)/g;
-const DAHILI_ATIF_DESENI = /[ \t]*\[K[1-9]\d*\](?![ \t]*(?:\(|\[|:))[ \t]*/g;
+const DAHILI_ATIF_DESENI = /[ \t]*\[K[1-9]\d*(?:[ \t]*,[ \t]*K[1-9]\d*)*[ \t]*\](?![ \t]*(?:\(|\[|:))[ \t]*/g;
 
 const duzMetindekiAtiflariTemizle = (metin) => String(metin).replace(
     DAHILI_ATIF_DESENI,
