@@ -4,6 +4,8 @@ import Ders from "../models/Ders.js";
 import Materyal from "../models/Materyal.js";
 import MetinParcasi from "../models/MetinParcasi.js";
 import KonuHaritasi from "../models/KonuHaritasi.js";
+import Sohbet from "../models/Sohbet.js";
+import Mesaj from "../models/Mesaj.js";
 import { guvenliDosyaSil } from "../utils/dosyaIslemleri.js";
 
 /* =========================
@@ -466,6 +468,14 @@ export const dersSil = async (req, res) => {
       MetinParcasi.deleteMany({ dersId: kilitliDers._id }),
       KonuHaritasi.deleteMany({ dersId: kilitliDers._id }),
       Materyal.deleteMany({ dersId: kilitliDers._id }),
+      Mesaj.deleteMany({
+        dersId: kilitliDers._id,
+        kullaniciId: req.user._id,
+      }),
+      Sohbet.deleteMany({
+        dersId: kilitliDers._id,
+        kullaniciId: req.user._id,
+      }),
     ]);
 
     await temizlikLeaseYenile();

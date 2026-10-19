@@ -14,6 +14,8 @@ let materyalBulmaBeklet;
 let materyalBulmaDevam;
 let silinenMetinParcasi;
 let silinenKonuHaritasi;
+let silinenSohbetler;
+let silinenMesajlar;
 
 const ayniId = (sol, sag) => String(sol) === String(sag);
 
@@ -94,6 +96,16 @@ mock.module("../models/KonuHaritasi.js", {
     async deleteMany() { silinenKonuHaritasi = true; }
   }
 });
+mock.module("../models/Sohbet.js", {
+  defaultExport: {
+    async deleteMany() { silinenSohbetler = true; }
+  }
+});
+mock.module("../models/Mesaj.js", {
+  defaultExport: {
+    async deleteMany() { silinenMesajlar = true; }
+  }
+});
 mock.module("../utils/dosyaIslemleri.js", {
   namedExports: {
     guvenliDosyaSil() {
@@ -138,6 +150,8 @@ beforeEach(() => {
   materyalBulmaDevam = null;
   silinenMetinParcasi = false;
   silinenKonuHaritasi = false;
+  silinenSohbetler = false;
+  silinenMesajlar = false;
 });
 
 test("aktif materyal işlemi varken ders silme 409 ile reddedilir", async () => {
@@ -163,6 +177,8 @@ test("kullanıcı tarafından silinmesi istenen onaylanmış ders ve ilişkili k
   assert.equal(materyaller.length, 0);
   assert.equal(silinenMetinParcasi, true);
   assert.equal(silinenKonuHaritasi, true);
+  assert.equal(silinenSohbetler, true);
+  assert.equal(silinenMesajlar, true);
 });
 
 test("silme kilidi alındıktan sonra yeni materyal işlemi başlatılamaz", async () => {

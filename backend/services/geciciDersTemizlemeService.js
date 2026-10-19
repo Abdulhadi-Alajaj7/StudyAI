@@ -3,6 +3,8 @@ import Ders from "../models/Ders.js";
 import Materyal from "../models/Materyal.js";
 import MetinParcasi from "../models/MetinParcasi.js";
 import KonuHaritasi from "../models/KonuHaritasi.js";
+import Sohbet from "../models/Sohbet.js";
+import Mesaj from "../models/Mesaj.js";
 import { guvenliDosyaSil } from "../utils/dosyaIslemleri.js";
 
 const BIR_SAAT = 60 * 60 * 1000;
@@ -204,7 +206,15 @@ export const geciciDersTemizlemeTuruCalistir = async ({
             await Promise.all([
                 MetinParcasi.deleteMany({ dersId: kilit._id }),
                 KonuHaritasi.deleteMany({ dersId: kilit._id }),
-                Materyal.deleteMany({ dersId: kilit._id })
+                Materyal.deleteMany({ dersId: kilit._id }),
+                Mesaj.deleteMany({
+                    dersId: kilit._id,
+                    kullaniciId: kilit.kullaniciId
+                }),
+                Sohbet.deleteMany({
+                    dersId: kilit._id,
+                    kullaniciId: kilit.kullaniciId
+                })
             ]);
 
             await heartbeat.dogrula();

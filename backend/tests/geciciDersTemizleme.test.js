@@ -9,6 +9,8 @@ let dersler;
 let materyaller;
 let metinParcalari;
 let konuHaritalari;
+let sohbetler;
+let mesajlar;
 let veritabaniSaati;
 let dosyaSilmeHatasi;
 let dosyaSilmeBeklemesi;
@@ -159,6 +161,20 @@ mock.module("../models/KonuHaritasi.js", {
         }
     }
 });
+mock.module("../models/Sohbet.js", {
+    defaultExport: {
+        async deleteMany(filtre) {
+            sohbetler = sohbetler.filter((kayit) => !kosulEslesiyor(kayit, filtre));
+        }
+    }
+});
+mock.module("../models/Mesaj.js", {
+    defaultExport: {
+        async deleteMany(filtre) {
+            mesajlar = mesajlar.filter((kayit) => !kosulEslesiyor(kayit, filtre));
+        }
+    }
+});
 mock.module("../utils/dosyaIslemleri.js", {
     namedExports: {
         async guvenliDosyaSil(dosyaYolu) {
@@ -207,6 +223,9 @@ const dersEkle = ({
     });
     metinParcalari.push({ dersId: ders._id });
     konuHaritalari.push({ dersId: ders._id });
+    const sohbetId = new mongoose.Types.ObjectId();
+    sohbetler.push({ _id: sohbetId, dersId: ders._id, kullaniciId });
+    mesajlar.push({ sohbetId, dersId: ders._id, kullaniciId });
     return ders;
 };
 
@@ -223,6 +242,8 @@ beforeEach(() => {
     materyaller = [];
     metinParcalari = [];
     konuHaritalari = [];
+    sohbetler = [];
+    mesajlar = [];
     veritabaniSaati = new Date(temelZaman);
     dosyaSilmeHatasi = null;
     dosyaSilmeBeklemesi = null;
@@ -250,6 +271,8 @@ test("süresi dolmuş onaylanmamış ve işlemi olmayan ders temizlenir", async 
     assert.equal(materyaller.length, 0);
     assert.equal(metinParcalari.length, 0);
     assert.equal(konuHaritalari.length, 0);
+    assert.equal(sohbetler.length, 0);
+    assert.equal(mesajlar.length, 0);
     assert.equal(dosyaSilmeCagrilari.length, 1);
 });
 
@@ -434,6 +457,8 @@ test("dosya silme hatasında veritabanı kayıtları korunur ve tekrar güvenlid
     assert.equal(materyaller.length, 1);
     assert.equal(metinParcalari.length, 1);
     assert.equal(konuHaritalari.length, 1);
+    assert.equal(sohbetler.length, 1);
+    assert.equal(mesajlar.length, 1);
 
     dosyaSilmeHatasi = null;
     const tekrarSonucu = await temizlikCalistir(
@@ -462,4 +487,6 @@ test("lease'i kaybeden eski çalışan veritabanı kayıtlarını silemez", asyn
     assert.equal(materyaller.length, 1);
     assert.equal(metinParcalari.length, 1);
     assert.equal(konuHaritalari.length, 1);
+    assert.equal(sohbetler.length, 1);
+    assert.equal(mesajlar.length, 1);
 });

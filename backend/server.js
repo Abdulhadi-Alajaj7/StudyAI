@@ -9,6 +9,7 @@ import veritabaninaBaglan from "./config/db.js";
 import authRoutes from "./routes/authRoutes.js";
 import dersRoutes from "./routes/dersRoutes.js";
 import materyalRoutes from "./routes/materyalRoutes.js";
+import sohbetRoutes from "./routes/sohbetRoutes.js";
 
 import { geciciDersleriTemizle } from "./services/geciciDersTemizlemeService.js";
 import { baslangicIslemleriniKurtar } from "./services/baslangicKurtarmaService.js";
@@ -33,6 +34,7 @@ app.use(cookieParser());
 // Routes
 app.use("/auth", authRoutes);
 app.use("/dersler", dersRoutes);
+app.use("/dersler", sohbetRoutes);
 app.use("/materyaller", materyalRoutes);
 
 // Ana route
