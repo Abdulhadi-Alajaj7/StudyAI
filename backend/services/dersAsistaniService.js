@@ -8,6 +8,7 @@ import {
     geminiIleSohbetYanitiUret,
 } from "./geminiService.js";
 import { SohbetHatasi } from "./sohbetService.js";
+import { dahiliKaynakAtiflariniTemizle } from "../utils/dahiliKaynakAtiflari.js";
 
 const MESAJ_KILIDI_MS = 2 * 60 * 1000;
 const BAGLAM_MESAJ_LIMITI = 8;
@@ -27,6 +28,12 @@ const depsGetir = (bagimliliklar = {}) => ({
 });
 
 const nesneyeCevir = (belge) => (belge?.toObject ? belge.toObject() : belge);
+
+const asistanMesajiniSunumaHazirla = (mesaj) => {
+    const nesne = nesneyeCevir(mesaj);
+    if (!nesne || nesne.rol !== "assistant") return nesne;
+    return { ...nesne, icerik: dahiliKaynakAtiflariniTemizle(nesne.icerik) };
+};
 
 const sohbetBulunamadi = () => new SohbetHatasi(
     "Sohbet bulunamadı veya bu sohbet için yetkiniz yok.",
@@ -110,7 +117,10 @@ export const konusmaBaglaminiSinirla = (mesajlar = []) => {
     const sonuc = [];
     let toplam = 0;
     for (const mesaj of [...uygun].reverse()) {
-        const icerik = String(mesaj.icerik || "").trim();
+        const hamIcerik = String(mesaj.icerik || "").trim();
+        const icerik = mesaj.rol === "assistant"
+            ? dahiliKaynakAtiflariniTemizle(hamIcerik)
+            : hamIcerik;
         if (!icerik) continue;
         const kalan = BAGLAM_KARAKTER_LIMITI - toplam;
         if (kalan <= 0) break;
@@ -343,7 +353,11 @@ export const sohbetMesajinaYanitOlustur = async ({
             await tamamlanmisYanitiOnar({
                 deps, sohbetId, kullaniciId, dersId, istemciIstekId, kullaniciMesaji, asistanMesaji: mevcutYanit,
             });
-            return { kullaniciMesaji, asistanMesaji: mevcutYanit, tekrar: true };
+            return {
+                kullaniciMesaji,
+                asistanMesaji: asistanMesajiniSunumaHazirla(mevcutYanit),
+                tekrar: true,
+            };
         }
     }
 
@@ -374,7 +388,11 @@ export const sohbetMesajinaYanitOlustur = async ({
                 await tamamlanmisYanitiOnar({
                     deps, sohbetId, kullaniciId, dersId, istemciIstekId, kullaniciMesaji, asistanMesaji: yarisYaniti,
                 });
-                return { kullaniciMesaji, asistanMesaji: yarisYaniti, tekrar: true };
+                return {
+                    kullaniciMesaji,
+                    asistanMesaji: asistanMesajiniSunumaHazirla(yarisYaniti),
+                    tekrar: true,
+                };
             }
         }
     }
@@ -447,6 +465,13 @@ export const sohbetMesajinaYanitOlustur = async ({
             yapayZekaSonucu.kullanilanKaynakKodlari,
             kaynakAdaylari
         );
+        const temizYanit = dahiliKaynakAtiflariniTemizle(yapayZekaSonucu.yanit).trim();
+        if (!temizYanit) {
+            throw new SohbetHatasi(
+                "Yapay zekâ hizmetinden gösterilebilir bir yanıt alınamadı. Aynı isteği yeniden deneyebilirsiniz.",
+                { status: 502, kod: "GEMINI_GECERSIZ_YANIT" }
+            );
+        }
         const kilitKontrolu = await deps.SohbetModel.findOne({
             _id: sohbetId,
             kullaniciId,
@@ -475,7 +500,7 @@ export const sohbetMesajinaYanitOlustur = async ({
                     kullaniciId,
                     dersId,
                     rol: "assistant",
-                    icerik: yapayZekaSonucu.yanit,
+                    icerik: temizYanit,
                     kaynaklar,
                     yanitlananMesajId: kullaniciMesaji._id,
                     tokenKullanimi: yapayZekaSonucu.tokenKullanimi,

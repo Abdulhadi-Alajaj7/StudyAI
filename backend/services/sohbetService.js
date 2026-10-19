@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 import Ders from "../models/Ders.js";
 import Sohbet from "../models/Sohbet.js";
 import Mesaj from "../models/Mesaj.js";
+import { dahiliKaynakAtiflariniTemizle } from "../utils/dahiliKaynakAtiflari.js";
 
 export class SohbetHatasi extends Error {
     constructor(mesaj, { status = 500, kod = "SOHBET_HATASI" } = {}) {
@@ -22,6 +23,10 @@ const bagimliliklariGetir = (bagimliliklar = {}) => ({
 const belgeyiNesneyeCevir = (belge) => (
     belge?.toObject ? belge.toObject() : belge
 );
+
+const mesajiSunumaHazirla = (mesaj) => mesaj?.rol === "assistant"
+    ? { ...mesaj, icerik: dahiliKaynakAtiflariniTemizle(mesaj.icerik) }
+    : mesaj;
 
 const oturumEkle = (sorgu, session) => (
     session ? sorgu.session(session) : sorgu
@@ -336,7 +341,7 @@ export const sohbetMesajlariniGetir = async ({
 
     return {
         sohbet,
-        mesajlar: enYenidenEskiye.reverse(),
+        mesajlar: enYenidenEskiye.reverse().map(mesajiSunumaHazirla),
         sonrakiCursor,
     };
 };

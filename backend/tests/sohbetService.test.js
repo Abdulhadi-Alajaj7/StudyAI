@@ -205,8 +205,14 @@ test("sohbet listesi yalnızca kullanıcıya ait dersi doğrulayıp son mesaj s�
 });
 
 test("mesaj geçmişi kullanıcı, ders ve sohbet kimlikleriyle izole edilir ve kronolojik döner", async () => {
-    const eskiMesaj = { _id: new mongoose.Types.ObjectId(), createdAt: new Date("2026-01-01") };
-    const yeniMesaj = { _id: new mongoose.Types.ObjectId(), createdAt: new Date("2026-01-02") };
+    const eskiMesaj = { _id: new mongoose.Types.ObjectId(), rol: "user", icerik: "Soru", createdAt: new Date("2026-01-01") };
+    const yeniMesaj = {
+        _id: new mongoose.Types.ObjectId(),
+        rol: "assistant",
+        icerik: "Eski kayıt yanıtı [K1].",
+        kaynaklar: [{ materyalAdi: "Hafta5.pdf" }],
+        createdAt: new Date("2026-01-02"),
+    };
     let sohbetFiltresi;
     let mesajFiltresi;
 
@@ -233,6 +239,8 @@ test("mesaj geçmişi kullanıcı, ders ve sohbet kimlikleriyle izole edilir ve 
     assert.deepEqual(sohbetFiltresi, { _id: sohbetId, kullaniciId, dersId });
     assert.deepEqual(mesajFiltresi, { sohbetId, kullaniciId, dersId });
     assert.deepEqual(sonuc.mesajlar.map((mesaj) => mesaj._id), [eskiMesaj._id, yeniMesaj._id]);
+    assert.equal(sonuc.mesajlar[1].icerik, "Eski kayıt yanıtı.");
+    assert.deepEqual(sonuc.mesajlar[1].kaynaklar, [{ materyalAdi: "Hafta5.pdf" }]);
 });
 
 test("başka kullanıcıya veya derse ait sohbet okunamaz", async () => {

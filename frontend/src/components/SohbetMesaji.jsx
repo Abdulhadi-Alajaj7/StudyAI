@@ -7,11 +7,18 @@ import {
 } from "@heroicons/react/24/outline";
 
 import GuvenliMarkdown from "./GuvenliMarkdown";
-import { kaynakMateryalAdlari, mesajSaati } from "../utils/sohbetYardimcilari.mjs";
+import {
+    dahiliKaynakAtiflariniTemizle,
+    kaynakMateryalAdlari,
+    mesajSaati,
+} from "../utils/sohbetYardimcilari.mjs";
 
 function SohbetMesaji({ mesaj, isDark }) {
     const kullaniciMesaji = mesaj.rol === "user";
     const [kopyalandi, setKopyalandi] = useState(false);
+    const gosterilecekIcerik = kullaniciMesaji
+        ? mesaj.icerik
+        : dahiliKaynakAtiflariniTemizle(mesaj.icerik);
 
     useEffect(() => {
         if (!kopyalandi) return undefined;
@@ -21,7 +28,7 @@ function SohbetMesaji({ mesaj, isDark }) {
 
     const kopyala = async () => {
         try {
-            await navigator.clipboard.writeText(mesaj.icerik);
+            await navigator.clipboard.writeText(gosterilecekIcerik);
             setKopyalandi(true);
         } catch {
             setKopyalandi(false);
@@ -61,13 +68,13 @@ function SohbetMesaji({ mesaj, isDark }) {
             <div className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-[#4F46E5] to-[#22C1DC] text-white shadow-sm sm:h-9 sm:w-9">
                 <SparklesIcon className="h-5 w-5" />
             </div>
-            <div className="min-w-0 max-w-[calc(100%-2.75rem)] sm:max-w-[84%]">
+            <div className="min-w-0 max-w-[calc(100%-2.5rem)] sm:max-w-[92%] xl:max-w-[88%]">
                 <div className={`rounded-2xl rounded-tl-md border px-4 py-3 text-[14px] leading-7 sm:px-5 sm:py-4 sm:text-[15px] ${
                     isDark
                         ? "border-[#26334A] bg-[#162137] text-[#E6EBF4]"
                         : "border-[#E7E5EF] bg-white text-[#243047] shadow-sm"
                 }`}>
-                    <GuvenliMarkdown icerik={mesaj.icerik} />
+                    <GuvenliMarkdown icerik={gosterilecekIcerik} />
 
                     {kaynakAdlari.length > 0 && (
                         <div className={`mt-4 border-t pt-3 ${isDark ? "border-[#2C3A54]" : "border-[#ECEAF2]"}`}>

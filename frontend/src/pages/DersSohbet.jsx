@@ -43,15 +43,28 @@ function DersSohbet() {
     const [modal, setModal] = useState(null);
     const [modalYukleniyor, setModalYukleniyor] = useState(false);
     const [modalHatasi, setModalHatasi] = useState("");
+    const [sohbetYuksekligi, setSohbetYuksekligi] = useState(null);
 
+    const sohbetKabuguRef = useRef(null);
     const mesajAlaniRef = useRef(null);
     const metinAlaniRef = useRef(null);
+    const mobilListeButonuRef = useRef(null);
+    const drawerOncekiOdakRef = useRef(null);
     const seciliSohbetRef = useRef(null);
     const gonderiliyorRef = useRef(false);
     const sohbetIstegiRef = useRef(0);
     const mesajIstegiRef = useRef(0);
     const baslikZamanlayicilariRef = useRef(new Set());
     const monteRef = useRef(true);
+
+    const mobilListeyiAc = useCallback(() => {
+        drawerOncekiOdakRef.current = document.activeElement;
+        setMobilListeAcik(true);
+    }, []);
+
+    const mobilListeyiKapat = useCallback(() => {
+        setMobilListeAcik(false);
+    }, []);
 
     useEffect(() => {
         monteRef.current = true;
@@ -65,9 +78,68 @@ function DersSohbet() {
     useEffect(() => {
         if (!mobilListeAcik) return undefined;
         const oncekiOverflow = document.body.style.overflow;
+        const oncekiOverscroll = document.documentElement.style.overscrollBehavior;
+        const oncekiOdak = drawerOncekiOdakRef.current;
+        const mobilListeButonu = mobilListeButonuRef.current;
         document.body.style.overflow = "hidden";
-        return () => { document.body.style.overflow = oncekiOverflow; };
+        document.documentElement.style.overscrollBehavior = "none";
+        return () => {
+            document.body.style.overflow = oncekiOverflow;
+            document.documentElement.style.overscrollBehavior = oncekiOverscroll;
+            requestAnimationFrame(() => {
+                const hedef = oncekiOdak?.isConnected ? oncekiOdak : mobilListeButonu;
+                hedef?.focus();
+            });
+        };
     }, [mobilListeAcik]);
+
+    useEffect(() => {
+        const masaustuSorgusu = window.matchMedia("(min-width: 1024px)");
+        const ekranDegisiminiYakala = (event) => {
+            if (event.matches) setMobilListeAcik(false);
+        };
+        masaustuSorgusu.addEventListener("change", ekranDegisiminiYakala);
+        return () => masaustuSorgusu.removeEventListener("change", ekranDegisiminiYakala);
+    }, []);
+
+    useEffect(() => {
+        let animasyonKaresi;
+        let iptalEdildi = false;
+
+        const yuksekligiHesapla = () => {
+            cancelAnimationFrame(animasyonKaresi);
+            animasyonKaresi = requestAnimationFrame(() => {
+                const kabuk = sohbetKabuguRef.current;
+                if (!kabuk || iptalEdildi) return;
+
+                const gorunenAlan = window.visualViewport;
+                const gorunenYukseklik = gorunenAlan?.height || window.innerHeight;
+                const gorunenUst = gorunenAlan?.offsetTop || 0;
+                const kabukUst = Math.max(0, kabuk.getBoundingClientRect().top - gorunenUst);
+                const altBosluk = window.innerWidth < 640 ? 12 : 16;
+                const asgariYukseklik = gorunenYukseklik < 600 ? 280 : window.innerWidth >= 1024 ? 420 : 340;
+                const yeniYukseklik = Math.max(
+                    asgariYukseklik,
+                    Math.floor(gorunenYukseklik - kabukUst - altBosluk)
+                );
+                setSohbetYuksekligi((onceki) => onceki === yeniYukseklik ? onceki : yeniYukseklik);
+            });
+        };
+
+        yuksekligiHesapla();
+        window.addEventListener("resize", yuksekligiHesapla);
+        window.visualViewport?.addEventListener("resize", yuksekligiHesapla);
+        window.visualViewport?.addEventListener("scroll", yuksekligiHesapla);
+        document.fonts?.ready.then(yuksekligiHesapla);
+
+        return () => {
+            iptalEdildi = true;
+            cancelAnimationFrame(animasyonKaresi);
+            window.removeEventListener("resize", yuksekligiHesapla);
+            window.visualViewport?.removeEventListener("resize", yuksekligiHesapla);
+            window.visualViewport?.removeEventListener("scroll", yuksekligiHesapla);
+        };
+    }, []);
 
     const altaKaydir = useCallback((davranis = "smooth") => {
         requestAnimationFrame(() => {
@@ -330,21 +402,31 @@ function DersSohbet() {
     };
 
     return (
-        <section className={`relative overflow-hidden rounded-2xl border ${isDark ? "border-[#26334A] bg-[#0C1424]" : "border-[#E2E0E9] bg-[#F8F9FC]"}`} aria-label="Ders sohbeti">
-            <div className="grid h-[min(780px,calc(100dvh-300px))] min-h-[570px] grid-cols-1 lg:grid-cols-[300px_minmax(0,1fr)]">
+        <section
+            ref={sohbetKabuguRef}
+            style={{ height: sohbetYuksekligi ? `${sohbetYuksekligi}px` : "calc(100dvh - 280px)" }}
+            className={`relative min-h-[280px] w-full max-w-full overflow-hidden rounded-2xl border ${isDark ? "border-[#26334A] bg-[#0C1424]" : "border-[#E2E0E9] bg-[#F8F9FC]"}`}
+            aria-label="Ders sohbeti"
+        >
+            <div
+                className="grid h-full min-h-0 grid-cols-1 lg:grid-cols-[260px_minmax(0,1fr)] xl:grid-cols-[272px_minmax(0,1fr)]"
+                inert={mobilListeAcik ? "" : undefined}
+            >
                 <div className={`hidden min-h-0 border-r lg:block ${isDark ? "border-[#26334A]" : "border-[#E7E5EF]"}`}>
                     <SohbetListesi {...listeProps} />
                 </div>
 
                 <div className="flex min-h-0 min-w-0 flex-col">
-                    <header className={`flex min-h-[76px] items-center gap-3 border-b px-4 py-3 sm:px-5 ${isDark ? "border-[#26334A] bg-[#10192C]" : "border-[#E7E5EF] bg-white"}`}>
+                    <header className={`flex min-h-[68px] items-center gap-3 border-b px-3 py-2.5 sm:px-5 ${isDark ? "border-[#26334A] bg-[#10192C]" : "border-[#E7E5EF] bg-white"}`}>
                         <button
+                            ref={mobilListeButonuRef}
                             type="button"
-                            onClick={() => setMobilListeAcik(true)}
+                            onClick={mobilListeyiAc}
                             aria-label="Sohbet geçmişini aç"
                             aria-controls="mobil-sohbet-listesi"
                             aria-expanded={mobilListeAcik}
-                            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl lg:hidden ${isDark ? "text-[#A7B0C2] hover:bg-white/5" : "text-[#64748B] hover:bg-slate-100"}`}
+                            aria-haspopup="dialog"
+                            className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl lg:hidden ${isDark ? "text-[#A7B0C2] hover:bg-white/5" : "text-[#64748B] hover:bg-slate-100"}`}
                         >
                             <Bars3BottomLeftIcon className="h-6 w-6" />
                         </button>
@@ -359,7 +441,13 @@ function DersSohbet() {
                         </div>
                     </header>
 
-                    <div ref={mesajAlaniRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6 sm:py-6" aria-live="polite">
+                    <div
+                        ref={mesajAlaniRef}
+                        className={`sohbet-mesaj-scrollbar min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain px-3 py-4 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-indigo-500 sm:px-5 sm:py-5 lg:px-6 ${isDark ? "sohbet-mesaj-scrollbar--dark" : "sohbet-mesaj-scrollbar--light"}`}
+                        aria-label="Mesaj geçmişi"
+                        aria-live="polite"
+                        tabIndex={0}
+                    >
                         {mesajCursor && !mesajlarYukleniyor && (
                             <div className="mb-5 text-center">
                                 <button
@@ -399,7 +487,7 @@ function DersSohbet() {
                         )}
 
                         {!mesajlarYukleniyor && mesajlar.length > 0 && (
-                            <div className="mx-auto max-w-4xl space-y-6">
+                            <div className="mx-auto w-full max-w-5xl space-y-5 sm:space-y-6">
                                 {mesajlar.map((mesaj) => <SohbetMesaji key={mesaj._id} mesaj={mesaj} isDark={isDark} />)}
                                 {gonderiliyor && (
                                     <div className="flex items-start gap-3" role="status" aria-label="Ders Asistanı yanıt hazırlıyor">
@@ -417,7 +505,7 @@ function DersSohbet() {
 
                     <div className={`border-t p-3 sm:p-4 ${isDark ? "border-[#26334A] bg-[#10192C]" : "border-[#E7E5EF] bg-white"}`}>
                         {mesajHatasi && (
-                            <div role="alert" className="mx-auto mb-3 flex max-w-4xl flex-col gap-2 rounded-xl border border-red-500/20 bg-red-500/5 px-3 py-2.5 text-[13px] text-red-500 sm:flex-row sm:items-center sm:justify-between">
+                            <div role="alert" className="mx-auto mb-3 flex max-w-5xl flex-col gap-2 rounded-xl border border-red-500/20 bg-red-500/5 px-3 py-2.5 text-[13px] text-red-500 sm:flex-row sm:items-center sm:justify-between">
                                 <span>{mesajHatasi}</span>
                                 {yenidenDenenecek && (
                                     <button type="button" onClick={yenidenDene} disabled={gonderiliyor} className="inline-flex shrink-0 items-center gap-1.5 font-semibold hover:underline disabled:opacity-60">
@@ -426,7 +514,7 @@ function DersSohbet() {
                                 )}
                             </div>
                         )}
-                        <form onSubmit={formuGonder} className={`mx-auto flex max-w-4xl items-end gap-2 rounded-2xl border p-2 transition-shadow focus-within:ring-4 focus-within:ring-indigo-500/10 ${isDark ? "border-[#33415C] bg-[#0C1424] focus-within:border-indigo-500" : "border-[#D8D5E2] bg-white focus-within:border-indigo-500"}`}>
+                        <form onSubmit={formuGonder} className={`mx-auto flex min-w-0 max-w-5xl items-end gap-2 rounded-2xl border p-2 transition-shadow focus-within:ring-4 focus-within:ring-indigo-500/10 ${isDark ? "border-[#33415C] bg-[#0C1424] focus-within:border-indigo-500" : "border-[#D8D5E2] bg-white focus-within:border-indigo-500"}`}>
                             <textarea
                                 ref={metinAlaniRef}
                                 value={girdi}
@@ -442,7 +530,7 @@ function DersSohbet() {
                                 disabled={gonderiliyor}
                                 placeholder={`${ders?.dersAdi || "Ders"} hakkında bir şey sorun...`}
                                 aria-label="Mesajınız"
-                                className={`max-h-32 min-h-11 flex-1 resize-none bg-transparent px-3 py-2.5 text-[14px] leading-6 outline-none disabled:cursor-not-allowed sm:text-[15px] ${isDark ? "text-white placeholder:text-[#71809B]" : "text-[#0F172A] placeholder:text-[#94A3B8]"}`}
+                                className={`max-h-32 min-h-11 min-w-0 flex-1 resize-none bg-transparent px-3 py-2.5 text-[14px] leading-6 outline-none disabled:cursor-not-allowed sm:text-[15px] ${isDark ? "text-white placeholder:text-[#71809B]" : "text-[#0F172A] placeholder:text-[#94A3B8]"}`}
                             />
                             <button
                                 type="submit"
@@ -455,7 +543,7 @@ function DersSohbet() {
                                     : <PaperAirplaneIcon className="h-5 w-5" />}
                             </button>
                         </form>
-                        <p className={`mx-auto mt-2 max-w-4xl text-center text-[10px] sm:text-[11px] ${isDark ? "text-[#66738B]" : "text-[#94A3B8]"}`}>
+                        <p className={`mx-auto mt-2 hidden max-w-5xl text-center text-[11px] sm:block ${isDark ? "text-[#66738B]" : "text-[#94A3B8]"}`}>
                             Enter ile gönderin · Shift+Enter ile yeni satır ekleyin · Yanıtları önemli bilgiler için doğrulayın.
                         </p>
                     </div>
@@ -463,10 +551,16 @@ function DersSohbet() {
             </div>
 
             {mobilListeAcik && (
-                <div id="mobil-sohbet-listesi" className="fixed inset-0 z-[80] lg:hidden">
-                    <button type="button" className="absolute inset-0 bg-slate-950/55 backdrop-blur-[2px]" onClick={() => setMobilListeAcik(false)} aria-label="Sohbet geçmişini kapat" />
-                    <div className="absolute inset-y-0 left-0">
-                        <SohbetListesi {...listeProps} mobil onKapat={() => setMobilListeAcik(false)} />
+                <div id="mobil-sohbet-listesi" className="fixed inset-0 z-[80] overflow-hidden lg:hidden">
+                    <button
+                        type="button"
+                        className="absolute inset-0 cursor-default bg-slate-950/60 backdrop-blur-[2px]"
+                        onClick={mobilListeyiKapat}
+                        aria-hidden="true"
+                        tabIndex={-1}
+                    />
+                    <div className="absolute inset-y-0 left-0 max-w-full">
+                        <SohbetListesi {...listeProps} mobil onKapat={mobilListeyiKapat} />
                     </div>
                 </div>
             )}

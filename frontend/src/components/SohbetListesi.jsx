@@ -70,12 +70,13 @@ function SohbetListesi({
     return (
         <aside
             ref={listeRef}
-            aria-label="Sohbet geçmişi"
+            aria-label={mobil ? undefined : "Sohbet geçmişi"}
+            aria-labelledby={mobil ? "mobil-sohbet-basligi" : undefined}
             role={mobil ? "dialog" : undefined}
             aria-modal={mobil ? "true" : undefined}
             className={`flex h-full min-h-0 flex-col ${
                 isDark ? "bg-[#10192C]" : "bg-white"
-            } ${mobil ? "w-[min(88vw,340px)] shadow-2xl" : "w-full"}`}
+            } ${mobil ? "w-[min(90vw,360px)] max-w-full pb-[env(safe-area-inset-bottom)] pt-[env(safe-area-inset-top)] shadow-2xl" : "w-full"}`}
         >
             <div className="flex items-center gap-2 p-4 pb-3">
                 <button
@@ -105,7 +106,7 @@ function SohbetListesi({
             </div>
 
             <div className="flex items-center justify-between px-5 pb-2 pt-1">
-                <h3 className={`text-[11px] font-bold uppercase tracking-[0.12em] ${isDark ? "text-[#8390A8]" : "text-[#64748B]"}`}>
+                <h3 id={mobil ? "mobil-sohbet-basligi" : undefined} className={`text-[11px] font-bold uppercase tracking-[0.12em] ${isDark ? "text-[#8390A8]" : "text-[#64748B]"}`}>
                     Sohbetler
                 </h3>
                 <button
@@ -113,13 +114,18 @@ function SohbetListesi({
                     onClick={onYenile}
                     disabled={yukleniyor || islemDevamEdiyor}
                     aria-label="Sohbet listesini yenile"
-                    className={`rounded-lg p-1.5 transition-colors ${isDark ? "text-[#8390A8] hover:bg-white/5 hover:text-white" : "text-[#64748B] hover:bg-slate-100 hover:text-slate-900"}`}
+                    className={`flex h-10 w-10 items-center justify-center rounded-lg transition-colors ${isDark ? "text-[#8390A8] hover:bg-white/5 hover:text-white" : "text-[#64748B] hover:bg-slate-100 hover:text-slate-900"}`}
                 >
                     <ArrowPathIcon className={`h-4 w-4 ${yukleniyor ? "animate-spin" : ""}`} />
                 </button>
             </div>
 
-            <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-4" data-testid="sohbet-listesi">
+            <div
+                className="sohbet-scrollbar min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain px-3 pb-4 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-indigo-500"
+                data-testid="sohbet-listesi"
+                aria-label="Sohbet listesi"
+                tabIndex={0}
+            >
                 {yukleniyor && sohbetler.length === 0 && (
                     <div className="space-y-2 px-1 py-2" aria-label="Sohbetler yükleniyor">
                         {[0, 1, 2].map((deger) => (
@@ -156,7 +162,7 @@ function SohbetListesi({
                                     }}
                                     disabled={islemDevamEdiyor}
                                     aria-current={aktif ? "page" : undefined}
-                                    className={`flex min-h-12 w-full items-center gap-3 rounded-xl py-2.5 pl-3 pr-11 text-left text-[13px] font-medium transition-colors disabled:cursor-not-allowed ${
+                                    className={`flex min-h-12 w-full items-center gap-3 rounded-xl py-2.5 pl-3 pr-14 text-left text-[13px] font-medium transition-colors disabled:cursor-not-allowed ${
                                         aktif
                                             ? isDark
                                                 ? "bg-indigo-500/20 text-indigo-100 ring-1 ring-inset ring-indigo-400/30"
@@ -179,7 +185,7 @@ function SohbetListesi({
                                     disabled={islemDevamEdiyor}
                                     aria-label={`${sohbet.baslik || "Sohbet"} seçenekleri`}
                                     aria-expanded={acikMenu === sohbet._id}
-                                    className={`absolute right-2 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-lg opacity-70 transition hover:opacity-100 focus:opacity-100 disabled:hidden ${
+                                    className={`absolute right-1.5 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-lg opacity-70 transition hover:opacity-100 focus:opacity-100 disabled:hidden ${
                                         isDark ? "text-[#A7B0C2] hover:bg-white/10" : "text-[#64748B] hover:bg-white"
                                     }`}
                                 >
@@ -187,13 +193,13 @@ function SohbetListesi({
                                 </button>
 
                                 {acikMenu === sohbet._id && (
-                                    <div className={`absolute right-2 top-[calc(100%-3px)] z-20 w-44 rounded-xl border p-1.5 shadow-xl ${
+                                    <div className={`absolute right-1.5 top-[calc(100%-3px)] z-20 w-48 rounded-xl border p-1.5 shadow-xl ${
                                         isDark ? "border-[#33415C] bg-[#162137]" : "border-[#E2E0E9] bg-white"
                                     }`} role="menu">
                                         <button
                                             type="button"
                                             onClick={() => { setAcikMenu(null); onYenidenAdlandir(sohbet); }}
-                                            className={`flex h-10 w-full items-center gap-2 rounded-lg px-3 text-[13px] font-medium ${isDark ? "text-[#D6DEEB] hover:bg-white/5" : "text-[#334155] hover:bg-slate-50"}`}
+                                            className={`flex h-11 w-full items-center gap-2 rounded-lg px-3 text-[13px] font-medium ${isDark ? "text-[#D6DEEB] hover:bg-white/5" : "text-[#334155] hover:bg-slate-50"}`}
                                             role="menuitem"
                                         >
                                             <PencilSquareIcon className="h-4 w-4" /> Yeniden Adlandır
@@ -201,7 +207,7 @@ function SohbetListesi({
                                         <button
                                             type="button"
                                             onClick={() => { setAcikMenu(null); onSil(sohbet); }}
-                                            className={`flex h-10 w-full items-center gap-2 rounded-lg px-3 text-[13px] font-medium text-red-500 ${isDark ? "hover:bg-red-500/10" : "hover:bg-red-50"}`}
+                                            className={`flex h-11 w-full items-center gap-2 rounded-lg px-3 text-[13px] font-medium text-red-500 ${isDark ? "hover:bg-red-500/10" : "hover:bg-red-50"}`}
                                             role="menuitem"
                                         >
                                             <TrashIcon className="h-4 w-4" /> Sil
@@ -218,7 +224,7 @@ function SohbetListesi({
                         type="button"
                         onClick={onDahaFazla}
                         disabled={yukleniyor}
-                        className={`mt-3 h-10 w-full rounded-xl text-[12px] font-semibold transition-colors ${
+                        className={`mt-3 h-11 w-full rounded-xl text-[12px] font-semibold transition-colors ${
                             isDark ? "bg-white/5 text-[#AAB5C8] hover:bg-white/10" : "bg-slate-50 text-[#64748B] hover:bg-slate-100"
                         }`}
                     >

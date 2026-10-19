@@ -3,7 +3,6 @@ import { useOutletContext, useNavigate, useLocation, useParams } from "react-rou
 import api from "../api";
 import DersOlusturmaAdimlari from "../components/DersOlusturmaAdimlari";
 import KonuHaritasiBolumu from "../components/KonuHaritasiBolumu";
-import SemantikAramaBolumu from "../components/SemantikAramaBolumu";
 import DersGorunumSimgesi from "../components/DersGorunumSimgesi";
 import { dersDetayYolu } from "../utils/dersDetayYollari.mjs";
 import { CheckBadgeIcon, ArrowRightIcon, BookOpenIcon, DocumentTextIcon, CheckIcon, CpuChipIcon, ListBulletIcon, ChatBubbleBottomCenterTextIcon, PuzzlePieceIcon, SparklesIcon } from "@heroicons/react/24/outline";
@@ -289,12 +288,6 @@ function DersHazir() {
                         guncelMi={guncelMi}
                         hazirMateryalSayisi={materyalSayisi}
                         saltOkunur={true}
-                    />
-
-                    <SemantikAramaBolumu
-                        dersId={dersId}
-                        isDark={isDark}
-                        hazirMateryalSayisi={materyalSayisi}
                     />
 
                     {/* Artık Neler Yapabilirsin? */}

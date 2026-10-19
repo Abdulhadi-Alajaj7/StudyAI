@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+    dahiliKaynakAtiflariniTemizle,
     geciciMesajiSunucuMesajiylaDegistir,
     istemciIstekIdOlustur,
     kaydirmaSondaMi,
@@ -9,6 +10,14 @@ import {
     mesajlariBirlestir,
     sohbetleriBirlestir,
 } from "../src/utils/sohbetYardimcilari.mjs";
+
+test("eski asistan mesajlarındaki dahili atıfları Markdown içeriğini bozmadan temizler", () => {
+    const icerik = "Yanıt [K1]. [Bağlantı](https://example.com) ve `örnek [K2]`.\n```txt\n[K3]\n```";
+    assert.equal(
+        dahiliKaynakAtiflariniTemizle(icerik),
+        "Yanıt. [Bağlantı](https://example.com) ve `örnek [K2]`.\n```txt\n[K3]\n```"
+    );
+});
 
 test("her gönderim için backend kalıbına uygun istemci istek kimliği oluşturulur", () => {
     const id = istemciIstekIdOlustur({ randomUUID: () => "12345678-1234-1234-1234-123456789abc" });

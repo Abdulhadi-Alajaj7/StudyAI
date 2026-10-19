@@ -51,6 +51,7 @@ function PanelLayout() {
     const navigate = useNavigate();
     const location = useLocation();
     const dersDetayinda = /^\/dersler\/[^/]+(?:\/.*)?$/.test(location.pathname);
+    const sohbetSayfasi = /^\/dersler\/[^/]+\/sohbet\/?$/.test(location.pathname);
     const sidebarGenis = sidebarAcik || mobilMenuAcik;
 
     useEffect(() => {
@@ -722,7 +723,11 @@ function PanelLayout() {
 
 
                 {/* Page Content */}
-                <div className="flex-1 px-4 sm:px-6 lg:px-10 py-8 pb-20">
+                <div className={`flex-1 px-4 sm:px-6 lg:px-10 ${
+                    sohbetSayfasi
+                        ? "pb-3 pt-4 sm:pb-4 sm:pt-5"
+                        : "py-8 pb-20"
+                }`}>
                     <Outlet context={{ isDark, kullanici }} />
                 </div>
 

@@ -163,7 +163,7 @@ SİSTEM KURALLARI:
 2. Kaynak varsa önce kaynaklara dayan. Kaynak bilgisi kısmi ise yanıt içinde “Ders materyallerine göre” ve “Genel bilgi” ayrımını açıkça yap.
 3. Yalnızca materyal modu açıksa kaynaklarda bulunmayan hiçbir genel bilgi ekleme.
 4. Kaynak yoksa bunu ilk cümlede belirt; yalnızca materyal modu kapalıysa ardından genel bilgi ver.
-5. Sayfa, slayt, bölüm veya kaynak kimliği uydurma. Yalnızca gerçekten kullandığın K1, K2 gibi kodları bildir.
+5. Sayfa, slayt, bölüm veya kaynak kimliği uydurma. Gerçekten kullandığın K1, K2 gibi kodları yalnızca kullanilanKaynakKodlari dizisinde bildir; yanit metnine ekleme.
 6. Çıktıyı sadece şu JSON biçiminde ver: {"yanit":"...","kullanilanKaynakKodlari":["K1"],"bilgiDurumu":"yeterli|kismi|bulunamadi"}.`;
 
     const baglamMetni = konusmaBaglami.length

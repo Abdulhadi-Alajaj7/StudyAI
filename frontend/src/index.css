@@ -18,3 +18,57 @@ textarea,
 select {
   font: inherit;
 }
+
+/* Yalnızca sohbet içindeki kaydırılabilir bölgeleri etkiler. */
+.sohbet-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
+}
+
+.sohbet-scrollbar::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+.sohbet-mesaj-scrollbar {
+  scrollbar-color: var(--sohbet-scroll-thumb) var(--sohbet-scroll-track);
+  scrollbar-width: thin;
+  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
+}
+
+.sohbet-mesaj-scrollbar--light {
+  --sohbet-scroll-track: rgb(226 232 240 / 45%);
+  --sohbet-scroll-thumb: rgb(100 116 139 / 55%);
+}
+
+.sohbet-mesaj-scrollbar--dark {
+  --sohbet-scroll-track: rgb(15 24 42 / 55%);
+  --sohbet-scroll-thumb: rgb(100 116 139 / 58%);
+  color-scheme: dark;
+}
+
+.sohbet-mesaj-scrollbar::-webkit-scrollbar {
+  width: 8px;
+  height: 0;
+}
+
+.sohbet-mesaj-scrollbar::-webkit-scrollbar-track {
+  border-radius: 999px;
+  background: var(--sohbet-scroll-track);
+}
+
+.sohbet-mesaj-scrollbar::-webkit-scrollbar-thumb {
+  min-height: 36px;
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: var(--sohbet-scroll-thumb);
+  background-clip: padding-box;
+}
+
+.sohbet-mesaj-scrollbar::-webkit-scrollbar-thumb:hover {
+  --sohbet-scroll-thumb: rgb(129 140 248 / 72%);
+}

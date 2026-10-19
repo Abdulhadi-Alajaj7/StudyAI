@@ -185,13 +185,17 @@ test("yeni sohbetin ilk mesajına AI yanıtı kaydeder ve doğrulanmış kaynağ
         ...modeller,
         semanticArama: async () => ({ sonuclar: [kaynak] }),
         geminiYanitUret: async () => ({
-            yanit: "Sanal bellek bir bellek yönetimi tekniğidir.",
+            yanit: "Sanal bellek bir bellek yönetimi tekniğidir [K1].",
             kullanilanKaynakKodlari: ["K1", "K999"],
             bilgiDurumu: "yeterli",
         }),
     });
 
     assert.equal(sonuc.asistanMesaji.icerik, "Sanal bellek bir bellek yönetimi tekniğidir.");
+    assert.equal(
+        modeller.mesajlar.find((mesaj) => mesaj.rol === "assistant").icerik,
+        "Sanal bellek bir bellek yönetimi tekniğidir."
+    );
     assert.deepEqual(sonuc.asistanMesaji.kaynaklar, [{
         metinParcasiId: kaynak.metinParcasiId,
         materyalId: kaynak.materyalId,
