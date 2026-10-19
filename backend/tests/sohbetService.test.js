@@ -91,7 +91,9 @@ test("ilk mesaj sohbetle aynı transaction içinde oluşturulur ve ders silme ki
     assert.deepEqual(dersGuncellemesi, { $inc: { sohbetSurumu: 1 } });
     assert.equal(sohbetKaydi.baslik, "Sanal bellek nedir?");
     assert.equal(String(mesajKaydi.sohbetId), String(sohbetId));
-    assert.equal(mesajKaydi.yanitDurumu, "kaydedildi");
+    assert.equal(mesajKaydi.yanitDurumu, "yanit_bekliyor");
+    assert.equal(sohbetKaydi.aktifIstekId, "istek-0001");
+    assert.equal(sonuc.kilitAlindi, true);
     assert.equal(sonuc.tekrar, false);
     assert.equal(session.sonaErdi, true);
 });

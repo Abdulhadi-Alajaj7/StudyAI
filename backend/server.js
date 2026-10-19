@@ -14,6 +14,7 @@ import sohbetRoutes from "./routes/sohbetRoutes.js";
 import { geciciDersleriTemizle } from "./services/geciciDersTemizlemeService.js";
 import { baslangicIslemleriniKurtar } from "./services/baslangicKurtarmaService.js";
 import { kullanilmayanMetinParcalariniTemizle } from "./services/metinParcasiTemizlemeService.js";
+import { yarimKalanBaslikUretimleriniKapat } from "./services/dersAsistaniService.js";
 
 const app = express();
 
@@ -51,6 +52,7 @@ const sunucuyuBaslat = async () => {
 
     try {
         await baslangicIslemleriniKurtar();
+        await yarimKalanBaslikUretimleriniKapat();
         await kullanilmayanMetinParcalariniTemizle();
     } catch (hata) {
         console.error("Başlangıç kurtarma veya metin parçası temizleme hatası:", hata.message);

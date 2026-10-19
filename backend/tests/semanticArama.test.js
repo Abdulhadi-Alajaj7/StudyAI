@@ -85,6 +85,7 @@ test("yalnızca kullanıcıya ait dersin aktif materyal sürümlerini sorgular v
             "İkili arama ağacında düğüm kökten başlanarak bulunur.",
             "Dengeli ağaçlar aramayı hızlandırır."
         ]);
+        assert.equal(sonuc.sonuclar[0].metinParcasiId, String(parcalar[1]._id));
         assert.equal(sonuc.meta.indeksliMateryalSayisi, 2);
     } finally {
         if (oncekiEsik === undefined) delete process.env.SEMANTIK_ARAMA_MIN_SKOR;

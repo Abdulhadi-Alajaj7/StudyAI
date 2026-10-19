@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
     sohbetBasligiGirdisiniDogrula,
+    sohbetMesajiGirdisiniDogrula,
     sohbetOlusturmaGirdisiniDogrula,
 } from "../controllers/sohbetController.js";
 
@@ -47,4 +48,12 @@ test("manuel başlık boş olamaz ve model sınırıyla aynı uzunluğu kullanı
         sohbetBasligiGirdisiniDogrula({ baslik: "  Deadlock Kavramı  " }),
         { baslik: "Deadlock Kavramı" }
     );
+});
+
+test("mevcut sohbete gönderilen mesaj ve istek kimliği doğrulanır", () => {
+    assert.deepEqual(
+        sohbetMesajiGirdisiniDogrula({ icerik: "  Peki avantajları nelerdir?  ", istemciIstekId: "istek-mesaj-01" }),
+        { icerik: "Peki avantajları nelerdir?", istemciIstekId: "istek-mesaj-01" }
+    );
+    assert.equal(sohbetMesajiGirdisiniDogrula({ icerik: " ", istemciIstekId: "istek-mesaj-01" }).kod, "GECERSIZ_MESAJ");
 });

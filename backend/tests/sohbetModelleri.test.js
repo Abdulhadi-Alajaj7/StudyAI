@@ -14,6 +14,8 @@ test("Sohbet modeli kullanıcı ve ders sahipliğini, başlık durumunu ve sıra
     assert.ok(Sohbet.schema.path("baslik"));
     assert.ok(Sohbet.schema.path("baslikManuel"));
     assert.ok(Sohbet.schema.path("baslikUretimDurumu"));
+    assert.ok(Sohbet.schema.path("baslikUretimDenemeSayisi"));
+    assert.ok(Sohbet.schema.path("aktifIstekId"));
     assert.ok(Sohbet.schema.path("sonMesajTarihi"));
 
     const indeks = indeksBul(Sohbet, {

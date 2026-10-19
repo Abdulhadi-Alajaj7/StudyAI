@@ -3,6 +3,7 @@ import kimlikDogrula from "../middleware/auth.js";
 import {
     sohbetBasliginiGuncelle,
     sohbetMesajlariniListele,
+    sohbetMesajiGonder,
     sohbetiSil,
     sohbetleriGetir,
     tekSohbetGetir,
@@ -15,6 +16,7 @@ router.use(kimlikDogrula);
 
 router.get("/:dersId/sohbetler", sohbetleriGetir);
 router.post("/:dersId/sohbetler", yeniSohbetOlustur);
+router.post("/:dersId/sohbetler/:sohbetId/mesajlar", sohbetMesajiGonder);
 router.get("/:dersId/sohbetler/:sohbetId/mesajlar", sohbetMesajlariniListele);
 router.get("/:dersId/sohbetler/:sohbetId", tekSohbetGetir);
 router.patch("/:dersId/sohbetler/:sohbetId", sohbetBasliginiGuncelle);

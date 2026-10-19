@@ -168,6 +168,8 @@ export const sohbetOlustur = async ({
                     baslikManuel: false,
                     baslikKaynagi: "varsayilan",
                     baslikUretimDurumu: "bekliyor",
+                    aktifIstekId: istemciIstekId,
+                    aktifIstekBaslamaTarihi: simdi,
                     sonMesajTarihi: simdi,
                 },
             ], { session });
@@ -180,7 +182,7 @@ export const sohbetOlustur = async ({
                     rol: "user",
                     icerik: ilkMesaj,
                     istemciIstekId,
-                    yanitDurumu: "kaydedildi",
+                    yanitDurumu: "yanit_bekliyor",
                 },
             ], { session });
 
@@ -188,6 +190,7 @@ export const sohbetOlustur = async ({
                 sohbet: belgeyiNesneyeCevir(sohbetBelgesi),
                 mesaj: belgeyiNesneyeCevir(mesajBelgesi),
                 tekrar: false,
+                kilitAlindi: true,
             };
         });
     } catch (hata) {
@@ -279,6 +282,7 @@ export const sohbetBasliginiDegistir = async ({
                 baslikKaynagi: "manuel",
                 baslikUretimDurumu: "tamamlandi",
             },
+            $unset: { baslikUretimBaslamaTarihi: "" },
         },
         { new: true, runValidators: true }
     );

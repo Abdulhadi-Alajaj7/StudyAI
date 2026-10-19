@@ -218,6 +218,7 @@ export const semanticAramaYap = async ({
         if (skor == null) continue;
         if (skor < minimumSkorGetir()) continue;
         sonuclar.push({
+            metinParcasiId: String(parca._id),
             materyalId: String(parca.materyalId),
             materyalAdi: materyal.orijinalDosyaAdi || materyal.dosyaAdi,
             parcaIndex: parca.parcaIndex,

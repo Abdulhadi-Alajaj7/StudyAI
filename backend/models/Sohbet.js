@@ -32,8 +32,28 @@ const sohbetSchema = new mongoose.Schema(
         },
         baslikUretimDurumu: {
             type: String,
-            enum: ["bekliyor", "tamamlandi", "hata"],
+            enum: ["bekliyor", "isleniyor", "tamamlandi", "hata"],
             default: "bekliyor",
+        },
+        baslikUretimBaslamaTarihi: {
+            type: Date,
+            default: undefined,
+        },
+        baslikUretimDenemeSayisi: {
+            type: Number,
+            min: 0,
+            max: 1,
+            default: 0,
+        },
+        aktifIstekId: {
+            type: String,
+            trim: true,
+            maxlength: 128,
+            default: undefined,
+        },
+        aktifIstekBaslamaTarihi: {
+            type: Date,
+            default: undefined,
         },
         sonMesajTarihi: {
             type: Date,

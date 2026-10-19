@@ -8,6 +8,10 @@ import {
     sohbetSil,
     sohbetleriListele,
 } from "../services/sohbetService.js";
+import {
+    otomatikSohbetBasliginiUret,
+    sohbetMesajinaYanitOlustur,
+} from "../services/dersAsistaniService.js";
 
 const ILK_MESAJ_MAKSIMUM_UZUNLUK = 4_000;
 const BASLIK_MAKSIMUM_UZUNLUK = 100;
@@ -28,6 +32,9 @@ const hataYaniti = (res, hata) => {
             hata: "Bu istek daha önce işlendi. Sohbet listesini yenileyip tekrar deneyin.",
             kod: "TEKRAR_ISTEK",
         });
+    }
+    if (Number.isInteger(hata?.status) && typeof hata?.kod === "string") {
+        return res.status(hata.status).json({ hata: hata.message, kod: hata.kod });
     }
 
     console.error("Sohbet işlemi hatası:", hata);
@@ -81,6 +88,22 @@ export const sohbetOlusturmaGirdisiniDogrula = (govde = {}) => {
     return { ilkMesaj, istemciIstekId };
 };
 
+export const sohbetMesajiGirdisiniDogrula = (govde = {}) => {
+    const girdi = sohbetOlusturmaGirdisiniDogrula({
+        ilkMesaj: govde.icerik,
+        istemciIstekId: govde.istemciIstekId,
+    });
+    if (girdi.hata) {
+        return {
+            hata: girdi.kod === "GECERSIZ_ILK_MESAJ"
+                ? `Mesaj 1-${ILK_MESAJ_MAKSIMUM_UZUNLUK} karakter arasında olmalıdır.`
+                : girdi.hata,
+            kod: girdi.kod === "GECERSIZ_ILK_MESAJ" ? "GECERSIZ_MESAJ" : girdi.kod,
+        };
+    }
+    return { icerik: girdi.ilkMesaj, istemciIstekId: girdi.istemciIstekId };
+};
+
 export const sohbetBasligiGirdisiniDogrula = (govde = {}) => {
     const baslik = typeof govde.baslik === "string" ? govde.baslik.trim() : "";
     if (!baslik || baslik.length > BASLIK_MAKSIMUM_UZUNLUK) {
@@ -132,6 +155,48 @@ export const yeniSohbetOlustur = async (req, res) => {
             kullaniciId: req.user._id,
             dersId: req.params.dersId,
             ilkMesaj: girdi.ilkMesaj,
+            istemciIstekId: girdi.istemciIstekId,
+        });
+        const yanitSonucu = await sohbetMesajinaYanitOlustur({
+            kullaniciId: req.user._id,
+            dersId: req.params.dersId,
+            sohbetId: sonuc.sohbet._id,
+            icerik: girdi.ilkMesaj,
+            istemciIstekId: girdi.istemciIstekId,
+            kullaniciMesaji: sonuc.mesaj,
+            kilitZatenAlindi: sonuc.kilitAlindi === true,
+        });
+        void otomatikSohbetBasliginiUret({
+            kullaniciId: req.user._id,
+            dersId: req.params.dersId,
+            sohbetId: sonuc.sohbet._id,
+            ilkMesaj: girdi.ilkMesaj,
+        }).catch(() => {});
+        return res.status(sonuc.tekrar && yanitSonucu.tekrar ? 200 : 201).json({
+            sohbet: sonuc.sohbet,
+            mesaj: yanitSonucu.kullaniciMesaji,
+            asistanMesaji: yanitSonucu.asistanMesaji,
+            arama: yanitSonucu.arama,
+            tekrar: sonuc.tekrar || yanitSonucu.tekrar,
+        });
+    } catch (hata) {
+        return hataYaniti(res, hata);
+    }
+};
+
+export const sohbetMesajiGonder = async (req, res) => {
+    const dogrulamaHatasi = kimlikleriDogrula(req.params);
+    if (dogrulamaHatasi) return res.status(400).json(dogrulamaHatasi);
+
+    const girdi = sohbetMesajiGirdisiniDogrula(req.body);
+    if (girdi.hata) return res.status(400).json(girdi);
+
+    try {
+        const sonuc = await sohbetMesajinaYanitOlustur({
+            kullaniciId: req.user._id,
+            dersId: req.params.dersId,
+            sohbetId: req.params.sohbetId,
+            icerik: girdi.icerik,
             istemciIstekId: girdi.istemciIstekId,
         });
         return res.status(sonuc.tekrar ? 200 : 201).json(sonuc);
