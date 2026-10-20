@@ -15,7 +15,14 @@ test("eski asistan mesajlarındaki dahili atıfları Markdown içeriğini bozmad
     const icerik = "Yanıt [K1, K3]. [Bağlantı](https://example.com) ve `örnek [K2, K4]`.\n```txt\n[K3, K5]\n```";
     assert.equal(
         dahiliKaynakAtiflariniTemizle(icerik),
-        "Yanıt. [Bağlantı](https://example.com) ve `örnek [K2, K4]`.\n```txt\n[K3, K5]\n```"
+        "Yanıt. [Bağlantı](https://example.com) ve `örnek`.\n```txt\n\n```"
+    );
+});
+
+test("Markdown bağlantısı ve referans tanımı olarak yazılan dahili kaynak kodlarını göstermez", () => {
+    assert.equal(
+        dahiliKaynakAtiflariniTemizle("Yanıt [K1](https://example.com/kaynak).\n[K2]: https://example.com/iki\nSonuç"),
+        "Yanıt.\nSonuç"
     );
 });
 

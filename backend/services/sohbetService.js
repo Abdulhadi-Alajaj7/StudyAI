@@ -13,6 +13,8 @@ export class SohbetHatasi extends Error {
     }
 }
 
+const MESAJ_KILIDI_MS = 2 * 60 * 1000;
+
 const bagimliliklariGetir = (bagimliliklar = {}) => ({
     DersModel: bagimliliklar.DersModel || Ders,
     SohbetModel: bagimliliklar.SohbetModel || Sohbet,
@@ -40,6 +42,11 @@ const dersBulunamadiHatasi = () => new SohbetHatasi(
 const sohbetBulunamadiHatasi = () => new SohbetHatasi(
     "Sohbet bulunamadı veya bu sohbet için yetkiniz yok.",
     { status: 404, kod: "SOHBET_BULUNAMADI" }
+);
+
+const sohbetMesajiIsleniyorHatasi = () => new SohbetHatasi(
+    "Bu sohbette bir yanıt hazırlanırken sohbet silinemez.",
+    { status: 409, kod: "SOHBET_MESAJI_ISLENIYOR" }
 );
 
 const cursorHatasi = () => new SohbetHatasi(
@@ -354,15 +361,52 @@ export const sohbetSil = async ({
     const deps = bagimliliklariGetir(bagimliliklar);
     const session = await deps.startSession();
     let silinenSohbet;
+    let silmeHatasi = null;
 
     try {
         await session.withTransaction(async () => {
+            silinenSohbet = null;
+            silmeHatasi = null;
+            const eskiKilitEsigi = new Date(Date.now() - MESAJ_KILIDI_MS);
             silinenSohbet = await deps.SohbetModel.findOneAndDelete({
                 _id: sohbetId,
                 kullaniciId,
                 dersId,
+                $or: [
+                    { aktifIstekId: { $exists: false } },
+                    { aktifIstekId: null },
+                ],
             }).session(session);
-            if (!silinenSohbet) throw sohbetBulunamadiHatasi();
+            if (!silinenSohbet) {
+                const mevcutSohbet = await deps.SohbetModel.findOne({
+                    _id: sohbetId,
+                    kullaniciId,
+                    dersId,
+                }).session(session).lean();
+                if (mevcutSohbet) {
+                    if (
+                        mevcutSohbet.aktifIstekId &&
+                        mevcutSohbet.aktifIstekBaslamaTarihi &&
+                        new Date(mevcutSohbet.aktifIstekBaslamaTarihi) < eskiKilitEsigi
+                    ) {
+                        await deps.SohbetModel.updateOne(
+                            {
+                                _id: sohbetId,
+                                kullaniciId,
+                                dersId,
+                                aktifIstekId: mevcutSohbet.aktifIstekId,
+                                aktifIstekBaslamaTarihi: mevcutSohbet.aktifIstekBaslamaTarihi,
+                            },
+                            { $unset: { aktifIstekId: "", aktifIstekBaslamaTarihi: "" } },
+                            { session }
+                        );
+                    }
+                    silmeHatasi = sohbetMesajiIsleniyorHatasi();
+                    return;
+                }
+                silmeHatasi = sohbetBulunamadiHatasi();
+                return;
+            }
 
             await deps.MesajModel.deleteMany({
                 sohbetId,
@@ -370,6 +414,7 @@ export const sohbetSil = async ({
                 dersId,
             }).session(session);
         });
+        if (silmeHatasi) throw silmeHatasi;
     } finally {
         await session.endSession();
     }

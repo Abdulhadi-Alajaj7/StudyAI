@@ -5,7 +5,7 @@ function DersDetayIcerik({ baslik }) {
 
     return (
         <section
-            
+
         >
             <h2 className={`text-[24px] font-bold ${isDark ? "text-[#F8FAFC]" : "text-[#0F172A]"}`}>
                 {baslik}

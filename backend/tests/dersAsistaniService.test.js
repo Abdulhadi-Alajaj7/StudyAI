@@ -4,8 +4,10 @@ import assert from "node:assert/strict";
 import {
     acikKonuIceriyorMu,
     anlamsalAramaSorgusuOlustur,
+    kaynakAdaylariniHazirla,
     kaynakSnapshotlariniDogrula,
     otomatikSohbetBasliginiUret,
+    ragSonucLimitiGetir,
     sohbetMesajinaYanitOlustur,
     yalnizcaMateryalIstegiMi,
     yarimKalanBaslikUretimleriniKapat,
@@ -267,6 +269,55 @@ test("açık konu değişimi önceki konuya bağlanmaz", () => {
     assert.deepEqual(sonuc, { sorgu: "Deadlock nedir?", takipSorusu: false, baglamMesajId: null });
 });
 
+test("çok konulu soru tek arama çağrısıyla daha geniş RAG bağlamı kullanır", async () => {
+    const soru = "MCAR / MAR / MNAR ile veri sızıntısını birlikte açıkla";
+    assert.equal(ragSonucLimitiGetir(soru), 10);
+    assert.equal(ragSonucLimitiGetir("MCAR nedir?"), 6);
+
+    const adaylar = Array.from({ length: 10 }, (_, index) => ({
+        metinParcasiId: `parca-${index + 1}`,
+        materyalId: `materyal-${index + 1}`,
+        materyalAdi: index === 9 ? "VeriSizintisi.pdf" : "EksikVeri.pdf",
+        parcaIndex: index,
+        icerik: index === 9
+            ? "Veri sızıntısı, test bilgisinin eğitim sürecine karışmasıdır."
+            : `Eksik veri mekanizması ${index + 1}`,
+        skor: 0.99 - (index * 0.01),
+    }));
+    assert.equal(kaynakAdaylariniHazirla(adaylar, 10).length, 10);
+
+    const modeller = bellekModelleri();
+    let aramaCagrisi = 0;
+    let geminiCagrisi = 0;
+    await sohbetMesajinaYanitOlustur({
+        kullaniciId,
+        dersId,
+        sohbetId,
+        icerik: soru,
+        istemciIstekId: "istek-cok-konu-01",
+    }, {
+        ...modeller,
+        semanticArama: async ({ limit }) => {
+            aramaCagrisi += 1;
+            assert.equal(limit, 10);
+            return { sonuclar: adaylar };
+        },
+        geminiYanitUret: async ({ kaynaklar }) => {
+            geminiCagrisi += 1;
+            assert.equal(kaynaklar.length, 10);
+            assert.match(kaynaklar[9].icerik, /Veri sızıntısı/);
+            return {
+                yanit: "İki konu da materyallerde bulundu.",
+                kullanilanKaynakKodlari: ["K1", "K10"],
+                bilgiDurumu: "yeterli",
+            };
+        },
+    });
+
+    assert.equal(aramaCagrisi, 1);
+    assert.equal(geminiCagrisi, 1);
+});
+
 test("yalnızca getirilen kaynak kodlarını doğrular; uydurma ve tekrar kodlarını reddeder", () => {
     const aday = { ...kaynak, kod: "K1" };
     assert.deepEqual(kaynakSnapshotlariniDogrula(["K999", "K1", "K1"], [aday]), [{
@@ -388,6 +439,50 @@ test("başarısız AI isteği hata olarak işaretlenir ve aynı istek kimliğiyl
     assert.equal(sonuc.asistanMesaji.icerik, "Semaphore bir senkronizasyon aracıdır.");
     assert.equal(modeller.mesajlar.filter((mesaj) => mesaj.rol === "user").length, 1);
     assert.equal(modeller.mesajlar[0].yanitDurumu, "yanitlandi");
+});
+
+test("hatalı mesaj yeniden denenirken ders silme kilidi alınmışsa dış servis çağrısı yapılmaz", async () => {
+    const istemciIstekId = "istek-silme-yarisi";
+    const kullaniciMesaji = {
+        _id: "mesaj-silme-yarisi",
+        sohbetId,
+        kullaniciId,
+        dersId,
+        rol: "user",
+        icerik: "Tekrar dene",
+        istemciIstekId,
+        yanitDurumu: "hata",
+        createdAt: new Date(),
+    };
+    const modeller = bellekModelleri({ mesajlar: [kullaniciMesaji] });
+    modeller.DersModel = {
+        async findOneAndUpdate() { return null; },
+    };
+    let disServisCagrildi = false;
+
+    await assert.rejects(
+        sohbetMesajinaYanitOlustur({
+            kullaniciId,
+            dersId,
+            sohbetId,
+            icerik: kullaniciMesaji.icerik,
+            istemciIstekId,
+        }, {
+            ...modeller,
+            semanticArama: async () => {
+                disServisCagrildi = true;
+                return { sonuclar: [] };
+            },
+            geminiYanitUret: async () => {
+                disServisCagrildi = true;
+                return { yanit: "Yanıt", kullanilanKaynakKodlari: [] };
+            },
+        }),
+        (hata) => hata.status === 404 && hata.kod === "DERS_BULUNAMADI"
+    );
+
+    assert.equal(disServisCagrildi, false);
+    assert.equal(modeller.sohbetler[0].aktifIstekId, undefined);
 });
 
 test("eşzamanlı farklı mesaj aktif sohbet kilidini geçemez", async () => {

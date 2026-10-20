@@ -18,14 +18,21 @@ test("virgülle ayrılmış çoklu dahili RAG atıflarını tek parça olarak te
 });
 
 test("normal Markdown bağlantılarını ve köşeli parantezleri korur", () => {
-    const icerik = "[Kaynak](https://example.com), [önemli] ifade ve [K1, K3](https://example.com/kaynak).";
+    const icerik = "[Kaynak](https://example.com) ve [önemli] ifade.";
     assert.equal(dahiliKaynakAtiflariniTemizle(icerik), icerik);
 });
 
-test("satır içi ve çitli kod bloklarındaki K kodlarını değiştirmez", () => {
+test("Markdown bağlantısı veya referans tanımı biçimindeki dahili kodları da temizler", () => {
+    assert.equal(
+        dahiliKaynakAtiflariniTemizle("Bilgi [K1](https://example.com/kaynak).\n[K2]: https://example.com/iki\nDevam"),
+        "Bilgi.\nDevam"
+    );
+});
+
+test("satır içi ve çitli kod bloklarına yazılmış dahili K kodlarını da temizler", () => {
     const icerik = "Metin [K1].\n\n`const kod = '[K2]'`\n\n```js\nconst kaynak = '[K3]';\n```";
     assert.equal(
         dahiliKaynakAtiflariniTemizle(icerik),
-        "Metin.\n\n`const kod = '[K2]'`\n\n```js\nconst kaynak = '[K3]';\n```"
+        "Metin.\n\n`const kod = ''`\n\n```js\nconst kaynak = '';\n```"
     );
 });

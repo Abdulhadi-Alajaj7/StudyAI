@@ -8,6 +8,8 @@ import Sohbet from "../models/Sohbet.js";
 import Mesaj from "../models/Mesaj.js";
 import { guvenliDosyaSil } from "../utils/dosyaIslemleri.js";
 
+const SOHBET_MESAJ_KILIDI_MS = 2 * 60 * 1000;
+
 /* =========================
    Ders Oluştur
 ========================= */
@@ -420,6 +422,52 @@ export const dersSil = async (req, res) => {
       });
     }
 
+    const eskiSohbetKilidiEsigi = new Date(Date.now() - SOHBET_MESAJ_KILIDI_MS);
+    const aktifSohbet = await Sohbet.findOne({
+      dersId: kilitliDers._id,
+      kullaniciId: req.user._id,
+      aktifIstekId: { $exists: true, $ne: null },
+    }).select("_id aktifIstekId aktifIstekBaslamaTarihi").lean();
+
+    if (aktifSohbet) {
+      if (
+        aktifSohbet.aktifIstekBaslamaTarihi &&
+        new Date(aktifSohbet.aktifIstekBaslamaTarihi) < eskiSohbetKilidiEsigi
+      ) {
+        await Sohbet.updateOne(
+          {
+            _id: aktifSohbet._id,
+            dersId: kilitliDers._id,
+            kullaniciId: req.user._id,
+            aktifIstekId: aktifSohbet.aktifIstekId,
+            aktifIstekBaslamaTarihi: aktifSohbet.aktifIstekBaslamaTarihi,
+          },
+          { $unset: { aktifIstekId: "", aktifIstekBaslamaTarihi: "" } }
+        );
+      }
+      await Ders.updateOne(
+        {
+          _id: kilitliDers._id,
+          kullaniciId: req.user._id,
+          temizleniyor: true,
+          silmeNiyeti: "kullanici",
+          temizlikIslemToken,
+          aktifMateryalIslemSayisi: 0,
+        },
+        {
+          $set: {
+            temizleniyor: false,
+            silmeNiyeti: null,
+            temizlikIslemToken: null,
+            temizlikKilitSonYenilemeTarihi: null,
+          },
+        }
+      );
+      return res.status(409).json({
+        hata: "Ders asistanı yanıt hazırlarken ders silinemez. Yanıt tamamlandıktan sonra yeniden deneyin.",
+      });
+    }
+
     const temizlikLeaseYenile = async () => {
       const sonuc = await Ders.updateOne(
         {
@@ -464,15 +512,19 @@ export const dersSil = async (req, res) => {
 
     await temizlikLeaseYenile();
 
+    // Sohbet silme işlemi, yanıtın transaction içindeki son sohbet yazımıyla
+    // sıralanır. Mesajlar ancak sohbetler silindikten sonra temizlenir; böylece
+    // tamamlanmakta olan bir yanıt yetim mesaj bırakamaz.
+    await Sohbet.deleteMany({
+      dersId: kilitliDers._id,
+      kullaniciId: req.user._id,
+    });
+
     await Promise.all([
       MetinParcasi.deleteMany({ dersId: kilitliDers._id }),
       KonuHaritasi.deleteMany({ dersId: kilitliDers._id }),
       Materyal.deleteMany({ dersId: kilitliDers._id }),
       Mesaj.deleteMany({
-        dersId: kilitliDers._id,
-        kullaniciId: req.user._id,
-      }),
-      Sohbet.deleteMany({
         dersId: kilitliDers._id,
         kullaniciId: req.user._id,
       }),

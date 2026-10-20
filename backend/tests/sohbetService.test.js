@@ -290,7 +290,88 @@ test("başlık değiştirme ve silme sorguları kullanıcı, ders ve sohbet sahi
 
     const beklenen = { _id: sohbetId, kullaniciId, dersId };
     assert.deepEqual(guncellemeFiltresi, beklenen);
-    assert.deepEqual(silmeFiltresi, beklenen);
+    assert.equal(String(silmeFiltresi._id), String(sohbetId));
+    assert.equal(String(silmeFiltresi.kullaniciId), String(kullaniciId));
+    assert.equal(String(silmeFiltresi.dersId), String(dersId));
+    assert.equal(silmeFiltresi.$or.length, 2);
     assert.deepEqual(mesajSilmeFiltresi, { sohbetId, kullaniciId, dersId });
+    assert.equal(session.sonaErdi, true);
+});
+
+test("aktif yanıt üretilirken sohbet ve mesajlar silinmez", async () => {
+    const session = oturum();
+    let mesajlarSilindi = false;
+
+    await assert.rejects(
+        sohbetSil({ kullaniciId, dersId, sohbetId }, {
+            SohbetModel: {
+                findOneAndDelete() { return sorgu(null); },
+                findOne() {
+                    return sorgu({
+                        _id: sohbetId,
+                        kullaniciId,
+                        dersId,
+                        aktifIstekId: "istek-aktif-01",
+                        aktifIstekBaslamaTarihi: new Date(),
+                    });
+                },
+            },
+            MesajModel: {
+                deleteMany() {
+                    mesajlarSilindi = true;
+                    return sorgu({ deletedCount: 2 });
+                },
+            },
+            startSession: async () => session,
+        }),
+        (hata) => hata.status === 409 && hata.kod === "SOHBET_MESAJI_ISLENIYOR"
+    );
+
+    assert.equal(mesajlarSilindi, false);
+    assert.equal(session.sonaErdi, true);
+});
+
+test("süresi dolmuş yanıt kilidi ilk silme denemesinde temizlenir fakat veri silinmez", async () => {
+    const session = oturum();
+    const eskiBaslangic = new Date(Date.now() - (3 * 60 * 1000));
+    let kilitTemizlendi = false;
+    let mesajlarSilindi = false;
+
+    await assert.rejects(
+        sohbetSil({ kullaniciId, dersId, sohbetId }, {
+            SohbetModel: {
+                findOneAndDelete() { return sorgu(null); },
+                findOne() {
+                    return sorgu({
+                        _id: sohbetId,
+                        kullaniciId,
+                        dersId,
+                        aktifIstekId: "istek-bayat-01",
+                        aktifIstekBaslamaTarihi: eskiBaslangic,
+                    });
+                },
+                async updateOne(filtre, guncelleme, secenekler) {
+                    assert.equal(filtre.aktifIstekId, "istek-bayat-01");
+                    assert.equal(secenekler.session, session);
+                    assert.deepEqual(guncelleme.$unset, {
+                        aktifIstekId: "",
+                        aktifIstekBaslamaTarihi: "",
+                    });
+                    kilitTemizlendi = true;
+                },
+            },
+            MesajModel: {
+                deleteMany() {
+                    mesajlarSilindi = true;
+                    return sorgu({ deletedCount: 2 });
+                },
+            },
+            startSession: async () => session,
+        }),
+        (hata) => hata.status === 409 && hata.kod === "SOHBET_MESAJI_ISLENIYOR"
+    );
+
+    assert.equal(kilitTemizlendi, true);
+    assert.equal(mesajlarSilindi, false);
     assert.equal(session.sonaErdi, true);
 });

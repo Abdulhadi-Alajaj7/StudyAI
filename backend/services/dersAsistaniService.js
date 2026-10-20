@@ -13,7 +13,8 @@ import { dahiliKaynakAtiflariniTemizle } from "../utils/dahiliKaynakAtiflari.js"
 const MESAJ_KILIDI_MS = 2 * 60 * 1000;
 const BAGLAM_MESAJ_LIMITI = 8;
 const BAGLAM_KARAKTER_LIMITI = 8_000;
-const RAG_SONUC_LIMITI = 6;
+const RAG_TEK_KONU_SONUC_LIMITI = 6;
+const RAG_COK_KONU_SONUC_LIMITI = 10;
 
 const depsGetir = (bagimliliklar = {}) => ({
     DersModel: bagimliliklar.DersModel || Ders,
@@ -109,6 +110,14 @@ export const anlamsalAramaSorgusuOlustur = ({ guncelMesaj, oncekiMesajlar = [] }
     };
 };
 
+export const ragSonucLimitiGetir = (sorgu) => {
+    const metin = turkceKucult(sorgu);
+    const cokluKonuAyiraciVar = /[,;/]|\b(?:ve|ile|ayrıca|ayrica|hem|birlikte)\b/iu.test(metin);
+    return cokluKonuAyiraciVar
+        ? RAG_COK_KONU_SONUC_LIMITI
+        : RAG_TEK_KONU_SONUC_LIMITI;
+};
+
 export const konusmaBaglaminiSinirla = (mesajlar = []) => {
     const uygun = mesajlar
         .filter((mesaj) => ["user", "assistant"].includes(mesaj.rol))
@@ -135,12 +144,15 @@ export const konusmaBaglaminiSinirla = (mesajlar = []) => {
     return sonuc;
 };
 
-export const kaynakAdaylariniHazirla = (sonuclar = []) => sonuclar
+export const kaynakAdaylariniHazirla = (
+    sonuclar = [],
+    limit = RAG_TEK_KONU_SONUC_LIMITI
+) => sonuclar
     .filter((kaynak) => (
         kaynak?.metinParcasiId && kaynak?.materyalId && kaynak?.materyalAdi &&
         Number.isInteger(kaynak?.parcaIndex) && typeof kaynak?.icerik === "string"
     ))
-    .slice(0, RAG_SONUC_LIMITI)
+    .slice(0, Math.min(RAG_COK_KONU_SONUC_LIMITI, Math.max(1, limit)))
     .map((kaynak, index) => ({ ...kaynak, kod: `K${index + 1}` }));
 
 export const kaynakSnapshotlariniDogrula = (kodlar = [], adaylar = []) => {
@@ -362,6 +374,7 @@ export const sohbetMesajinaYanitOlustur = async ({
     }
 
     let kilitBizde = kilitZatenAlindi && sohbet.aktifIstekId === istemciIstekId;
+    let dersSilmeKilitliIslemleSirali = kilitBizde;
     let kilitBaslamaTarihi = kilitBizde ? sohbet.aktifIstekBaslamaTarihi : null;
     if (!kullaniciMesaji) {
         const kayitSonucu = await yeniKullaniciMesajiniKaydet({
@@ -375,6 +388,7 @@ export const sohbetMesajinaYanitOlustur = async ({
         kullaniciMesaji = kayitSonucu.kullaniciMesaji;
         if (kayitSonucu.kilit) {
             kilitBizde = true;
+            dersSilmeKilitliIslemleSirali = true;
             kilitBaslamaTarihi = kayitSonucu.kilit.aktifIstekBaslamaTarihi;
         } else {
             const yarisYaniti = await asistanMesajiniGetir({
@@ -411,6 +425,15 @@ export const sohbetMesajinaYanitOlustur = async ({
     }
 
     try {
+        if (!dersSilmeKilitliIslemleSirali) {
+            const ders = await deps.DersModel.findOneAndUpdate(
+                { _id: dersId, kullaniciId, temizleniyor: { $ne: true } },
+                { $inc: { sohbetSurumu: 1 } },
+                { new: true }
+            );
+            if (!ders) throw dersBulunamadi();
+        }
+
         await deps.MesajModel.updateOne(
             { _id: kullaniciMesaji._id, sohbetId, kullaniciId, dersId },
             { $set: { yanitDurumu: "yanit_bekliyor" }, $unset: { hataKodu: "" } }
@@ -430,13 +453,17 @@ export const sohbetMesajinaYanitOlustur = async ({
             guncelMesaj: icerik,
             oncekiMesajlar: baglam,
         });
+        const ragSonucLimiti = ragSonucLimitiGetir(arama.sorgu);
         const aramaSonucu = await deps.semanticArama({
             kullaniciId,
             dersId,
             sorgu: arama.sorgu,
-            limit: RAG_SONUC_LIMITI,
+            limit: ragSonucLimiti,
         });
-        const kaynakAdaylari = kaynakAdaylariniHazirla(aramaSonucu?.sonuclar || []);
+        const kaynakAdaylari = kaynakAdaylariniHazirla(
+            aramaSonucu?.sonuclar || [],
+            ragSonucLimiti
+        );
         const baglamdakiKonuMesaji = arama.baglamMesajId
             ? baglam.find((mesaj) => String(mesaj._id) === arama.baglamMesajId)
             : null;
@@ -472,61 +499,71 @@ export const sohbetMesajinaYanitOlustur = async ({
                 { status: 502, kod: "GEMINI_GECERSIZ_YANIT" }
             );
         }
-        const kilitKontrolu = await deps.SohbetModel.findOne({
-            _id: sohbetId,
-            kullaniciId,
-            dersId,
-            aktifIstekId: istemciIstekId,
-            aktifIstekBaslamaTarihi: kilitBaslamaTarihi,
-        }).lean();
-        if (!kilitKontrolu) {
-            throw new SohbetHatasi(
-                "Mesaj işleme süresi doldu. Aynı isteği güvenle yeniden deneyebilirsiniz.",
-                { status: 409, kod: "SOHBET_MESAJ_KILIDI_KAYBEDILDI" }
-            );
+        const kayitSession = await deps.startSession();
+        let asistanMesaji;
+        try {
+            await kayitSession.withTransaction(async () => {
+                const yanitTarihi = deps.simdi();
+                const kilitliSohbet = await deps.SohbetModel.findOneAndUpdate(
+                    {
+                        _id: sohbetId,
+                        kullaniciId,
+                        dersId,
+                        aktifIstekId: istemciIstekId,
+                        aktifIstekBaslamaTarihi: kilitBaslamaTarihi,
+                    },
+                    {
+                        $set: { sonMesajTarihi: yanitTarihi },
+                        $unset: { aktifIstekId: "", aktifIstekBaslamaTarihi: "" },
+                    },
+                    { new: true, session: kayitSession }
+                );
+                if (!kilitliSohbet) {
+                    throw new SohbetHatasi(
+                        "Mesaj işleme süresi doldu. Aynı isteği güvenle yeniden deneyebilirsiniz.",
+                        { status: 409, kod: "SOHBET_MESAJ_KILIDI_KAYBEDILDI" }
+                    );
+                }
+
+                const asistanBelgesi = await deps.MesajModel.findOneAndUpdate(
+                    {
+                        sohbetId,
+                        kullaniciId,
+                        dersId,
+                        rol: "assistant",
+                        yanitlananMesajId: kullaniciMesaji._id,
+                    },
+                    {
+                        $setOnInsert: {
+                            sohbetId,
+                            kullaniciId,
+                            dersId,
+                            rol: "assistant",
+                            icerik: temizYanit,
+                            kaynaklar,
+                            yanitlananMesajId: kullaniciMesaji._id,
+                            tokenKullanimi: yapayZekaSonucu.tokenKullanimi,
+                        },
+                    },
+                    {
+                        upsert: true,
+                        new: true,
+                        runValidators: true,
+                        setDefaultsOnInsert: true,
+                        session: kayitSession,
+                    }
+                );
+                asistanMesaji = nesneyeCevir(asistanBelgesi);
+
+                await deps.MesajModel.updateOne(
+                    { _id: kullaniciMesaji._id, sohbetId, kullaniciId, dersId },
+                    { $set: { yanitDurumu: "yanitlandi" }, $unset: { hataKodu: "" } },
+                    { session: kayitSession }
+                );
+            });
+        } finally {
+            await kayitSession.endSession();
         }
-
-        const asistanBelgesi = await deps.MesajModel.findOneAndUpdate(
-            {
-                sohbetId,
-                kullaniciId,
-                dersId,
-                rol: "assistant",
-                yanitlananMesajId: kullaniciMesaji._id,
-            },
-            {
-                $setOnInsert: {
-                    sohbetId,
-                    kullaniciId,
-                    dersId,
-                    rol: "assistant",
-                    icerik: temizYanit,
-                    kaynaklar,
-                    yanitlananMesajId: kullaniciMesaji._id,
-                    tokenKullanimi: yapayZekaSonucu.tokenKullanimi,
-                },
-            },
-            { upsert: true, new: true, runValidators: true, setDefaultsOnInsert: true }
-        );
-        const asistanMesaji = nesneyeCevir(asistanBelgesi);
-
-        await deps.MesajModel.updateOne(
-            { _id: kullaniciMesaji._id, sohbetId, kullaniciId, dersId },
-            { $set: { yanitDurumu: "yanitlandi" }, $unset: { hataKodu: "" } }
-        );
-        await deps.SohbetModel.updateOne(
-            {
-                _id: sohbetId,
-                kullaniciId,
-                dersId,
-                aktifIstekId: istemciIstekId,
-                aktifIstekBaslamaTarihi: kilitBaslamaTarihi,
-            },
-            {
-                $set: { sonMesajTarihi: asistanMesaji.createdAt || deps.simdi() },
-                $unset: { aktifIstekId: "", aktifIstekBaslamaTarihi: "" },
-            }
-        );
 
         return {
             kullaniciMesaji,

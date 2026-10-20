@@ -203,15 +203,18 @@ export const geciciDersTemizlemeTuruCalistir = async ({
 
             // Dosyalar silindikten sonra ilişkili kayıtları temizlemek tekrar
             // çalıştırılabilir; deleteMany ve dosya yardımcı fonksiyonu idempotenttir.
+            // Sohbetler önce silinerek devam eden yanıt transaction'larıyla aynı
+            // belge üzerinde sıralanır; mesaj temizliği bundan sonra yapılır.
+            await Sohbet.deleteMany({
+                dersId: kilit._id,
+                kullaniciId: kilit.kullaniciId
+            });
+
             await Promise.all([
                 MetinParcasi.deleteMany({ dersId: kilit._id }),
                 KonuHaritasi.deleteMany({ dersId: kilit._id }),
                 Materyal.deleteMany({ dersId: kilit._id }),
                 Mesaj.deleteMany({
-                    dersId: kilit._id,
-                    kullaniciId: kilit.kullaniciId
-                }),
-                Sohbet.deleteMany({
                     dersId: kilit._id,
                     kullaniciId: kilit.kullaniciId
                 })

@@ -16,6 +16,7 @@ let silinenMetinParcasi;
 let silinenKonuHaritasi;
 let silinenSohbetler;
 let silinenMesajlar;
+let aktifSohbet;
 
 const ayniId = (sol, sag) => String(sol) === String(sag);
 
@@ -98,6 +99,23 @@ mock.module("../models/KonuHaritasi.js", {
 });
 mock.module("../models/Sohbet.js", {
   defaultExport: {
+    findOne() {
+      return {
+        select() { return this; },
+        async lean() { return aktifSohbet ? { ...aktifSohbet } : null; }
+      };
+    },
+    async updateOne(filtre) {
+      if (
+        aktifSohbet &&
+        ayniId(filtre._id, aktifSohbet._id) &&
+        filtre.aktifIstekId === aktifSohbet.aktifIstekId
+      ) {
+        aktifSohbet = null;
+        return { modifiedCount: 1 };
+      }
+      return { modifiedCount: 0 };
+    },
     async deleteMany() { silinenSohbetler = true; }
   }
 });
@@ -152,6 +170,7 @@ beforeEach(() => {
   silinenKonuHaritasi = false;
   silinenSohbetler = false;
   silinenMesajlar = false;
+  aktifSohbet = null;
 });
 
 test("aktif materyal işlemi varken ders silme 409 ile reddedilir", async () => {
@@ -179,6 +198,43 @@ test("kullanıcı tarafından silinmesi istenen onaylanmış ders ve ilişkili k
   assert.equal(silinenKonuHaritasi, true);
   assert.equal(silinenSohbetler, true);
   assert.equal(silinenMesajlar, true);
+});
+
+test("aktif asistan yanıtı varken ders silme kilidi bırakılır ve veriler korunur", async () => {
+  aktifSohbet = {
+    _id: new mongoose.Types.ObjectId(),
+    aktifIstekId: "istek-aktif-01",
+    aktifIstekBaslamaTarihi: new Date(),
+  };
+  const res = responseMock();
+
+  await dersSil(istek(), res);
+
+  assert.equal(res.statusCode, 409);
+  assert.match(res.body.hata, /yanıt hazırlarken/);
+  assert.equal(ders.temizleniyor, false);
+  assert.equal(ders.silmeNiyeti, null);
+  assert.equal(materyaller.length, 1);
+  assert.equal(silinenSohbetler, false);
+  assert.equal(silinenMesajlar, false);
+});
+
+test("süresi dolmuş asistan kilidi temizlenir ancak aynı istekte ders silinmez", async () => {
+  aktifSohbet = {
+    _id: new mongoose.Types.ObjectId(),
+    aktifIstekId: "istek-bayat-01",
+    aktifIstekBaslamaTarihi: new Date(Date.now() - (3 * 60 * 1000)),
+  };
+  const res = responseMock();
+
+  await dersSil(istek(), res);
+
+  assert.equal(res.statusCode, 409);
+  assert.equal(aktifSohbet, null);
+  assert.equal(ders.temizleniyor, false);
+  assert.equal(materyaller.length, 1);
+  assert.equal(silinenSohbetler, false);
+  assert.equal(silinenMesajlar, false);
 });
 
 test("silme kilidi alındıktan sonra yeni materyal işlemi başlatılamaz", async () => {
