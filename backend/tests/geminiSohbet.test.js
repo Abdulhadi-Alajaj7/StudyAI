@@ -78,15 +78,15 @@ test("başlık çağrısı kısa Türkçe başlığı doğrular ve yalnızca tek
     assert.equal(cagrilar, 1);
 });
 
-test("Gemini ders özeti yapılandırılmış alanları doğrular ve uzunluk token bütçesini değiştirir", async () => {
+test("Gemini ders özeti uzunluk hedeflerini ayırır ve liste metinlerini güvenle normalize eder", async () => {
     const istekler = [];
     const sahteYanit = {
         genelBakis: "Genel bakış",
         temelKavramlar: [{ baslik: "Yığın", aciklama: "LIFO yapısıdır." }],
-        onemliNoktalar: ["Ekleme tepeden yapılır."],
+        onemliNoktalar: ["• Ekleme tepeden yapılır.", "- Ekleme tepeden yapılır."],
         konularArasiIliskiler: [],
         ornekler: [],
-        sinavIcinOnemli: ["LIFO ve FIFO farkını bil."],
+        sinavIcinOnemli: ["- LIFO ve FIFO farkını bil."],
     };
     const ortakBagimlilik = {
         istemci: istemci(async (girdi) => {
@@ -100,6 +100,11 @@ test("Gemini ders özeti yapılandırılmış alanları doğrular ve uzunluk tok
         tur: "tum_ders",
         uzunluk: "kisa",
     }, ortakBagimlilik);
+    const orta = await geminiIleDersOzetiUret({
+        kaynakMetni: "Kaynak",
+        tur: "tum_ders",
+        uzunluk: "orta",
+    }, ortakBagimlilik);
     await geminiIleDersOzetiUret({
         kaynakMetni: "Kaynak",
         tur: "tum_ders",
@@ -107,6 +112,15 @@ test("Gemini ders özeti yapılandırılmış alanları doğrular ve uzunluk tok
     }, ortakBagimlilik);
 
     assert.equal(kisa.icerik.temelKavramlar[0].baslik, "Yığın");
+    assert.deepEqual(kisa.icerik.onemliNoktalar, ["Ekleme tepeden yapılır."]);
+    assert.deepEqual(kisa.icerik.sinavIcinOnemli, ["LIFO ve FIFO farkını bil."]);
     assert.ok(istekler[1].config.maxOutputTokens > istekler[0].config.maxOutputTokens);
+    assert.ok(istekler[2].config.maxOutputTokens > istekler[1].config.maxOutputTokens);
+    assert.match(istekler[0].contents, /Ana kavramları, temel tanımları/i);
+    assert.match(istekler[1].contents, /az sayıda formül veya öğretici örneği/i);
+    assert.match(istekler[1].contents, /uzun özet düzeyinde ayrıntıya girme/i);
+    assert.match(istekler[2].contents, /önemli formülleri, yöntemleri/i);
     assert.match(istekler[0].config.systemInstruction, /Kaynak konumu uydurma/i);
+    assert.match(istekler[0].config.systemInstruction, /madde işareti olmadan düz metin/i);
+    assert.equal(orta.icerik.genelBakis, "Genel bakış");
 });

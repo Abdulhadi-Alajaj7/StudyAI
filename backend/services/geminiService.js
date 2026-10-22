@@ -243,17 +243,17 @@ export const geminiIleSohbetBasligiUret = async ({
 
 const OZET_UZUNLUK_AYARLARI = {
     kisa: {
-        hedef: "Yaklaşık 300-500 kelimelik, hızlı tekrar için özlü bir özet üret.",
+        hedef: "Yaklaşık 300-500 kelimelik, kısa ve doğrudan bir özet üret. Ana kavramları, temel tanımları ve en kritik bilgileri önceliklendir; ikincil ayrıntıları ele.",
         maxOutputTokens: 1_500,
         diziSiniri: 6,
     },
     orta: {
-        hedef: "Yaklaşık 700-1100 kelimelik, açıklayıcı ve dengeli ayrıntıda bir özet üret.",
+        hedef: "Yaklaşık 700-1100 kelimelik, dengeli ve okunabilir bir özet üret. Temel kavramları, önemli tanımları ve kritik noktaları koru; kaynaklarda varsa konuyu anlamak için gerekli az sayıda formül veya öğretici örneği ekle. Önemli bilgileri sırf kısaltmak için atlama, ancak uzun özet düzeyinde ayrıntıya girme.",
         maxOutputTokens: 3_000,
         diziSiniri: 12,
     },
     uzun: {
-        hedef: "Yaklaşık 1400-2200 kelimelik, kavram bağlantılarını da açıklayan ayrıntılı bir çalışma özeti üret.",
+        hedef: "Yaklaşık 1400-2200 kelimelik ayrıntılı bir çalışma özeti üret. Kaynak kapsamını daha geniş işle; kavram bağlantılarını, önemli formülleri, yöntemleri ve kaynaklarda bulunan öğretici örnekleri daha kapsamlı açıkla.",
         maxOutputTokens: 5_500,
         diziSiniri: 20,
     },
@@ -263,14 +263,27 @@ const ozetMetniniTemizle = (deger, maksimum = 20_000) => (
     typeof deger === "string" ? deger.trim().slice(0, maksimum) : ""
 );
 
-const ozetMetinDizisiniTemizle = (deger, sinir) => (
-    Array.isArray(deger)
-        ? deger
-            .map((oge) => ozetMetniniTemizle(oge, 4_000))
-            .filter(Boolean)
-            .slice(0, sinir)
-        : []
+const ozetListeIsaretiniTemizle = (deger) => (
+    ozetMetniniTemizle(deger, 4_000)
+        .replace(/^(?:(?:[•●▪◦‣⁃]\s*)|(?:[-*]\s+))+/u, "")
+        .trim()
 );
+
+const ozetMetinDizisiniTemizle = (deger, sinir) => {
+    if (!Array.isArray(deger)) return [];
+
+    const gorulen = new Set();
+    return deger
+        .map(ozetListeIsaretiniTemizle)
+        .filter((oge) => {
+            if (!oge) return false;
+            const anahtar = oge.toLocaleLowerCase("tr-TR");
+            if (gorulen.has(anahtar)) return false;
+            gorulen.add(anahtar);
+            return true;
+        })
+        .slice(0, sinir);
+};
 
 const ozetIceriginiDogrula = (veri, diziSiniri) => {
     const genelBakis = ozetMetniniTemizle(veri?.genelBakis);
@@ -327,7 +340,10 @@ KESİN KURALLAR:
 3. Dosya adı, sayfa, slayt, bölüm numarası veya kaynak konumu uydurma. Çıktıya kaynak listesi ekleme; doğrulanmış kaynakları backend ekleyecek.
 4. Kaynakta örnek yoksa ornekler dizisini boş bırak. Sınav vurgularını yalnızca kaynak içeriğinden çıkar.
 5. Bütün metni Türkçe yaz. Markdown kod bloğu veya JSON dışında açıklama döndürme.
-6. Yalnızca şu sade JSON nesnesini döndür:
+6. Kaynakların ana konularını dengeli kapsa; aynı bilgiyi farklı bölümlerde gereksiz yere tekrarlama. Kaynak kapsamı genişse her ayrıntıyı aktarmak yerine istenen uzunluğa göre önceliklendir.
+7. Teknik terimleri, sembolleri ve kaynakta bulunan formülleri anlamını değiştirmeden koru. Kaynakta olmayan formül, yöntem veya örnek ekleme.
+8. Dizi alanlarındaki her öğeyi başında “•”, “-” veya benzeri madde işareti olmadan düz metin olarak yaz; JSON dizisi zaten liste yapısını sağlar.
+9. Yalnızca şu sade JSON nesnesini döndür:
 {"genelBakis":"...","temelKavramlar":[{"baslik":"...","aciklama":"..."}],"onemliNoktalar":["..."],"konularArasiIliskiler":["..."],"ornekler":["..."],"sinavIcinOnemli":["..."]}.`;
 
     const turAciklamasi = {
