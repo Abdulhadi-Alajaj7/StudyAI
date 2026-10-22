@@ -6,6 +6,7 @@ import { guvenliDosyaSil } from "../utils/dosyaIslemleri.js";
 import { metinCikar } from "../services/metinCikarmaService.js";
 import { metinParcalaVeKaydet } from "../services/metinParcalamaService.js";
 import MetinParcasi from "../models/MetinParcasi.js";
+import DersOzeti from "../models/DersOzeti.js";
 import {
     materyalEklendigindeIncrementalGuncelle,
     materyalSilindigindeGuncelle
@@ -398,6 +399,10 @@ export const materyalSil = async (req, res) => {
         await guvenliDosyaSil(materyal.dosyaYolu);
         await Materyal.deleteOne({ _id: materyalId, kullaniciId });
         await MetinParcasi.deleteMany({ materyalId });
+
+        // Ders içeriği değiştiği için önceki tüm ders/materyal/konu özetleri
+        // artık güncel kabul edilemez.
+        await DersOzeti.deleteMany({ dersId: materyal.dersId, kullaniciId });
 
         // Harita güncellemesini de kilidin içinde tamamla.
         await materyalSilindigindeGuncelle(materyalId, materyal.dersId, kullaniciId);

@@ -30,6 +30,7 @@ const modeller = ({
     dersVar = true,
     parcalar = [],
     filtreYakala = () => {},
+    materyalFiltreYakala = () => {},
     ilkMateryaller = varsayilanMateryaller(),
     guncelMateryaller = ilkMateryaller,
 } = {}) => {
@@ -42,8 +43,9 @@ const modeller = ({
         }
     },
     MateryalModel: {
-        find() {
+        find(filtre) {
             materyalCagrisi += 1;
+            materyalFiltreYakala(filtre);
             return zincir(materyalCagrisi === 1 ? ilkMateryaller : guncelMateryaller);
         }
     },
@@ -183,4 +185,21 @@ test("indeksli aktif parça yoksa gereksiz sorgu embedding çağrısı yapmaz", 
     assert.equal(embeddingCagrildi, false);
     assert.deepEqual(sonuc.sonuclar, []);
     assert.equal(sonuc.meta.eksikIndeksSayisi, 2);
+});
+
+test("konu araması istendiğinde aday materyalleri verilen kimliklerle sınırlar", async () => {
+    const filtreler = [];
+    const bagimliliklar = modeller({
+        parcalar: [],
+        materyalFiltreYakala: (filtre) => filtreler.push(filtre),
+    });
+
+    await semanticAramaYap({
+        kullaniciId,
+        dersId,
+        sorgu: "yığın",
+        materyalIds: [materyal1],
+    }, bagimliliklar);
+
+    assert.deepEqual(filtreler[0]._id.$in.map(String), [String(materyal1)]);
 });

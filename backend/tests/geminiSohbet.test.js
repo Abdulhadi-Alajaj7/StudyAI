@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+    geminiIleDersOzetiUret,
     geminiIleSohbetBasligiUret,
     geminiIleSohbetYanitiUret,
 } from "../services/geminiService.js";
@@ -75,4 +76,37 @@ test("başlık çağrısı kısa Türkçe başlığı doğrular ve yalnızca tek
     });
     assert.equal(baslik, "Sanal Bellek Yönetimi");
     assert.equal(cagrilar, 1);
+});
+
+test("Gemini ders özeti yapılandırılmış alanları doğrular ve uzunluk token bütçesini değiştirir", async () => {
+    const istekler = [];
+    const sahteYanit = {
+        genelBakis: "Genel bakış",
+        temelKavramlar: [{ baslik: "Yığın", aciklama: "LIFO yapısıdır." }],
+        onemliNoktalar: ["Ekleme tepeden yapılır."],
+        konularArasiIliskiler: [],
+        ornekler: [],
+        sinavIcinOnemli: ["LIFO ve FIFO farkını bil."],
+    };
+    const ortakBagimlilik = {
+        istemci: istemci(async (girdi) => {
+            istekler.push(girdi);
+            return { text: JSON.stringify(sahteYanit) };
+        }),
+    };
+
+    const kisa = await geminiIleDersOzetiUret({
+        kaynakMetni: "Kaynak",
+        tur: "tum_ders",
+        uzunluk: "kisa",
+    }, ortakBagimlilik);
+    await geminiIleDersOzetiUret({
+        kaynakMetni: "Kaynak",
+        tur: "tum_ders",
+        uzunluk: "uzun",
+    }, ortakBagimlilik);
+
+    assert.equal(kisa.icerik.temelKavramlar[0].baslik, "Yığın");
+    assert.ok(istekler[1].config.maxOutputTokens > istekler[0].config.maxOutputTokens);
+    assert.match(istekler[0].config.systemInstruction, /Kaynak konumu uydurma/i);
 });

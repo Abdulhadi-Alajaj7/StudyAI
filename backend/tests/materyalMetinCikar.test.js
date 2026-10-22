@@ -95,6 +95,11 @@ mock.module("../models/MetinParcasi.js", {
         }
     }
 });
+mock.module("../models/DersOzeti.js", {
+    defaultExport: {
+        async deleteMany() {}
+    }
+});
 
 mock.module("../services/metinCikarmaService.js", {
     namedExports: {

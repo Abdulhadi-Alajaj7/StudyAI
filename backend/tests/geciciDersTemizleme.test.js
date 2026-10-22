@@ -11,6 +11,7 @@ let metinParcalari;
 let konuHaritalari;
 let sohbetler;
 let mesajlar;
+let dersOzetleri;
 let veritabaniSaati;
 let dosyaSilmeHatasi;
 let dosyaSilmeBeklemesi;
@@ -175,6 +176,13 @@ mock.module("../models/Mesaj.js", {
         }
     }
 });
+mock.module("../models/DersOzeti.js", {
+    defaultExport: {
+        async deleteMany(filtre) {
+            dersOzetleri = dersOzetleri.filter((kayit) => !kosulEslesiyor(kayit, filtre));
+        }
+    }
+});
 mock.module("../utils/dosyaIslemleri.js", {
     namedExports: {
         async guvenliDosyaSil(dosyaYolu) {
@@ -226,6 +234,7 @@ const dersEkle = ({
     const sohbetId = new mongoose.Types.ObjectId();
     sohbetler.push({ _id: sohbetId, dersId: ders._id, kullaniciId });
     mesajlar.push({ sohbetId, dersId: ders._id, kullaniciId });
+    dersOzetleri.push({ dersId: ders._id, kullaniciId });
     return ders;
 };
 
@@ -244,6 +253,7 @@ beforeEach(() => {
     konuHaritalari = [];
     sohbetler = [];
     mesajlar = [];
+    dersOzetleri = [];
     veritabaniSaati = new Date(temelZaman);
     dosyaSilmeHatasi = null;
     dosyaSilmeBeklemesi = null;
@@ -273,6 +283,7 @@ test("süresi dolmuş onaylanmamış ve işlemi olmayan ders temizlenir", async 
     assert.equal(konuHaritalari.length, 0);
     assert.equal(sohbetler.length, 0);
     assert.equal(mesajlar.length, 0);
+    assert.equal(dersOzetleri.length, 0);
     assert.equal(dosyaSilmeCagrilari.length, 1);
 });
 
@@ -459,6 +470,7 @@ test("dosya silme hatasında veritabanı kayıtları korunur ve tekrar güvenlid
     assert.equal(konuHaritalari.length, 1);
     assert.equal(sohbetler.length, 1);
     assert.equal(mesajlar.length, 1);
+    assert.equal(dersOzetleri.length, 1);
 
     dosyaSilmeHatasi = null;
     const tekrarSonucu = await temizlikCalistir(
@@ -489,4 +501,5 @@ test("lease'i kaybeden eski çalışan veritabanı kayıtlarını silemez", asyn
     assert.equal(konuHaritalari.length, 1);
     assert.equal(sohbetler.length, 1);
     assert.equal(mesajlar.length, 1);
+    assert.equal(dersOzetleri.length, 1);
 });

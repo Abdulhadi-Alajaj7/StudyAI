@@ -5,6 +5,7 @@ import MetinParcasi from "../models/MetinParcasi.js";
 import KonuHaritasi from "../models/KonuHaritasi.js";
 import Sohbet from "../models/Sohbet.js";
 import Mesaj from "../models/Mesaj.js";
+import DersOzeti from "../models/DersOzeti.js";
 import { guvenliDosyaSil } from "../utils/dosyaIslemleri.js";
 
 const BIR_SAAT = 60 * 60 * 1000;
@@ -217,7 +218,11 @@ export const geciciDersTemizlemeTuruCalistir = async ({
                 Mesaj.deleteMany({
                     dersId: kilit._id,
                     kullaniciId: kilit.kullaniciId
-                })
+                }),
+                DersOzeti.deleteMany({
+                    dersId: kilit._id,
+                    kullaniciId: kilit.kullaniciId
+                }),
             ]);
 
             await heartbeat.dogrula();

@@ -91,6 +91,7 @@ export const semanticAramaYap = async ({
     dersId,
     sorgu,
     limit = 5,
+    materyalIds = null,
 }, bagimliliklar = {}) => {
     const DersModel = bagimliliklar.DersModel || Ders;
     const MateryalModel = bagimliliklar.MateryalModel || Materyal;
@@ -118,6 +119,7 @@ export const semanticAramaYap = async ({
         dersId,
         durum: "hazir",
         aktifIslemeId: { $ne: null },
+        ...(Array.isArray(materyalIds) ? { _id: { $in: materyalIds } } : {}),
     })
         .select("_id orijinalDosyaAdi dosyaAdi aktifIslemeId embeddingDurumu")
         .lean();

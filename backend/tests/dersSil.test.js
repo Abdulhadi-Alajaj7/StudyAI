@@ -16,6 +16,7 @@ let silinenMetinParcasi;
 let silinenKonuHaritasi;
 let silinenSohbetler;
 let silinenMesajlar;
+let silinenDersOzetleri;
 let aktifSohbet;
 
 const ayniId = (sol, sag) => String(sol) === String(sag);
@@ -124,6 +125,11 @@ mock.module("../models/Mesaj.js", {
     async deleteMany() { silinenMesajlar = true; }
   }
 });
+mock.module("../models/DersOzeti.js", {
+  defaultExport: {
+    async deleteMany() { silinenDersOzetleri = true; }
+  }
+});
 mock.module("../utils/dosyaIslemleri.js", {
   namedExports: {
     guvenliDosyaSil() {
@@ -170,6 +176,7 @@ beforeEach(() => {
   silinenKonuHaritasi = false;
   silinenSohbetler = false;
   silinenMesajlar = false;
+  silinenDersOzetleri = false;
   aktifSohbet = null;
 });
 
@@ -198,6 +205,7 @@ test("kullanıcı tarafından silinmesi istenen onaylanmış ders ve ilişkili k
   assert.equal(silinenKonuHaritasi, true);
   assert.equal(silinenSohbetler, true);
   assert.equal(silinenMesajlar, true);
+  assert.equal(silinenDersOzetleri, true);
 });
 
 test("aktif asistan yanıtı varken ders silme kilidi bırakılır ve veriler korunur", async () => {

@@ -122,6 +122,7 @@ mock.module("../models/MetinParcasi.js", { defaultExport: {} });
 mock.module("../models/KonuHaritasi.js", { defaultExport: KonuHaritasiMock });
 mock.module("../models/Sohbet.js", { defaultExport: {} });
 mock.module("../models/Mesaj.js", { defaultExport: {} });
+mock.module("../models/DersOzeti.js", { defaultExport: {} });
 mock.module("../utils/dosyaIslemleri.js", {
   namedExports: { guvenliDosyaSil() {} }
 });
