@@ -18,6 +18,7 @@ import {
 } from "@heroicons/react/24/outline";
 
 import dersOzetiApi from "../services/dersOzetiApi.mjs";
+import OzetSecimDropdown from "../components/OzetSecimDropdown.jsx";
 import { kullaniciHataMesaji } from "../utils/kullaniciHatasi.mjs";
 import {
     kaynakAdlariniGetir,
@@ -327,6 +328,23 @@ function DersOzet() {
         () => konuSecenekleriniOlustur(konuHaritasi),
         [konuHaritasi]
     );
+    const materyalDropdownSecenekleri = useMemo(
+        () => kullanilabilirMateryaller.map((materyal) => ({
+            value: String(materyal._id),
+            label: materyal.orijinalDosyaAdi || materyal.dosyaAdi,
+        })),
+        [kullanilabilirMateryaller]
+    );
+    const konuDropdownSecenekleri = useMemo(
+        () => konuSecenekleri.map((konu) => ({
+            value: konu.konuId,
+            label: konu.baslik,
+            tamEtiket: konu.etiket,
+            seviye: konu.tur,
+            ustBaslik: konu.tur === "alt_konu" ? konu.etiket.split(" — ")[0] : "",
+        })),
+        [konuSecenekleri]
+    );
     const secimGirdisi = useMemo(() => ozetGirdisiOlustur({
         tur,
         uzunluk,
@@ -584,40 +602,32 @@ function DersOzet() {
                                 <label htmlFor="ozet-materyal" className={`mb-2 block text-[12px] font-bold ${metinAna}`}>
                                     Materyal Seçimi
                                 </label>
-                                <select
+                                <OzetSecimDropdown
                                     id="ozet-materyal"
                                     value={materyalId}
-                                    onChange={(event) => setMateryalId(event.target.value)}
+                                    onChange={setMateryalId}
+                                    options={materyalDropdownSecenekleri}
                                     disabled={olusturuluyor || seceneklerYukleniyor || kullanilabilirMateryaller.length === 0}
-                                    className={`h-[46px] w-full rounded-xl border px-3 text-[12px] outline-none transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${secimAlani}`}
-                                >
-                                    {kullanilabilirMateryaller.length === 0 && <option value="">Hazır materyal yok</option>}
-                                    {kullanilabilirMateryaller.map((materyal) => (
-                                        <option key={materyal._id} value={materyal._id}>
-                                            {materyal.orijinalDosyaAdi || materyal.dosyaAdi}
-                                        </option>
-                                    ))}
-                                </select>
+                                    emptyLabel={seceneklerYukleniyor ? "Materyaller yükleniyor..." : "Hazır materyal yok"}
+                                    tur="materyal"
+                                    isDark={isDark}
+                                />
                             </>
                         ) : tur === "konu" ? (
                             <>
                                 <label htmlFor="ozet-konu" className={`mb-2 block text-[12px] font-bold ${metinAna}`}>
                                     Konu Seçimi
                                 </label>
-                                <select
+                                <OzetSecimDropdown
                                     id="ozet-konu"
                                     value={konuId}
-                                    onChange={(event) => setKonuId(event.target.value)}
+                                    onChange={setKonuId}
+                                    options={konuDropdownSecenekleri}
                                     disabled={olusturuluyor || seceneklerYukleniyor || konuSecenekleri.length === 0}
-                                    className={`h-[46px] w-full rounded-xl border px-3 text-[12px] outline-none transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${secimAlani}`}
-                                >
-                                    {konuSecenekleri.length === 0 && <option value="">Hazır konu yok</option>}
-                                    {konuSecenekleri.map((konu) => (
-                                        <option key={konu.konuId} value={konu.konuId}>
-                                            {konu.etiket}
-                                        </option>
-                                    ))}
-                                </select>
+                                    emptyLabel={seceneklerYukleniyor ? "Konular yükleniyor..." : "Hazır konu yok"}
+                                    tur="konu"
+                                    isDark={isDark}
+                                />
                             </>
                         ) : (
                             <>
