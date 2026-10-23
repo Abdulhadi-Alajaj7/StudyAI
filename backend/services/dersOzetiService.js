@@ -408,6 +408,11 @@ const kaynaklariOlustur = (materyaller, parcalar) => {
         }));
 };
 
+const kaynakSurumleriniOlustur = (materyaller) => materyaller.map((materyal) => ({
+    materyalId: materyal._id,
+    aktifIslemeId: materyal.aktifIslemeId,
+}));
+
 const parcalariBatchlereBol = (parcalar, materyalHaritasi, batchButcesi) => {
     const bloklar = parcalar.flatMap((parca) => {
         const materyal = materyalHaritasi.get(kimlikMetni(parca.materyalId));
@@ -453,11 +458,16 @@ const kilidiYenile = async (ozetId, islemToken, deps) => {
     }
 };
 
-const kaynakSurumleriniDogrula = async ({ kullaniciId, dersId, kaynaklar }, deps) => {
+const kaynakSurumleriniDogrula = async ({
+    kullaniciId,
+    dersId,
+    kaynaklar,
+    materyalIds = kaynaklar.map((kaynak) => kaynak.materyalId),
+}, deps) => {
     const guncelMateryaller = await hazirMateryalleriGetir({
         kullaniciId,
         dersId,
-        materyalIds: kaynaklar.map((kaynak) => kaynak.materyalId),
+        materyalIds,
     }, deps.MateryalModel);
     const guncelHarita = new Map(
         guncelMateryaller.map((materyal) => [kimlikMetni(materyal._id), materyal])
@@ -474,17 +484,65 @@ const kaynakSurumleriniDogrula = async ({ kullaniciId, dersId, kaynaklar }, deps
     }
 };
 
+const kaynakSurumleriEslesiyor = (kaynakSurumleri, materyaller) => {
+    if (!Array.isArray(kaynakSurumleri) || kaynakSurumleri.length === 0) return false;
+    if (kaynakSurumleri.length !== materyaller.length) return false;
+
+    const guncelHarita = new Map(
+        materyaller.map((materyal) => [kimlikMetni(materyal._id), materyal])
+    );
+    return kaynakSurumleri.every((kaynak) => (
+        kimlikMetni(guncelHarita.get(kimlikMetni(kaynak.materyalId))?.aktifIslemeId) ===
+        kimlikMetni(kaynak.aktifIslemeId)
+    ));
+};
+
+const ozetKapsamiMateryalIds = (tur, hedef) => (
+    tur === "materyal"
+        ? [hedef.materyal._id]
+        : (tur === "konu" && hedef.konu.kaynakMateryalIds.length > 0
+            ? hedef.konu.kaynakMateryalIds
+            : null)
+);
+
+const kayitliOzetGuncelMi = async ({
+    kullaniciId,
+    dersId,
+    tur,
+    hedef,
+    ozet,
+}, deps) => {
+    const kaydedilmisSurumler = ozet.kaynakSurumleri?.length > 0
+        ? ozet.kaynakSurumleri
+        : ozet.kullanilanKaynaklar;
+    if (!Array.isArray(kaydedilmisSurumler) || kaydedilmisSurumler.length === 0) {
+        return false;
+    }
+
+    // Yeni kayıtlarda tüm özet kapsamını karşılaştır. Eski kayıtlarda bu alan
+    // bulunmadığı için yalnızca gerçekten kullanılan kaynak sürümlerini doğrula.
+    let materyalIds;
+    if (ozet.kaynakSurumleri?.length > 0) {
+        materyalIds = ozetKapsamiMateryalIds(tur, hedef);
+    } else {
+        materyalIds = kaydedilmisSurumler.map((kaynak) => kaynak.materyalId);
+    }
+
+    const guncelMateryaller = await hazirMateryalleriGetir({
+        kullaniciId,
+        dersId,
+        materyalIds,
+    }, deps.MateryalModel);
+    return kaynakSurumleriEslesiyor(kaydedilmisSurumler, guncelMateryaller);
+};
+
 const kaynaklariHazirla = async ({
     kullaniciId,
     dersId,
     tur,
     hedef,
 }, deps) => {
-    const sinirliMateryalIds = tur === "materyal"
-        ? [hedef.materyal._id]
-        : (tur === "konu" && hedef.konu.kaynakMateryalIds.length > 0
-            ? hedef.konu.kaynakMateryalIds
-            : null);
+    const sinirliMateryalIds = ozetKapsamiMateryalIds(tur, hedef);
     const materyaller = await hazirMateryalleriGetir({
         kullaniciId,
         dersId,
@@ -524,6 +582,7 @@ const kaynaklariHazirla = async ({
         materyaller,
         parcalar: secilenParcalar,
         kaynaklar: kaynaklariOlustur(materyaller, secilenParcalar),
+        kaynakSurumleri: kaynakSurumleriniOlustur(materyaller),
     };
 };
 
@@ -587,7 +646,13 @@ export const kayitliDersOzetiniGetir = async ({
 }, bagimliliklar = {}) => {
     const deps = bagimliliklariGetir(bagimliliklar);
     await dersiGetir({ kullaniciId, dersId }, deps.DersModel);
-    await hedefiDogrula({ kullaniciId, dersId, tur, materyalId, konuId }, deps);
+    const hedef = await hedefiDogrula({
+        kullaniciId,
+        dersId,
+        tur,
+        materyalId,
+        konuId,
+    }, deps);
 
     const ozet = await deps.DersOzetiModel.findOne({
         ...ozetAnahtari({ kullaniciId, dersId, tur, materyalId, konuId, uzunluk }),
@@ -596,6 +661,19 @@ export const kayitliDersOzetiniGetir = async ({
     if (!ozet) {
         throw new DersOzetiHatasi(
             "Bu seçim için kaydedilmiş başarılı bir özet bulunamadı.",
+            { status: 404, kod: "OZET_BULUNAMADI" }
+        );
+    }
+    const guncel = await kayitliOzetGuncelMi({
+        kullaniciId,
+        dersId,
+        tur,
+        hedef,
+        ozet,
+    }, deps);
+    if (!guncel) {
+        throw new DersOzetiHatasi(
+            "Kaynaklar değiştiği için kaydedilmiş özet artık güncel değil.",
             { status: 404, kod: "OZET_BULUNAMADI" }
         );
     }
@@ -630,7 +708,17 @@ export const dersOzetiOlustur = async ({
     });
 
     const mevcut = await deps.DersOzetiModel.findOne(anahtar).lean();
-    if (!yenidenOlustur && mevcut?.basarili) {
+    if (
+        !yenidenOlustur &&
+        mevcut?.basarili &&
+        await kayitliOzetGuncelMi({
+            kullaniciId,
+            dersId,
+            tur,
+            hedef,
+            ozet: mevcut,
+        }, deps)
+    ) {
         return { ozet: mevcut, onbellekten: true };
     }
 
@@ -680,7 +768,17 @@ export const dersOzetiOlustur = async ({
             ...anahtar,
             basarili: true,
         }).lean();
-        if (!yenidenOlustur && yarisSonucu) {
+        if (
+            !yenidenOlustur &&
+            yarisSonucu &&
+            await kayitliOzetGuncelMi({
+                kullaniciId,
+                dersId,
+                tur,
+                hedef,
+                ozet: yarisSonucu,
+            }, deps)
+        ) {
             return { ozet: yarisSonucu, onbellekten: true };
         }
         throw new DersOzetiHatasi(
@@ -710,10 +808,20 @@ export const dersOzetiOlustur = async ({
         }, deps);
 
         await heartbeat();
+        const guncelHedef = tur === "konu"
+            ? await hedefiDogrula({
+                kullaniciId,
+                dersId,
+                tur,
+                materyalId,
+                konuId,
+            }, deps)
+            : hedef;
         await kaynakSurumleriniDogrula({
             kullaniciId,
             dersId,
-            kaynaklar: kaynakVerisi.kaynaklar,
+            kaynaklar: kaynakVerisi.kaynakSurumleri,
+            materyalIds: ozetKapsamiMateryalIds(tur, guncelHedef),
         }, deps);
 
         const kaydedilen = await deps.DersOzetiModel.findOneAndUpdate(
@@ -723,6 +831,7 @@ export const dersOzetiOlustur = async ({
                     basarili: true,
                     icerik: geminiSonucu.icerik,
                     kullanilanKaynaklar: kaynakVerisi.kaynaklar,
+                    kaynakSurumleri: kaynakVerisi.kaynakSurumleri,
                     kullanilanModel: geminiSonucu.model ||
                         process.env.GEMINI_OZET_MODELI ||
                         VARSAYILAN_GEMINI_MODELI,

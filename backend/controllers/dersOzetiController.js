@@ -82,6 +82,7 @@ const ozetiSunumaHazirla = (ozet) => {
     delete nesne.aktifIslemToken;
     delete nesne.kilitSonYenilemeTarihi;
     delete nesne.hedefAnahtari;
+    delete nesne.kaynakSurumleri;
     delete nesne.__v;
     return nesne;
 };

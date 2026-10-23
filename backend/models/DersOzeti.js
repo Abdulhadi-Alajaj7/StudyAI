@@ -75,6 +75,21 @@ const kaynakSchema = new mongoose.Schema(
     { _id: false }
 );
 
+const kaynakSurumuSchema = new mongoose.Schema(
+    {
+        materyalId: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "Materyal",
+            required: true,
+        },
+        aktifIslemeId: {
+            type: mongoose.Schema.Types.ObjectId,
+            required: true,
+        },
+    },
+    { _id: false }
+);
+
 const dersOzetiSchema = new mongoose.Schema(
     {
         kullaniciId: {
@@ -135,6 +150,10 @@ const dersOzetiSchema = new mongoose.Schema(
         },
         kullanilanKaynaklar: {
             type: [kaynakSchema],
+            default: [],
+        },
+        kaynakSurumleri: {
+            type: [kaynakSurumuSchema],
             default: [],
         },
         kullanilanModel: {

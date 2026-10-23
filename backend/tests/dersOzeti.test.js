@@ -7,6 +7,7 @@ import { dersOzetiGirdisiniDogrula } from "../controllers/dersOzetiController.js
 import {
     dengeliOzetParcalariniSec,
     dersOzetiOlustur,
+    kayitliDersOzetiniGetir,
 } from "../services/dersOzetiService.js";
 
 const kullaniciId = new mongoose.Types.ObjectId();
@@ -161,6 +162,7 @@ test("DersOzeti modeli son başarılı kombinasyon için benzersiz indeks ve ger
         "uzunluk",
         "icerik",
         "kullanilanKaynaklar",
+        "kaynakSurumleri",
         "olusturulmaTarihi",
         "aktifIslemToken",
     ]) {
@@ -249,6 +251,39 @@ test("eşzamanlı aynı özet isteğinde yalnızca bir Gemini üretimi başlar",
 
     assert.equal(geminiCagrisi, 1);
     assert.equal(sonuc.ozet.icerik.genelBakis, "Yeni özet");
+});
+
+test("özet üretilirken tüm ders kaynak kapsamı değişirse sonuç kaydedilmez", async () => {
+    const materyaller = [{
+        _id: materyalId,
+        orijinalDosyaAdi: "ders.pdf",
+        durum: "hazir",
+        aktifIslemeId: islemeId,
+    }];
+    const { bagimliliklar, ozetGetir } = bagimliliklariOlustur({
+        materyaller,
+        geminiOzetUret: async () => {
+            materyaller.push({
+                _id: new mongoose.Types.ObjectId(),
+                orijinalDosyaAdi: "yeni.pdf",
+                durum: "hazir",
+                aktifIslemeId: new mongoose.Types.ObjectId(),
+            });
+            return { icerik: ozetIcerigi("Eksik kapsam"), model: "test-model" };
+        },
+    });
+
+    await assert.rejects(
+        dersOzetiOlustur({
+            kullaniciId,
+            dersId,
+            tur: "tum_ders",
+            uzunluk: "orta",
+        }, bagimliliklar),
+        (hata) => hata.status === 409 && hata.kod === "KAYNAK_SURUMU_DEGISTI"
+    );
+    assert.equal(ozetGetir().basarili, false);
+    assert.equal(ozetGetir().aktifIslemToken, null);
 });
 
 test("materyal özeti yalnızca seçilen materyalin aktif parçalarını kullanır", async () => {
@@ -403,4 +438,175 @@ test("yeniden üretim hatasında önceki başarılı özet korunur ve kilit bır
     assert.deepEqual(ozetGetir().icerik, eskiIcerik);
     assert.equal(ozetGetir().basarili, true);
     assert.equal(ozetGetir().aktifIslemToken, null);
+});
+
+test("kayıtlı materyal özeti yalnızca kaynak aktif sürümü değişmediğinde döner", async () => {
+    const materyaller = [{
+        _id: materyalId,
+        orijinalDosyaAdi: "ders.pdf",
+        dosyaAdi: "ders.pdf",
+        durum: "hazir",
+        aktifIslemeId: islemeId,
+    }];
+    const eskiOzet = {
+        _id: new mongoose.Types.ObjectId(),
+        kullaniciId,
+        dersId,
+        tur: "materyal",
+        hedefAnahtari: String(materyalId),
+        materyalId,
+        uzunluk: "orta",
+        basarili: true,
+        icerik: ozetIcerigi("Eski özet"),
+        kullanilanKaynaklar: [{ materyalId, aktifIslemeId: islemeId, dosyaAdi: "ders.pdf" }],
+    };
+    const { bagimliliklar, ozetGetir } = bagimliliklariOlustur({
+        ilkOzet: eskiOzet,
+        materyaller,
+    });
+    const girdi = {
+        kullaniciId,
+        dersId,
+        tur: "materyal",
+        materyalId,
+        uzunluk: "orta",
+    };
+
+    const guncel = await kayitliDersOzetiniGetir(girdi, bagimliliklar);
+    assert.equal(guncel.icerik.genelBakis, "Eski özet");
+
+    materyaller[0].aktifIslemeId = new mongoose.Types.ObjectId();
+    await assert.rejects(
+        kayitliDersOzetiniGetir(girdi, bagimliliklar),
+        (hata) => hata.status === 404 && hata.kod === "OZET_BULUNAMADI"
+    );
+    assert.equal(ozetGetir().basarili, true);
+    assert.deepEqual(ozetGetir().icerik, eskiOzet.icerik);
+
+    // Başarısız yeniden işleme aktif sürümü değiştirmez; eski özet silinmeden
+    // yeniden kullanılabilir hale gelir.
+    materyaller[0].aktifIslemeId = islemeId;
+    const tekrarGuncel = await kayitliDersOzetiniGetir(girdi, bagimliliklar);
+    assert.equal(tekrarGuncel.icerik.genelBakis, "Eski özet");
+});
+
+test("tüm ders özetinde kaynak kümesine yeni materyal eklenirse eski özet sunulmaz", async () => {
+    const yeniMateryalId = new mongoose.Types.ObjectId();
+    const yeniIslemeId = new mongoose.Types.ObjectId();
+    const { bagimliliklar } = bagimliliklariOlustur({
+        ilkOzet: {
+            _id: new mongoose.Types.ObjectId(),
+            kullaniciId,
+            dersId,
+            tur: "tum_ders",
+            hedefAnahtari: "ders",
+            uzunluk: "kisa",
+            basarili: true,
+            icerik: ozetIcerigi("Eksik kapsam"),
+            kullanilanKaynaklar: [{ materyalId, aktifIslemeId: islemeId, dosyaAdi: "ders.pdf" }],
+            kaynakSurumleri: [{ materyalId, aktifIslemeId: islemeId }],
+        },
+        materyaller: [
+            {
+                _id: materyalId,
+                dosyaAdi: "ders.pdf",
+                durum: "hazir",
+                aktifIslemeId: islemeId,
+            },
+            {
+                _id: yeniMateryalId,
+                dosyaAdi: "ek.pdf",
+                durum: "hazir",
+                aktifIslemeId: yeniIslemeId,
+            },
+        ],
+    });
+
+    await assert.rejects(
+        kayitliDersOzetiniGetir({
+            kullaniciId,
+            dersId,
+            tur: "tum_ders",
+            uzunluk: "kisa",
+        }, bagimliliklar),
+        (hata) => hata.status === 404 && hata.kod === "OZET_BULUNAMADI"
+    );
+});
+
+test("konu özetinde kapsama dahil kaynak değişirse eski cache yerine yeni özet üretilir", async () => {
+    const ikinciMateryalId = new mongoose.Types.ObjectId();
+    const ikinciEskiIslemeId = new mongoose.Types.ObjectId();
+    const ikinciYeniIslemeId = new mongoose.Types.ObjectId();
+    const materyaller = [
+        {
+            _id: materyalId,
+            dosyaAdi: "bir.pdf",
+            durum: "hazir",
+            aktifIslemeId: islemeId,
+        },
+        {
+            _id: ikinciMateryalId,
+            dosyaAdi: "iki.pdf",
+            durum: "hazir",
+            aktifIslemeId: ikinciYeniIslemeId,
+        },
+    ];
+    let geminiCagrisi = 0;
+    const { bagimliliklar } = bagimliliklariOlustur({
+        ilkOzet: {
+            _id: new mongoose.Types.ObjectId(),
+            kullaniciId,
+            dersId,
+            tur: "konu",
+            hedefAnahtari: "sub-yigin",
+            konuId: "sub-yigin",
+            uzunluk: "orta",
+            basarili: true,
+            icerik: ozetIcerigi("Eski konu özeti"),
+            kullanilanKaynaklar: [{ materyalId, aktifIslemeId: islemeId, dosyaAdi: "bir.pdf" }],
+            kaynakSurumleri: [
+                { materyalId, aktifIslemeId: islemeId },
+                { materyalId: ikinciMateryalId, aktifIslemeId: ikinciEskiIslemeId },
+            ],
+            aktifIslemToken: null,
+        },
+        materyaller,
+        metinParcalari: [
+            { materyalId, islemeId, parcaIndex: 0, icerik: "Yığın işlemleri" },
+            { materyalId: ikinciMateryalId, islemeId: ikinciYeniIslemeId, parcaIndex: 0, icerik: "Yığın belleği" },
+        ],
+        konuHaritasi: {
+            anaKonular: [{
+                konuId: "top-veri",
+                baslik: "Veri Yapıları",
+                kaynakMateryalIds: [materyalId, ikinciMateryalId],
+                altKonular: [{
+                    konuId: "sub-yigin",
+                    baslik: "Yığın",
+                    aciklama: "LIFO",
+                    kaynakMateryalIds: [materyalId, ikinciMateryalId],
+                }],
+            }],
+        },
+        geminiOzetUret: async () => {
+            geminiCagrisi += 1;
+            return { icerik: ozetIcerigi("Yeni konu özeti"), model: "test-model" };
+        },
+    });
+
+    const sonuc = await dersOzetiOlustur({
+        kullaniciId,
+        dersId,
+        tur: "konu",
+        konuId: "sub-yigin",
+        uzunluk: "orta",
+    }, bagimliliklar);
+
+    assert.equal(sonuc.onbellekten, false);
+    assert.equal(geminiCagrisi, 1);
+    assert.equal(sonuc.ozet.icerik.genelBakis, "Yeni konu özeti");
+    assert.deepEqual(
+        sonuc.ozet.kaynakSurumleri.map((kaynak) => String(kaynak.materyalId)),
+        [String(materyalId), String(ikinciMateryalId)]
+    );
 });
