@@ -7,6 +7,7 @@ import KonuHaritasi from "../models/KonuHaritasi.js";
 import Sohbet from "../models/Sohbet.js";
 import Mesaj from "../models/Mesaj.js";
 import DersOzeti from "../models/DersOzeti.js";
+import Test from "../models/Test.js";
 import { guvenliDosyaSil } from "../utils/dosyaIslemleri.js";
 
 const SOHBET_MESAJ_KILIDI_MS = 2 * 60 * 1000;
@@ -530,6 +531,10 @@ export const dersSil = async (req, res) => {
         kullaniciId: req.user._id,
       }),
       DersOzeti.deleteMany({
+        dersId: kilitliDers._id,
+        kullaniciId: req.user._id,
+      }),
+      Test.deleteMany({
         dersId: kilitliDers._id,
         kullaniciId: req.user._id,
       }),

@@ -183,6 +183,11 @@ mock.module("../models/DersOzeti.js", {
         }
     }
 });
+mock.module("../models/Test.js", {
+    defaultExport: {
+        async deleteMany() {}
+    }
+});
 mock.module("../utils/dosyaIslemleri.js", {
     namedExports: {
         async guvenliDosyaSil(dosyaYolu) {

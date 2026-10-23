@@ -11,6 +11,7 @@ import dersRoutes from "./routes/dersRoutes.js";
 import materyalRoutes from "./routes/materyalRoutes.js";
 import sohbetRoutes from "./routes/sohbetRoutes.js";
 import dersOzetiRoutes from "./routes/dersOzetiRoutes.js";
+import testRoutes from "./routes/testRoutes.js";
 
 import { geciciDersleriTemizle } from "./services/geciciDersTemizlemeService.js";
 import { baslangicIslemleriniKurtar } from "./services/baslangicKurtarmaService.js";
@@ -38,6 +39,7 @@ app.use("/auth", authRoutes);
 app.use("/dersler", dersRoutes);
 app.use("/dersler", sohbetRoutes);
 app.use("/dersler", dersOzetiRoutes);
+app.use("/dersler", testRoutes);
 app.use("/materyaller", materyalRoutes);
 
 // Ana route

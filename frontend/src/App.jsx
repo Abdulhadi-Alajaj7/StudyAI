@@ -23,6 +23,8 @@ import DersKonular from "./pages/DersKonular.jsx";
 import DersOzet from "./pages/DersOzet.jsx";
 import DersSohbet from "./pages/DersSohbet.jsx";
 import DersTestler from "./pages/DersTestler.jsx";
+import TestCoz from "./pages/TestCoz.jsx";
+import TestSonucu from "./pages/TestSonucu.jsx";
 import DersCalismaKartlari from "./pages/DersCalismaKartlari.jsx";
 import DersDuzenle from "./pages/DersDuzenle.jsx";
 
@@ -70,6 +72,8 @@ function App() {
                             <Route path="ozet" element={<DersOzet />} />
                             <Route path="sohbet" element={<DersSohbet />} />
                             <Route path="testler" element={<DersTestler />} />
+                            <Route path="testler/:testId/coz" element={<TestCoz />} />
+                            <Route path="testler/:testId/sonuc" element={<TestSonucu />} />
                             <Route path="calisma-kartlari" element={<DersCalismaKartlari />} />
                         </Route>
                     </Route>

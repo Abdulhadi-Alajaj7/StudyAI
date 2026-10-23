@@ -130,6 +130,11 @@ mock.module("../models/DersOzeti.js", {
     async deleteMany() { silinenDersOzetleri = true; }
   }
 });
+mock.module("../models/Test.js", {
+  defaultExport: {
+    async deleteMany() {}
+  }
+});
 mock.module("../utils/dosyaIslemleri.js", {
   namedExports: {
     guvenliDosyaSil() {
