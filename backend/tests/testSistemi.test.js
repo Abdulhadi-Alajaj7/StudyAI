@@ -124,6 +124,7 @@ const ornekSorular = (adet, zorluk = "orta") => Array.from(
 
 const uretimBagimliliklari = ({
     parcalar = metinParcalari,
+    harita = konuHaritasi,
     geminiTestUret,
     testTanilamaYaz,
     korelasyonIdOlustur,
@@ -166,7 +167,7 @@ const uretimBagimliliklari = ({
             },
         },
         KonuHaritasiModel: {
-            findOne() { return zincir(konuHaritasi); },
+            findOne() { return zincir(harita); },
         },
         TestModel: {
             async create(veri) {
@@ -331,6 +332,64 @@ test("tum_ders, materyal ve konu üretimleri yalnızca doğrulanmış kapsamdaki
     }
 });
 
+test("aynı fiziksel parça farklı konu etiketleriyle çoğaltılmaz, konu kümesi korunur", async () => {
+    const ortakHarita = {
+        anaKonular: [{
+            konuId: "ana-ortak",
+            baslik: "Ortak Ana Konu",
+            aciklama: "Ortak açıklama",
+            kaynakMateryalIds: [materyalId],
+            altKonular: [
+                {
+                    konuId: "alt-bir",
+                    baslik: "Birinci Alt Konu",
+                    aciklama: "Birinci açıklama",
+                    kaynakMateryalIds: [materyalId],
+                },
+                {
+                    konuId: "alt-iki",
+                    baslik: "İkinci Alt Konu",
+                    aciklama: "İkinci açıklama",
+                    kaynakMateryalIds: [materyalId],
+                },
+            ],
+        }],
+    };
+    const ortakParca = {
+        _id: new mongoose.Types.ObjectId(),
+        materyalId,
+        islemeId,
+        parcaIndex: 0,
+        icerik: uzunIcerik(
+            "Birinci Alt Konu İkinci Alt Konu",
+            "Ortak fiziksel parça iki konu için doğrulanmış içerik sağlar"
+        ),
+    };
+    let geminiGirdisi;
+    const { bagimliliklar } = uretimBagimliliklari({
+        parcalar: [ortakParca],
+        harita: ortakHarita,
+        geminiTestUret: async (girdi) => {
+            geminiGirdisi = girdi;
+            return { sorular: ornekSorular(5), model: "test-model" };
+        },
+    });
+
+    await testOlustur({
+        kullaniciId,
+        dersId,
+        kapsamTuru: "tum_ders",
+        soruSayisi: 5,
+        zorluk: "karisik",
+    }, bagimliliklar);
+
+    assert.equal(geminiGirdisi.kaynaklar.length, 1);
+    assert.deepEqual(
+        new Set(geminiGirdisi.kaynaklar[0].konuIds),
+        new Set(["alt-bir", "alt-iki"])
+    );
+});
+
 test("başarısız üretim güvenli korelasyonlu metadata kaydı bırakır ve hatayı değiştirmez", async () => {
     const kayitlar = [];
     const asilHata = Object.assign(new Error("Güvenli genel hata mesajı"), {
@@ -360,10 +419,14 @@ test("başarısız üretim güvenli korelasyonlu metadata kaydı bırakır ve ha
             retryEdildiMi: true,
             gercekDenemeSayisi: 2,
             maksimumDenemeSayisi: 2,
+            partiSayisi: 1,
+            partiIndeksi: 0,
+            onarimDenemeSayisi: 2,
+            apiCagriSayisi: 3,
             sdkCagriAsamasi: "models.generateContent",
         },
     });
-    const { bagimliliklar } = uretimBagimliliklari({
+    const { bagimliliklar, kaydiGetir } = uretimBagimliliklari({
         geminiTestUret: async () => { throw asilHata; },
         korelasyonIdOlustur: () => "sabit-korelasyon-id",
         testTanilamaYaz: (kayit) => kayitlar.push(kayit),
@@ -381,6 +444,7 @@ test("başarısız üretim güvenli korelasyonlu metadata kaydı bırakır ve ha
     );
 
     assert.equal(kayitlar.length, 1);
+    assert.equal(kaydiGetir(), undefined, "Başarısız üretim atomik olarak kaydedilmemeli");
     assert.deepEqual(kayitlar[0], {
         korelasyonId: "sabit-korelasyon-id",
         kapsamTuru: "tum_ders",
@@ -417,6 +481,10 @@ test("başarısız üretim güvenli korelasyonlu metadata kaydı bırakır ve ha
         retryEdildiMi: true,
         gercekDenemeSayisi: 2,
         maksimumDenemeSayisi: 2,
+        partiSayisi: 1,
+        partiIndeksi: 0,
+        onarimDenemeSayisi: 2,
+        apiCagriSayisi: 3,
         sdkCagriAsamasi: "models.generateContent",
         httpDurumu: 502,
         uygulamaHataKodu: "GEMINI_GECERSIZ_TEST_YANITI",
@@ -513,7 +581,7 @@ const dogrulamaKaynaklari = [
     },
 ];
 
-const hamSoru = ({ metin, dogru, aciklama, kaynak }) => ({
+const hamSoru = ({ metin, dogru, aciklama, kaynak, kanit }) => ({
     metin,
     secenekler: [
         { anahtar: "A", metin: dogru },
@@ -526,6 +594,7 @@ const hamSoru = ({ metin, dogru, aciklama, kaynak }) => ({
     zorluk: "kolay",
     konuId: "",
     kaynakReferanslari: [kaynak],
+    kaynakKanitlari: [{ kaynakReferansi: kaynak, alinti: kanit }],
 });
 
 test("Gemini test çıktısı yapı, kaynak ve tekrar bakımından doğrulanır", () => {
@@ -536,12 +605,14 @@ test("Gemini test çıktısı yapı, kaynak ve tekrar bakımından doğrulanır"
                 dogru: "LIFO çalışma prensibi",
                 aciklama: "Yığın ekleme ve çıkarma işlemlerinde LIFO kullanır.",
                 kaynak: "K1",
+                kanit: "Yığın veri yapısı LIFO çalışma prensibi ile ekleme ve çıkarma yapar.",
             }),
             hamSoru({
                 metin: "Kuyruk elemanları hangi sırayla işler?",
                 dogru: "FIFO sırası",
                 aciklama: "Kuyruk veri yapısı elemanları FIFO sırasıyla işler.",
                 kaynak: "K2",
+                kanit: "Kuyruk veri yapısı FIFO sırasıyla elemanları işler.",
             }),
         ],
     };

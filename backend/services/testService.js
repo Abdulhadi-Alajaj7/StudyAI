@@ -379,18 +379,22 @@ const enUygunKonuyuBul = (parca, konular) => {
     return enIyi;
 };
 
-const kaynakKayitlariniOlustur = (parcaKonulari, materyaller) => {
+const kaynakKayitlariniOlustur = (parcaGruplari, materyaller) => {
     const materyalHaritasi = new Map(
         materyaller.map((materyal) => [kimlikMetni(materyal._id), materyal])
     );
-    return parcaKonulari.map(({ parca, konu }, index) => {
+    return parcaGruplari.map(({ parca, konular }, index) => {
         const materyal = materyalHaritasi.get(kimlikMetni(parca.materyalId));
+        const konuIds = [...new Set(
+            (konular || []).map((konu) => String(konu?.konuId || "")).filter(Boolean)
+        )];
         return {
             anahtar: `K${index + 1}`,
             materyalId: parca.materyalId,
             dosyaAdi: materyal?.orijinalDosyaAdi || materyal?.dosyaAdi || "Materyal",
             parcaIndex: parca.parcaIndex,
-            konuId: konu?.konuId || "",
+            konuId: konuIds[0] || "",
+            konuIds,
             icerik: String(parca.icerik || "").trim(),
         };
     });
@@ -467,11 +471,16 @@ const kaynaklariHazirla = async ({
         }
     }
 
-    const benzersizParcaKonulari = [...new Map(parcaKonulari.map(({ parca, konu }) => [
-        `${konu?.konuId || ""}:${kimlikMetni(parca.materyalId)}:${parca.parcaIndex}`,
-        { parca, konu },
-    ])).values()];
-    const toplamKarakter = benzersizParcaKonulari.reduce(
+    const fizikselParcaGruplari = new Map();
+    for (const { parca, konu } of parcaKonulari) {
+        const fizikselAnahtar = `${kimlikMetni(parca.materyalId)}:${parca.parcaIndex}`;
+        if (!fizikselParcaGruplari.has(fizikselAnahtar)) {
+            fizikselParcaGruplari.set(fizikselAnahtar, { parca, konular: [] });
+        }
+        if (konu?.konuId) fizikselParcaGruplari.get(fizikselAnahtar).konular.push(konu);
+    }
+    const benzersizFizikselParcalar = [...fizikselParcaGruplari.values()];
+    const toplamKarakter = benzersizFizikselParcalar.reduce(
         (toplam, { parca }) => toplam + String(parca.icerik || "").length,
         0
     );
@@ -481,7 +490,7 @@ const kaynaklariHazirla = async ({
 
     return {
         materyaller,
-        kaynaklar: kaynakKayitlariniOlustur(benzersizParcaKonulari, materyaller),
+        kaynaklar: kaynakKayitlariniOlustur(benzersizFizikselParcalar, materyaller),
         konuDagilimi,
         izinliKonuIds: tumKonular.map(({ konuId, baslik, konuTuru }) => ({
             konuId,
@@ -564,7 +573,7 @@ export const testOlustur = async ({
             kaynakMateryalSayisi: kaynakVerisi.materyaller.length,
             kaynakMetinParcasiSayisi: kaynakVerisi.kaynaklar.length,
             konuSayisi: new Set(
-                kaynakVerisi.kaynaklar.map((kaynak) => String(kaynak.konuId || ""))
+                kaynakVerisi.kaynaklar.flatMap((kaynak) => kaynak.konuIds || [])
                     .filter(Boolean)
             ).size,
             toplamKaynakKarakterSayisi: kaynakVerisi.kaynaklar.reduce(

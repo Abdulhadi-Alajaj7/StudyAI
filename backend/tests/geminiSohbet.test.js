@@ -28,7 +28,7 @@ test("Gemini sohbet yanıtını yapılandırılmış JSON ve token kullanımıyl
     assert.deepEqual(sonuc.tokenKullanimi, { girdi: 10, cikti: 5, toplam: 15 });
 });
 
-test("Gemini kota aşımını sınırlı yeniden denemeden sonra güvenli 429 hatasına çevirir", async () => {
+test("Gemini kota aşımını agresif yeniden denemeden güvenli 429 hatasına çevirir", async () => {
     let cagrilar = 0;
     await assert.rejects(
         geminiIleSohbetYanitiUret({ soru: "Soru" }, {
@@ -55,21 +55,25 @@ test("Gemini kota aşımını sınırlı yeniden denemeden sonra güvenli 429 ha
                 agHataKodu: null,
                 hataKaynagi: "saglayici_http",
                 sdkCagriAsamasi: "models.generateContent",
-                retryUygunMu: true,
-                retryEdildiMi: true,
-                gercekDenemeSayisi: 2,
+                retryUygunMu: false,
+                retryEdildiMi: false,
+                gercekDenemeSayisi: 1,
                 maksimumDenemeSayisi: 2,
             });
             return true;
         }
     );
-    assert.equal(cagrilar, 2);
+    assert.equal(cagrilar, 1);
 });
 
 test("Gemini timeout güvenli 504 hatasına çevrilir", async () => {
+    let abortSignal;
     await assert.rejects(
         geminiIleSohbetYanitiUret({ soru: "Soru" }, {
-            istemci: istemci(() => new Promise(() => {})),
+            istemci: istemci((istek) => {
+                abortSignal = istek.config.abortSignal;
+                return new Promise(() => {});
+            }),
             timeoutMs: 5,
             maxDeneme: 1,
         }),
@@ -81,6 +85,29 @@ test("Gemini timeout güvenli 504 hatasına çevrilir", async () => {
             assert.equal(hata.tanilama?.retryUygunMu, true);
             assert.equal(hata.tanilama?.retryEdildiMi, false);
             assert.equal(hata.tanilama?.gercekDenemeSayisi, 1);
+            return true;
+        }
+    );
+    assert.equal(abortSignal?.aborted, true);
+});
+
+test("Gemini sağlayıcı 504 yanıtını özgün durumuyla geçici zaman aşımı olarak sınıflandırır", async () => {
+    await assert.rejects(
+        geminiIleSohbetYanitiUret({ soru: "Soru" }, {
+            istemci: istemci(async () => {
+                throw Object.assign(new Error("Gateway Timeout"), {
+                    name: "ApiError",
+                    status: 504,
+                });
+            }),
+            maxDeneme: 1,
+        }),
+        (hata) => {
+            assert.equal(hata.status, 504);
+            assert.equal(hata.kod, "GEMINI_ZAMAN_ASIMI");
+            assert.equal(hata.tanilama?.orijinalHttpDurumu, 504);
+            assert.equal(hata.tanilama?.hataKaynagi, "saglayici_http");
+            assert.equal(hata.tanilama?.retryUygunMu, true);
             return true;
         }
     );
@@ -155,6 +182,27 @@ test("Gemini geçici hatadan sonra başarılı olan çağrıyı gerçekten yenid
 
     assert.equal(cagrilar, 2);
     assert.equal(sonuc.yanit, "Başarılı yanıt");
+});
+
+test("Gemini sürekli 503 hatasında yeniden deneme sınırını aşmaz", async () => {
+    let cagrilar = 0;
+    await assert.rejects(
+        geminiIleSohbetYanitiUret({ soru: "Soru" }, {
+            istemci: istemci(async () => {
+                cagrilar += 1;
+                throw Object.assign(new Error("geçici hata"), { name: "ApiError", status: 503 });
+            }),
+            bekle: async () => {},
+            rastgele: () => 0,
+            maxDeneme: 2,
+        }),
+        (hata) => (
+            hata.kod === "GEMINI_GECICI_HATA" &&
+            hata.tanilama?.gercekDenemeSayisi === 2 &&
+            hata.tanilama?.retryEdildiMi === true
+        )
+    );
+    assert.equal(cagrilar, 2);
 });
 
 test("başlık çağrısı kısa Türkçe başlığı doğrular ve yalnızca tek API denemesi yapar", async () => {

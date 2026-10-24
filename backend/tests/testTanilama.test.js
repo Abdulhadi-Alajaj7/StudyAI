@@ -42,6 +42,7 @@ const soru = ({
     kaynak = "K1",
     konuId = "konu-1",
     zorluk = "kolay",
+    kanit = "Yığın veri yapısı LIFO çalışma prensibi ile ekleme ve çıkarma yapar.",
 } = {}) => ({
     metin,
     secenekler: [
@@ -55,6 +56,7 @@ const soru = ({
     zorluk,
     konuId,
     kaynakReferanslari: [kaynak],
+    kaynakKanitlari: [{ kaynakReferansi: kaynak, alinti: kanit }],
 });
 
 const kuyrukSorusu = (degisiklik = {}) => soru({
@@ -63,6 +65,7 @@ const kuyrukSorusu = (degisiklik = {}) => soru({
     aciklama: "Kuyruk veri yapısı elemanları FIFO sırasıyla işler.",
     kaynak: "K2",
     konuId: "konu-2",
+    kanit: "Kuyruk veri yapısı FIFO sırasıyla elemanları işler.",
     ...degisiklik,
 });
 
@@ -109,8 +112,18 @@ test("test doğrulama alt nedenlerini ve sıfır tabanlı soru indeksini ayırt 
         0
     );
     altKoduDogrula(
+        () => dogrula([{ ...soru(), dogruCevap: "E" }]),
+        "DOGRU_CEVAP",
+        0
+    );
+    altKoduDogrula(
         () => dogrula([{ ...soru(), kaynakReferanslari: ["K99"] }]),
         "KAYNAK_REFERANSI",
+        0
+    );
+    altKoduDogrula(
+        () => dogrula([{ ...soru(), kaynakKanitlari: [] }]),
+        "KAYNAK_KANITI",
         0
     );
     altKoduDogrula(
@@ -135,10 +148,14 @@ test("test doğrulama alt nedenlerini ve sıfır tabanlı soru indeksini ayırt 
 const uyumSorusu = (kaynakReferanslari = ["K1"]) => ({
     ...soru({
         metin: "Echo foxtrot?",
-        dogru: "Golf hotel",
-        aciklama: "India juliett kilo lima.",
+        dogru: "Echo foxtrot",
+        aciklama: "Echo ve foxtrot kavramları birlikte değerlendirilir.",
     }),
     kaynakReferanslari,
+    kaynakKanitlari: kaynakReferanslari.map((kaynakReferansi) => ({
+        kaynakReferansi,
+        alinti: kaynakReferansi === "K1" ? "echo bravo" : "foxtrot charlie",
+    })),
 });
 
 const uyumKaynagi = ({
@@ -169,7 +186,7 @@ test("KAYNAK_UYUMU sıfır kelime örtüşmesini güvenli sayaçlarla tanılar",
                 dogrulamaAltKodu: "KAYNAK_UYUMU",
                 soruIndeksi: 0,
                 uretilenSoruSayisi: 1,
-                destekAdayiSayisi: 8,
+                destekAdayiSayisi: 5,
                 kaynakKelimeSayisi: 4,
                 ortakKelimeSayisi: 0,
                 gerekenOrtakKelimeSayisi: 2,
@@ -196,7 +213,7 @@ test("KAYNAK_UYUMU çok kaynakta tek kelime örtüşmesini ve fiziksel kaynaklar
         () => dogrula([uyumSorusu(["K1", "K3"])], { kaynaklar: cokluKaynaklar }),
         (hata) => {
             assert.equal(hata.tanilama?.dogrulamaAltKodu, "KAYNAK_UYUMU");
-            assert.equal(hata.tanilama?.destekAdayiSayisi, 8);
+            assert.equal(hata.tanilama?.destekAdayiSayisi, 5);
             assert.equal(hata.tanilama?.kaynakKelimeSayisi, 4);
             assert.equal(hata.tanilama?.ortakKelimeSayisi, 1);
             assert.equal(hata.tanilama?.gerekenOrtakKelimeSayisi, 2);
@@ -209,7 +226,7 @@ test("KAYNAK_UYUMU çok kaynakta tek kelime örtüşmesini ve fiziksel kaynaklar
     );
 });
 
-test("iki kelime örtüşmesi farklı kaynaklara dağılsa da mevcut algoritma değişmeden kabul eder", () => {
+test("iki ayırt edici kelime ve kaynak başına kanıt çok kaynaklı soruda kabul edilir", () => {
     const sonuc = dogrula([uyumSorusu(["K1", "K3"])], {
         kaynaklar: [
             uyumKaynagi({ anahtar: "K1", icerik: "echo bravo" }),
@@ -294,6 +311,10 @@ test("izinli kimlik ile kaynak konu uyuşmazlığı güvenli sayaçlarla ayrı t
         () => dogrula([{
             ...soru(),
             kaynakReferanslari: ["K1", "K3"],
+            kaynakKanitlari: ["K1", "K3"].map((kaynakReferansi) => ({
+                kaynakReferansi,
+                alinti: "Yığın veri yapısı LIFO çalışma prensibi ile ekleme ve çıkarma yapar.",
+            })),
         }], {
             konuDagilimi: [{ konuId: "konu-1", adet: 1 }],
             kaynaklar: [...kaynaklar, ayniParcaninDigerKonuKaynagi],
@@ -395,6 +416,10 @@ test("tanılama kaydı yalnızca beyaz listedeki metadata alanlarını yazar", (
         retryEdildiMi: true,
         gercekDenemeSayisi: 2,
         maksimumDenemeSayisi: 2,
+        partiSayisi: 4,
+        partiIndeksi: 2,
+        onarimDenemeSayisi: 1,
+        apiCagriSayisi: 5,
         sdkCagriAsamasi: "models.generateContent",
         konuKimligiIzinliMi: true,
         konuKimligiDagitimdaMi: false,
@@ -417,6 +442,7 @@ test("tanılama kaydı yalnızca beyaz listedeki metadata alanlarını yazar", (
         prompt: "tam-prompt-metni",
         hamYanit: "ham-gemini-yaniti",
         kaynakMetni: "tam-materyal-metni",
+        kaynakKanitlari: [{ alinti: "hassas-kaynak-kaniti" }],
         soruMetni: "hassas-soru-metni",
         dogruCevapMetni: "hassas-dogru-cevap",
         aciklamaMetni: "hassas-aciklama-metni",
@@ -445,6 +471,10 @@ test("tanılama kaydı yalnızca beyaz listedeki metadata alanlarını yazar", (
     assert.equal(kayit.retryEdildiMi, true);
     assert.equal(kayit.gercekDenemeSayisi, 2);
     assert.equal(kayit.maksimumDenemeSayisi, 2);
+    assert.equal(kayit.partiSayisi, 4);
+    assert.equal(kayit.partiIndeksi, 2);
+    assert.equal(kayit.onarimDenemeSayisi, 1);
+    assert.equal(kayit.apiCagriSayisi, 5);
     assert.equal(kayit.sdkCagriAsamasi, "models.generateContent");
     assert.equal(kayit.konuKimligiDagitimdaMi, false);
     assert.equal(kayit.konuKimligiTuru, "ana");
@@ -467,6 +497,7 @@ test("tanılama kaydı yalnızca beyaz listedeki metadata alanlarını yazar", (
         "tam-prompt-metni",
         "ham-gemini-yaniti",
         "tam-materyal-metni",
+        "hassas-kaynak-kaniti",
         "hassas-soru-metni",
         "hassas-dogru-cevap",
         "hassas-aciklama-metni",

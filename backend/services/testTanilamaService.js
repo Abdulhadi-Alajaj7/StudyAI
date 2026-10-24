@@ -66,6 +66,10 @@ export const testTanilamaKaydiOlustur = (girdi = {}, simdi = () => new Date()) =
     retryEdildiMi: guvenliBoolean(girdi.retryEdildiMi),
     gercekDenemeSayisi: guvenliSayi(girdi.gercekDenemeSayisi),
     maksimumDenemeSayisi: guvenliSayi(girdi.maksimumDenemeSayisi),
+    partiSayisi: guvenliSayi(girdi.partiSayisi),
+    partiIndeksi: guvenliSayi(girdi.partiIndeksi),
+    onarimDenemeSayisi: guvenliSayi(girdi.onarimDenemeSayisi),
+    apiCagriSayisi: guvenliSayi(girdi.apiCagriSayisi),
     sdkCagriAsamasi: girdi.sdkCagriAsamasi === "models.generateContent"
         ? girdi.sdkCagriAsamasi
         : null,
