@@ -13,6 +13,7 @@ import {
 import { testSorulariniDogrula } from "../services/geminiService.js";
 import {
     cevabiKaydet,
+    konuIcinParcalariSirala,
     konuKotalariniDagit,
     sonGoruntulenenSoruyuGuncelle,
     soruIsaretiniGuncelle,
@@ -281,6 +282,56 @@ test("tüm ders konu kotası içeriği yetersiz konuya soru zorlamadan dengeleni
     assert.ok(dagilim.every((konu) => konu.adet >= 1));
 });
 
+test("konu etiketi yalnızca başlık veya açıklama için güçlü metinsel kanıt bulunan parçaya verilir", () => {
+    const konu = {
+        konuId: "sanal-bellek",
+        baslik: "Sanal Bellek ve Sayfalama",
+        kanitSorgusu: "Sanal bellek sayfa tablosu adres çevirisi",
+        sorgu: "İşletim Sistemleri Sanal Bellek ve Sayfalama",
+        kaynakMateryalIds: [materyalId],
+    };
+    const ilgili = {
+        materyalId,
+        parcaIndex: 0,
+        icerik: "Sanal bellek sayfalama kullanır; sayfa tablosu mantıksal adresleri fiziksel çerçevelere çevirir.",
+    };
+    const ilgisiz = {
+        materyalId,
+        parcaIndex: 1,
+        icerik: "Round Robin zamanlayıcı her sürece eşit zaman dilimi ayırır ve hazır kuyruğunu döngüsel işler.",
+    };
+    assert.deepEqual(konuIcinParcalariSirala([ilgisiz, ilgili], konu), [ilgili]);
+});
+
+test("aynı fiziksel parça yalnızca gerçekten desteklediği konu başlıklarıyla eşleşir", () => {
+    const ortakParca = {
+        materyalId,
+        parcaIndex: 0,
+        icerik: "Yığın LIFO ilkesiyle çalışır; kuyruk ise FIFO sırasını kullanır.",
+    };
+    const yigin = konuIcinParcalariSirala([ortakParca], {
+        baslik: "Yığın",
+        kanitSorgusu: "Yığın LIFO",
+        sorgu: "Yığın LIFO",
+        kaynakMateryalIds: [materyalId],
+    });
+    const kuyruk = konuIcinParcalariSirala([ortakParca], {
+        baslik: "Kuyruk",
+        kanitSorgusu: "Kuyruk FIFO",
+        sorgu: "Kuyruk FIFO",
+        kaynakMateryalIds: [materyalId],
+    });
+    const agac = konuIcinParcalariSirala([ortakParca], {
+        baslik: "Dengeli Ağaçlar",
+        kanitSorgusu: "AVL ağacı rotasyon",
+        sorgu: "Dengeli Ağaçlar AVL ağacı rotasyon",
+        kaynakMateryalIds: [materyalId],
+    });
+    assert.deepEqual(yigin, [ortakParca]);
+    assert.deepEqual(kuyruk, [ortakParca]);
+    assert.deepEqual(agac, []);
+});
+
 test("tum_ders, materyal ve konu üretimleri yalnızca doğrulanmış kapsamdaki kaynakları kullanır", async () => {
     for (const girdi of [
         { kapsamTuru: "tum_ders" },
@@ -330,6 +381,81 @@ test("tum_ders, materyal ve konu üretimleri yalnızca doğrulanmış kapsamdaki
         assert.equal(kaydiGetir().kapsamTuru, girdi.kapsamTuru);
         assert.equal(kaydiGetir().sorular.length, 5);
     }
+});
+
+test("tüm ders konu-kaynak eşlemesi ek semantik arama çağrısı üretmez", async () => {
+    let semantikAramaSayisi = 0;
+    const { bagimliliklar } = uretimBagimliliklari();
+    bagimliliklar.semanticArama = async () => {
+        semantikAramaSayisi += 1;
+        return { sonuclar: [] };
+    };
+    await testOlustur({
+        kullaniciId,
+        dersId,
+        kapsamTuru: "tum_ders",
+        soruSayisi: 5,
+        zorluk: "karisik",
+    }, bagimliliklar);
+    assert.equal(semantikAramaSayisi, 0);
+});
+
+test("tüm ders kök eşleşmesi bulamadığında mevcut semantik aramayla konu kaynağını bulur", async () => {
+    const anlamsalHarita = {
+        anaKonular: [{
+            konuId: "top-kilitlenme",
+            baslik: "Kilitlenme Önleme",
+            aciklama: "Döngüsel bekleme koşulunun engellenmesi",
+            kaynakMateryalIds: [materyalId],
+            altKonular: [],
+        }],
+    };
+    const anlamsalParca = {
+        _id: new mongoose.Types.ObjectId(),
+        materyalId,
+        islemeId,
+        parcaIndex: 7,
+        icerik: uzunIcerik(
+            "Kaynak tahsisi",
+            "Bir görev elindeki varlığı bırakmadan yenisini isterse ilerleme durabilir"
+        ),
+    };
+    let semantikAramaGirdisi;
+    let geminiGirdisi;
+    const { bagimliliklar } = uretimBagimliliklari({
+        parcalar: [anlamsalParca],
+        harita: anlamsalHarita,
+        geminiTestUret: async (girdi) => {
+            geminiGirdisi = girdi;
+            return { sorular: ornekSorular(5), model: "test-model" };
+        },
+    });
+    bagimliliklar.semanticArama = async (girdi) => {
+        semantikAramaGirdisi = girdi;
+        return {
+            sonuclar: [{
+                materyalId: String(materyalId),
+                parcaIndex: anlamsalParca.parcaIndex,
+                skor: 0.88,
+            }],
+        };
+    };
+
+    await testOlustur({
+        kullaniciId,
+        dersId,
+        kapsamTuru: "tum_ders",
+        soruSayisi: 5,
+        zorluk: "karisik",
+    }, bagimliliklar);
+
+    assert.ok(semantikAramaGirdisi);
+    assert.deepEqual(
+        semantikAramaGirdisi.materyalIds.map(String),
+        [String(materyalId)]
+    );
+    assert.equal(geminiGirdisi.kaynaklar.length, 1);
+    assert.deepEqual(geminiGirdisi.kaynaklar[0].konuIds, ["top-kilitlenme"]);
 });
 
 test("aynı fiziksel parça farklı konu etiketleriyle çoğaltılmaz, konu kümesi korunur", async () => {

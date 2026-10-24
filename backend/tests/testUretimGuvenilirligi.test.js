@@ -19,7 +19,7 @@ const kaynaklar = [
         dosyaAdi: "bir.pdf",
         parcaIndex: 0,
         konuId: "konu-1",
-        konuIds: ["konu-1", "konu-2"],
+        konuIds: ["konu-1"],
         icerik: kapsamliKaynakMetni,
     },
     {
@@ -29,7 +29,7 @@ const kaynaklar = [
         parcaIndex: 0,
         konuId: "konu-2",
         konuIds: ["konu-2"],
-        icerik: "İkinci materyal yalnızca farklı bir fiziksel kaynak sağlar.",
+        icerik: `${kapsamliKaynakMetni} İkinci materyal yalnızca farklı bir fiziksel kaynak sağlar.`,
     },
 ];
 
@@ -44,7 +44,7 @@ const planiPrompttanGetir = (prompt) => {
     return JSON.parse(eslesme[1]);
 };
 
-const gecerliHamSoru = ({ plan, index, kaynak = "K1" }) => ({
+const gecerliHamSoru = ({ plan, index, kaynak = plan.izinliKaynakReferanslari?.[0] || "K1" }) => ({
     metin: `Kavram${index} için kaynakta doğrulanan sonuç hangisidir?`,
     secenekler: [
         { anahtar: "A", metin: `Değer${index}` },
@@ -107,15 +107,19 @@ const uret = (soruSayisi, uretici, ayarlar = {}) => geminiIleTestSorulariUret({
     istemci: uretici.istemci,
     maxDeneme: ayarlar.maxDeneme || 1,
     maksimumOnarimDenemesi: ayarlar.maksimumOnarimDenemesi ?? 2,
+    ...(ayarlar.partiBoyutu ? { partiBoyutu: ayarlar.partiBoyutu } : {}),
+    ...(ayarlar.partiKaynakKarakterButcesi
+        ? { partiKaynakKarakterButcesi: ayarlar.partiKaynakKarakterButcesi }
+        : {}),
     bekle: ayarlar.bekle || (async () => {}),
     rastgele: ayarlar.rastgele || (() => 0),
 });
 
-test("5/10/15/20 soruluk testler en fazla beş soruluk şemalı partilerde üretilir", async () => {
+test("5/10/15/20 soruluk testler uyarlanabilir en fazla on soruluk partilerde üretilir", async () => {
     for (const soruSayisi of [5, 10, 15, 20]) {
         const uretici = mockUretici();
         const sonuc = await uret(soruSayisi, uretici);
-        const beklenenPartiSayisi = Math.ceil(soruSayisi / 5);
+        const beklenenPartiSayisi = Math.ceil(soruSayisi / 10);
 
         assert.equal(sonuc.sorular.length, soruSayisi);
         assert.equal(uretici.istekler.length, beklenenPartiSayisi);
@@ -128,7 +132,7 @@ test("5/10/15/20 soruluk testler en fazla beş soruluk şemalı partilerde üret
             const sema = istek.config.responseJsonSchema;
             assert.equal(istek.config.responseMimeType, "application/json");
             assert.ok(sema, "JSON response schema gönderilmeli");
-            assert.ok(sema.properties.sorular.maxItems <= 5);
+            assert.ok(sema.properties.sorular.maxItems <= 10);
             assert.equal(sema.properties.sorular.minItems, sema.properties.sorular.maxItems);
             assert.ok(istek.contents.length < 55_000, "Parti prompt'u kaynak bütçesini aşmamalı");
             assert.ok(
@@ -139,29 +143,56 @@ test("5/10/15/20 soruluk testler en fazla beş soruluk şemalı partilerde üret
     }
 });
 
-test("üç kapsam ve dört zorluk seçeneği tam soru kotasını korur", async () => {
-    for (const soruSayisi of [5, 10, 15, 20]) {
-        for (const zorluk of ["kolay", "orta", "zor", "karisik"]) {
-            const dagilim = zorlukDagiliminiOlustur(zorluk, soruSayisi);
-            const plan = testUretimPlaniniOlustur({
-                soruSayisi,
-                zorlukDagilimi: dagilim,
-            });
-            assert.equal(plan.length, soruSayisi);
-            assert.deepEqual(
-                Object.fromEntries([...new Set(plan.map((soru) => soru.zorluk))].map(
-                    (deger) => [deger, plan.filter((soru) => soru.zorluk === deger).length]
-                )),
-                dagilim
-            );
-        }
-    }
+test("20 soruda uyarlanabilir partiler sabit beşli akıştan daha az çağrı ve prompt karakteri kullanır", async () => {
+    const uyarlanabilir = mockUretici();
+    const sabitBesli = mockUretici();
+    const uyarlanabilirSonuc = await uret(20, uyarlanabilir);
+    const sabitBesliSonuc = await uret(20, sabitBesli, { partiBoyutu: 5 });
 
+    const uyarlanabilirPromptKarakteri = uyarlanabilir.istekler.reduce(
+        (toplam, istek) => toplam + istek.contents.length,
+        0
+    );
+    const sabitPromptKarakteri = sabitBesli.istekler.reduce(
+        (toplam, istek) => toplam + istek.contents.length,
+        0
+    );
+    assert.equal(uyarlanabilir.istekler.length, 2);
+    assert.equal(sabitBesli.istekler.length, 4);
+    assert.ok(uyarlanabilirPromptKarakteri < sabitPromptKarakteri);
+    assert.deepEqual(uyarlanabilirSonuc.tokenKullanimi, { girdi: 20, cikti: 10, toplam: 30 });
+    assert.deepEqual(sabitBesliSonuc.tokenKullanimi, { girdi: 40, cikti: 20, toplam: 60 });
+});
+
+test("üç kapsam ve dört zorluk seçeneği tam soru kotasını korur", async () => {
     for (const kapsamTuru of ["tum_ders", "materyal", "konu"]) {
-        const uretici = mockUretici();
-        const sonuc = await uret(5, uretici, { kapsamTuru });
-        assert.equal(sonuc.sorular.length, 5);
-        assert.match(uretici.istekler[0].contents, new RegExp(`Kapsam: ${kapsamTuru}`));
+        for (const soruSayisi of [5, 10, 15, 20]) {
+            for (const zorluk of ["kolay", "orta", "zor", "karisik"]) {
+                const dagilim = zorlukDagiliminiOlustur(zorluk, soruSayisi);
+                const plan = testUretimPlaniniOlustur({
+                    soruSayisi,
+                    zorlukDagilimi: dagilim,
+                });
+                assert.equal(plan.length, soruSayisi);
+
+                const uretici = mockUretici();
+                const sonuc = await uret(soruSayisi, uretici, {
+                    kapsamTuru,
+                    zorlukDagilimi: dagilim,
+                });
+                assert.equal(sonuc.sorular.length, soruSayisi);
+                assert.deepEqual(
+                    sonuc.sorular.reduce((sayac, soru) => {
+                        sayac[soru.zorluk] = (sayac[soru.zorluk] || 0) + 1;
+                        return sayac;
+                    }, {}),
+                    dagilim
+                );
+                assert.ok(uretici.istekler.every((istek) => (
+                    new RegExp(`Kapsam: ${kapsamTuru}`).test(istek.contents)
+                )));
+            }
+        }
     }
 });
 
@@ -182,9 +213,36 @@ test("konu ve zorluk kotaları partiler arasında deterministik ve tam korunur",
         }, {}),
         zorlukDagiliminiOlustur("karisik", 10)
     );
+    const plan = planiPrompttanGetir(uretici.istekler[0].contents);
+    assert.ok(plan.every((soru) => soru.izinliKaynakReferanslari.length > 0));
+    assert.ok(plan
+        .filter((soru) => soru.konuId === "konu-1")
+        .every((soru) => soru.izinliKaynakReferanslari.every((anahtar) => anahtar === "K1")));
+    assert.ok(plan
+        .filter((soru) => soru.konuId === "konu-2")
+        .every((soru) => soru.izinliKaynakReferanslari.every((anahtar) => anahtar === "K2")));
+});
+
+test("kaynak bütçesi çok konulu partiyi otomatik böler", async () => {
+    const uretici = mockUretici();
+    const tekKaynakButcesi = Math.max(...kaynaklar.map((kaynak) => kaynak.icerik.length)) + 10;
+    const sonuc = await uret(10, uretici, {
+        konuDagilimi: [
+            { konuId: "konu-1", adet: 5 },
+            { konuId: "konu-2", adet: 5 },
+        ],
+        partiKaynakKarakterButcesi: tekKaynakButcesi,
+    });
+    assert.equal(sonuc.sorular.length, 10);
+    assert.ok(uretici.istekler.length > 1);
+    assert.ok(uretici.istekler.every((istek) => istek.contents.length < tekKaynakButcesi + 5_000));
 });
 
 test("parti kaynakları karakter bütçesini ve çoklu materyal kapsamını korur", () => {
+    const karakterButcesi = kaynaklar.reduce(
+        (toplam, kaynak) => toplam + kaynak.icerik.length,
+        0
+    );
     const secilenler = partiKaynaklariniSec({
         kaynaklar,
         soruPlani: [
@@ -193,14 +251,93 @@ test("parti kaynakları karakter bütçesini ve çoklu materyal kapsamını koru
         ],
         partiIndeksi: 0,
         partiSayisi: 1,
-        karakterButcesi: kapsamliKaynakMetni.length + 100,
+        karakterButcesi,
     });
     assert.deepEqual(new Set(secilenler.map((kaynak) => kaynak.materyalId)), new Set([
         "materyal-1",
         "materyal-2",
     ]));
     assert.ok(secilenler.reduce((toplam, kaynak) => toplam + kaynak.icerik.length, 0) <=
-        kapsamliKaynakMetni.length + 100);
+        karakterButcesi);
+});
+
+test("parti dönüşü bütçeye sığan zorunlu konu kaynaklarından hiçbirini düşürmez", () => {
+    const donenKaynaklar = [
+        { anahtar: "K1", materyalId: "m1", parcaIndex: 0, konuIds: ["konu-1"], icerik: "a".repeat(80) },
+        { anahtar: "K2", materyalId: "m2", parcaIndex: 0, konuIds: ["konu-2"], icerik: "b".repeat(80) },
+        { anahtar: "K3", materyalId: "m3", parcaIndex: 0, konuIds: ["konu-1"], icerik: "c".repeat(100) },
+        { anahtar: "K4", materyalId: "m4", parcaIndex: 0, konuIds: ["konu-2"], icerik: "d".repeat(100) },
+    ];
+    const secilenler = partiKaynaklariniSec({
+        kaynaklar: donenKaynaklar,
+        soruPlani: [
+            { zorluk: "kolay", konuId: "konu-1" },
+            { zorluk: "orta", konuId: "konu-2" },
+        ],
+        partiIndeksi: 1,
+        partiSayisi: 2,
+        karakterButcesi: 170,
+    });
+
+    assert.deepEqual(
+        new Set(secilenler.flatMap((kaynak) => kaynak.konuIds)),
+        new Set(["konu-1", "konu-2"])
+    );
+    assert.ok(secilenler.reduce(
+        (toplam, kaynak) => toplam + kaynak.icerik.length,
+        0
+    ) <= 170);
+});
+
+test("aynı fiziksel parça ayrı konu etiketleriyle gelirse metin tekrarlanmadan etiketleri birleşir", () => {
+    const ortakFizikselKaynaklar = [
+        { ...kaynaklar[0], anahtar: "K10", konuId: "konu-1", konuIds: ["konu-1"] },
+        { ...kaynaklar[0], anahtar: "K11", konuId: "konu-2", konuIds: ["konu-2"] },
+    ];
+    const secilenler = partiKaynaklariniSec({
+        kaynaklar: ortakFizikselKaynaklar,
+        soruPlani: [
+            { zorluk: "kolay", konuId: "konu-1" },
+            { zorluk: "orta", konuId: "konu-2" },
+        ],
+        partiIndeksi: 0,
+        partiSayisi: 1,
+    });
+    assert.equal(secilenler.length, 1);
+    assert.deepEqual(new Set(secilenler[0].konuIds), new Set(["konu-1", "konu-2"]));
+});
+
+test("birleşen fiziksel kaynak konu etiketlerini final doğrulamada da korur", async () => {
+    const ortakKaynaklar = [
+        { ...kaynaklar[0], anahtar: "K10", konuId: "konu-1", konuIds: ["konu-1"] },
+        { ...kaynaklar[0], anahtar: "K11", konuId: "konu-2", konuIds: ["konu-2"] },
+    ];
+    const uretici = mockUretici();
+    const sonuc = await geminiIleTestSorulariUret({
+        dersBilgisi: { dersAdi: "Ortak Kaynak" },
+        kapsamTuru: "tum_ders",
+        hedefBasligi: "Tüm ders",
+        soruSayisi: 2,
+        zorlukDagilimi: { kolay: 1, orta: 1 },
+        konuDagilimi: [
+            { konuId: "konu-1", adet: 1 },
+            { konuId: "konu-2", adet: 1 },
+        ],
+        kaynaklar: ortakKaynaklar,
+        izinliKonuIds,
+    }, {
+        istemci: uretici.istemci,
+        maxDeneme: 1,
+        bekle: async () => {},
+        rastgele: () => 0,
+    });
+
+    assert.equal(sonuc.sorular.length, 2);
+    assert.deepEqual(
+        new Set(sonuc.sorular.map((soru) => soru.konuId)),
+        new Set(["konu-1", "konu-2"])
+    );
+    assert.equal(uretici.istekler.length, 1);
 });
 
 const dogrulamaAyarlariniOlustur = (kaynak, soru) => ({
@@ -238,6 +375,37 @@ test("Türkçe çekim ekleri ve kısa teknik terimler güvenilir kanıtla kabul 
     const sonuc = testSorulariniDogrula(
         { sorular: [hamSoru] },
         dogrulamaAyarlariniOlustur(ekliKaynak, hamSoru)
+    );
+    assert.equal(sonuc.length, 1);
+});
+
+test("gerçekçi Türkçe teknik anlatım, anlamı koruyan çekimli ifadelerle doğrulanır", () => {
+    const gercekciKaynak = {
+        ...kaynaklar[0],
+        konuIds: ["konu-1"],
+        icerik: "İşletim sistemi, sanal adresleri sayfa tabloları aracılığıyla fiziksel çerçevelere eşler. TLB, yakın zamanda kullanılan sayfa tablosu girdilerini önbellekte tutarak adres çevirisini hızlandırır.",
+    };
+    const hamSoru = {
+        metin: "Sayfalama sırasında adreslerin çevrilmesini hızlandıran donanım önbelleği hangisidir?",
+        secenekler: [
+            { anahtar: "A", metin: "TLB" },
+            { anahtar: "B", metin: "Yığın" },
+            { anahtar: "C", metin: "İş kuyruğu" },
+            { anahtar: "D", metin: "Dosya tanıtıcısı" },
+        ],
+        dogruCevap: "A",
+        aciklama: "TLB, sayfa tablosu girdilerini önbelleğe alıp adres çevrilmesini hızlandırmaktadır.",
+        zorluk: "kolay",
+        konuId: "konu-1",
+        kaynakReferanslari: ["K1"],
+        kaynakKanitlari: [{
+            kaynakReferansi: "K1",
+            alinti: "TLB, yakın zamanda kullanılan sayfa tablosu girdilerini önbellekte tutarak adres çevirisini hızlandırır.",
+        }],
+    };
+    const sonuc = testSorulariniDogrula(
+        { sorular: [hamSoru] },
+        dogrulamaAyarlariniOlustur(gercekciKaynak, hamSoru)
     );
     assert.equal(sonuc.length, 1);
 });
@@ -336,6 +504,19 @@ test("çapraz konu kaynağı, izinli konu kimliği olsa bile reddedilir", () => 
     );
 });
 
+test("aynı anlamı ölçen çok benzer soru TEKRARLAYAN_SORU olarak reddedilir", () => {
+    const plan = { zorluk: "kolay", konuId: "konu-1" };
+    const ilkSoru = gecerliHamSoru({ plan, index: 1 });
+    const tekrar = structuredClone(ilkSoru);
+    assert.throws(
+        () => testSorulariniDogrula({ sorular: [tekrar] }, {
+            ...dogrulamaAyarlariniOlustur(kaynaklar[0], tekrar),
+            oncekiSorular: [ilkSoru],
+        }),
+        (hata) => hata.tanilama?.dogrulamaAltKodu === "TEKRARLAYAN_SORU"
+    );
+});
+
 test("tek geçersiz soru sınırlı onarımla değiştirilir, başarılı sorular korunur", async () => {
     let ilkPartiSorulari;
     const uretici = mockUretici({
@@ -363,6 +544,28 @@ test("tek geçersiz soru sınırlı onarımla değiştirilir, başarılı sorula
         assert.equal(sonuc.sorular[index].metin, ilkPartiSorulari[index].metin);
     }
     assert.notEqual(sonuc.sorular[2].metin, ilkPartiSorulari[2].metin);
+    assert.match(uretici.istekler[1].contents, /"dogrulamaAltKodu":"KAYNAK_REFERANSI"/);
+    assert.doesNotMatch(uretici.istekler[1].contents, /uydurma kaynak/);
+});
+
+test("farklı partilerdeki geçersiz soruların her biri kendi sınırlı bütçesiyle onarılır", async () => {
+    const uretici = mockUretici({
+        donustur(soru, { cagri, sira }) {
+            if ((cagri === 1 && sira === 3) || (cagri === 3 && sira === 12)) {
+                return {
+                    ...soru,
+                    kaynakReferanslari: ["K99"],
+                    kaynakKanitlari: [{ kaynakReferansi: "K99", alinti: "geçersiz" }],
+                };
+            }
+            return soru;
+        },
+    });
+    const sonuc = await uret(20, uretici, { maksimumOnarimDenemesi: 1 });
+    assert.equal(sonuc.sorular.length, 20);
+    assert.equal(uretici.istekler.length, 4);
+    assert.match(uretici.istekler[1].contents, /ONARIM_BAGLAMI/);
+    assert.match(uretici.istekler[3].contents, /ONARIM_BAGLAMI/);
 });
 
 test("onarım deneme sınırı sonsuz döngüyü ve eksik test kaydını engeller", async () => {

@@ -1,4 +1,5 @@
 import { GoogleGenAI } from "@google/genai";
+import { koklerEslesiyorMu } from "./konuKimlikEslemeService.js";
 
 export const VARSAYILAN_GEMINI_MODELI = "gemini-3.5-flash-lite";
 
@@ -521,9 +522,9 @@ ${kaynakMetni}
 };
 
 const TEST_SECENEKLERI = ["A", "B", "C", "D"];
-const TEST_PARTI_BOYUTU = 5;
+const TEST_AZAMI_PARTI_BOYUTU = 10;
 const TEST_PARTI_KAYNAK_KARAKTER_BUTCESI = 45_000;
-const TEST_MAKSIMUM_ONARIM_DENEMESI = 2;
+const TEST_PARTI_BASINA_MAKSIMUM_ONARIM_DENEMESI = 2;
 
 const TURKCE_DURAK_KELIMELER = new Set([
     "acaba", "ancak", "bazen", "bazı", "bile", "bir", "biri", "birkaç", "biz",
@@ -592,6 +593,36 @@ const anlamliKelimeKumesi = (deger) => new Set(
 
 const kelimeKumesi = anlamliKelimeKumesi;
 
+const testKokleriEslesiyorMu = (sol, sag) => {
+    if (sol === sag) return true;
+    if (
+        /\d/u.test(sol) ||
+        /\d/u.test(sag) ||
+        TEKNIK_KISA_TERIMLER.has(sol) ||
+        TEKNIK_KISA_TERIMLER.has(sag)
+    ) return false;
+    return koklerEslesiyorMu(sol, sag);
+};
+
+const kelimeKumesindeEslesmeVarMi = (kume, aranan) => [...kume].some(
+    (aday) => testKokleriEslesiyorMu(aday, aranan)
+);
+
+const kelimeKumelerindekiEslesmeleriBul = (sol, sag) => {
+    const kullanilanSag = new Set();
+    const eslesenler = [];
+    for (const solKelime of sol) {
+        const sagKelime = [...sag].find((aday) => (
+            !kullanilanSag.has(aday) && testKokleriEslesiyorMu(solKelime, aday)
+        ));
+        if (sagKelime) {
+            kullanilanSag.add(sagKelime);
+            eslesenler.push(solKelime);
+        }
+    }
+    return eslesenler;
+};
+
 const teknikTerimKumesi = (deger) => new Set(
     testMetniniNormalizeEt(deger)
         .split(" ")
@@ -617,7 +648,7 @@ const jaccardBenzerligi = (solMetin, sagMetin) => {
     const sol = kelimeKumesi(solMetin);
     const sag = kelimeKumesi(sagMetin);
     if (sol.size === 0 || sag.size === 0) return 0;
-    const ortak = [...sol].filter((kelime) => sag.has(kelime)).length;
+    const ortak = kelimeKumelerindekiEslesmeleriBul(sol, sag).length;
     return ortak / (sol.size + sag.size - ortak);
 };
 
@@ -773,12 +804,14 @@ export const testSorulariniDogrula = (veri, {
         );
         const kaynakBasinaOrtakKelimeSayilari = secilenKaynaklar.map((kaynak) => {
             const kaynakKelimeleri = kelimeKumesi(kaynak.icerik);
-            return [...destekAdaylari].filter(
-                (kelime) => kaynakKelimeleri.has(kelime)
+            return kelimeKumelerindekiEslesmeleriBul(
+                destekAdaylari,
+                kaynakKelimeleri
             ).length;
         });
-        const ortakKelimeler = [...destekAdaylari].filter(
-            (kelime) => kaynakKelimeKumesi.has(kelime)
+        const ortakKelimeler = kelimeKumelerindekiEslesmeleriBul(
+            destekAdaylari,
+            kaynakKelimeKumesi
         );
         const gucluOrtakKelimeVarMi = ortakKelimeler.some(
             (kelime) => TEKNIK_KISA_TERIMLER.has(kelime) || /\d/u.test(kelime) || kelime.length >= 7
@@ -797,10 +830,10 @@ export const testSorulariniDogrula = (veri, {
             const kanitKelimeleri = kelimeKumesi(kanit.alinti);
             if (kanitKelimeleri.size === 0) return false;
             const cevapOrtagiVarMi = [...cevapDestekAdaylari].some(
-                (kelime) => kanitKelimeleri.has(kelime)
+                (kelime) => kelimeKumesindeEslesmeVarMi(kanitKelimeleri, kelime)
             );
             const soruOrtagiVarMi = [...destekAdaylari].some(
-                (kelime) => kanitKelimeleri.has(kelime)
+                (kelime) => kelimeKumesindeEslesmeVarMi(kanitKelimeleri, kelime)
             );
             return cevapOrtagiVarMi && soruOrtagiVarMi;
         });
@@ -895,9 +928,17 @@ export const testSorulariniDogrula = (veri, {
         }
         if (
             konuId &&
-            secilenKaynaklar.some((kaynak) => (
-                !kaynakKonuKimlikleriniGetir(kaynak).includes(konuId)
-            ))
+            (
+                secilenKaynaklar.some((kaynak) => (
+                    !kaynakKonuKimlikleriniGetir(kaynak).includes(konuId)
+                )) ||
+                (
+                    Array.isArray(planlananSoru?.izinliKaynakReferanslari) &&
+                    kaynakAnahtarlari.some((anahtar) => (
+                        !planlananSoru.izinliKaynakReferanslari.includes(anahtar)
+                    ))
+                )
+            )
         ) {
             throw gecersiz(
                 "KAYNAK_KONU_UYUSMAZLIGI",
@@ -1018,26 +1059,103 @@ const dagilimiSay = (degerler) => degerler.reduce((dagilim, deger) => {
     return dagilim;
 }, {});
 
-const soruPlaniniPartilereBol = (soruPlani, partiBoyutu) => {
+const kaynaklariFizikselOlarakTekillestir = (kaynaklar) => {
+    const fizikselKaynaklar = new Map();
+    for (const kaynak of kaynaklar || []) {
+        const anahtar = fizikselKaynakAnahtariniGetir(kaynak) || String(kaynak.anahtar);
+        const mevcut = fizikselKaynaklar.get(anahtar);
+        if (!mevcut) {
+            fizikselKaynaklar.set(anahtar, {
+                ...kaynak,
+                konuIds: kaynakKonuKimlikleriniGetir(kaynak),
+            });
+            continue;
+        }
+        mevcut.konuIds = [...new Set([
+            ...kaynakKonuKimlikleriniGetir(mevcut),
+            ...kaynakKonuKimlikleriniGetir(kaynak),
+        ])];
+        mevcut.konuId = mevcut.konuIds[0] || "";
+    }
+    return [...fizikselKaynaklar.values()];
+};
+
+const kaynakKarakterSayisi = (kaynak) => String(kaynak?.icerik || "").length;
+
+const konuIcinZorunluKaynaklariSec = (konuIds, kaynaklar) => {
+    const acikKonular = new Set(konuIds);
+    const secilenler = [];
+    const kalanKaynaklar = [...kaynaklar];
+    while (acikKonular.size > 0) {
+        const adaylar = kalanKaynaklar.map((kaynak, index) => {
+            const kapsananKonular = kaynakKonuKimlikleriniGetir(kaynak).filter(
+                (konuId) => acikKonular.has(konuId)
+            );
+            return { kaynak, index, kapsananKonular };
+        }).filter(({ kapsananKonular }) => kapsananKonular.length > 0);
+        if (adaylar.length === 0) break;
+        adaylar.sort((sol, sag) => (
+            (kaynakKarakterSayisi(sol.kaynak) / sol.kapsananKonular.length) -
+                (kaynakKarakterSayisi(sag.kaynak) / sag.kapsananKonular.length) ||
+            kaynakKarakterSayisi(sol.kaynak) - kaynakKarakterSayisi(sag.kaynak) ||
+            sol.index - sag.index
+        ));
+        const secilen = adaylar[0];
+        secilenler.push(secilen.kaynak);
+        secilen.kapsananKonular.forEach((konuId) => acikKonular.delete(konuId));
+        kalanKaynaklar.splice(secilen.index, 1);
+    }
+    return secilenler;
+};
+
+const planIcinZorunluKaynaklariGetir = (plan, kaynaklar) => {
+    const benzersizKaynaklar = kaynaklariFizikselOlarakTekillestir(kaynaklar || []);
+    const konuIds = [...new Set(plan.map((soru) => soru.konuId).filter(Boolean))];
+    if (konuIds.length === 0) return benzersizKaynaklar.slice(0, 1);
+    return konuIcinZorunluKaynaklariSec(konuIds, benzersizKaynaklar);
+};
+
+export const soruPlaniniPartilereBol = ({
+    soruPlani,
+    kaynaklar,
+    partiBoyutu = TEST_AZAMI_PARTI_BOYUTU,
+    karakterButcesi = TEST_PARTI_KAYNAK_KARAKTER_BUTCESI,
+} = {}) => {
     const partiler = [];
-    for (let index = 0; index < soruPlani.length; index += partiBoyutu) {
-        const plan = soruPlani.slice(index, index + partiBoyutu).map((soru, yerelIndex) => ({
-            ...soru,
-            sira: yerelIndex + 1,
-        }));
-        partiler.push({ plan, baslangicIndeksi: index });
+    let baslangicIndeksi = 0;
+    const kalanSorular = [...(soruPlani || [])];
+    while (kalanSorular.length > 0) {
+        const plan = [];
+        while (plan.length < partiBoyutu && kalanSorular.length > 0) {
+            const uygunIndex = kalanSorular.findIndex((soru) => {
+                const zorunluKaynakKarakteri = planIcinZorunluKaynaklariGetir(
+                    [...plan, soru],
+                    kaynaklar
+                ).reduce(
+                    (toplam, kaynak) => toplam + kaynakKarakterSayisi(kaynak),
+                    0
+                );
+                return zorunluKaynakKarakteri <= karakterButcesi;
+            });
+            if (uygunIndex < 0) {
+                if (plan.length === 0) plan.push(kalanSorular.shift());
+                break;
+            }
+            plan.push(kalanSorular.splice(uygunIndex, 1)[0]);
+        }
+        partiler.push({
+            plan: plan.map((oge, yerelIndex) => ({
+                ...oge,
+                sira: yerelIndex + 1,
+            })),
+            baslangicIndeksi,
+        });
+        baslangicIndeksi += plan.length;
     }
     return partiler;
 };
 
-const kaynaklariFizikselOlarakTekillestir = (kaynaklar) => [...new Map(
-    kaynaklar.map((kaynak) => [
-        fizikselKaynakAnahtariniGetir(kaynak) || String(kaynak.anahtar),
-        kaynak,
-    ])
-).values()];
-
-export const partiKaynaklariniSec = ({
+const partiKaynakPaketiniOlustur = ({
     kaynaklar,
     soruPlani,
     partiIndeksi,
@@ -1051,7 +1169,7 @@ export const partiKaynaklariniSec = ({
             (konuId) => kaynakKonuKimlikleriniGetir(kaynak).includes(konuId)
         ))
         : benzersizKaynaklar;
-    if (adaylar.length === 0) return [];
+    if (adaylar.length === 0) return { kaynaklar: [], soruPlani: [] };
 
     const baslangic = Math.floor((adaylar.length * partiIndeksi) / Math.max(1, partiSayisi));
     const donmusAdaylar = [...adaylar.slice(baslangic), ...adaylar.slice(0, baslangic)];
@@ -1062,32 +1180,40 @@ export const partiKaynaklariniSec = ({
         gorulen.add(kaynak.anahtar);
         oncelikli.push(kaynak);
     };
-    for (const konuId of konuIds) {
-        ekle(donmusAdaylar.find(
-            (kaynak) => kaynakKonuKimlikleriniGetir(kaynak).includes(konuId)
-        ));
-    }
+    konuIcinZorunluKaynaklariSec(konuIds, adaylar).forEach(ekle);
     donmusAdaylar.forEach(ekle);
 
     const secilenler = [];
     let toplamKarakter = 0;
     for (const kaynak of oncelikli) {
-        const karakterSayisi = String(kaynak.icerik || "").length;
-        const konuIcinZorunlu = konuIds.some((konuId) => (
-            kaynakKonuKimlikleriniGetir(kaynak).includes(konuId) &&
-            !secilenler.some((secilen) => kaynakKonuKimlikleriniGetir(secilen).includes(konuId))
-        ));
+        const karakterSayisi = kaynakKarakterSayisi(kaynak);
         if (
             secilenler.length === 0 ||
-            konuIcinZorunlu ||
             toplamKarakter + karakterSayisi <= karakterButcesi
         ) {
             secilenler.push(kaynak);
             toplamKarakter += karakterSayisi;
         }
     }
-    return secilenler;
+    const kaynakAnahtarlari = new Set(secilenler.map((kaynak) => kaynak.anahtar));
+    const kaynakliSoruPlani = soruPlani.map((soru) => ({
+        ...soru,
+        izinliKaynakReferanslari: benzersizKaynaklar
+            .filter((kaynak) => (
+                kaynakAnahtarlari.has(kaynak.anahtar) &&
+                (
+                    !soru.konuId ||
+                    kaynakKonuKimlikleriniGetir(kaynak).includes(soru.konuId)
+                )
+            ))
+            .map((kaynak) => kaynak.anahtar),
+    }));
+    return { kaynaklar: secilenler, soruPlani: kaynakliSoruPlani };
 };
+
+export const partiKaynaklariniSec = (ayarlar = {}) => (
+    partiKaynakPaketiniOlustur(ayarlar).kaynaklar
+);
 
 const testYanitSemasiniOlustur = ({ soruSayisi, kaynakAnahtarlari, zorluklar }) => ({
     type: "object",
@@ -1161,9 +1287,41 @@ KESİN KURALLAR:
 5. Kaynak kanıtındaki ayırt edici teknik kavramları doğru cevapta veya açıklamada açıkça kullan. Genel sözcük benzerliğini kanıt sayma.
 6. Dosya adı, sayfa, slayt veya kaynak konumu yazma. Yalnızca gerçekten kullanılan kaynak anahtarlarını bildir.
 7. Aynı bilgiyi ölçen, yalnızca sözcükleri değiştirilmiş veya aşırı benzer sorular üretme.
-8. SORU_PLANI sırasına, zorluğuna ve dolu konu kimliğine tam uy. Bir konu kimliği yazıldığında kullanılan bütün kaynaklar bu konuya atanmış olmalı; farklı konuları tek soruda birleştirme.
+8. SORU_PLANI sırasına, zorluğuna, dolu konu kimliğine ve izinliKaynakReferanslari listesine tam uy. Her soruda yalnızca o plan satırında izin verilen kaynakları kullan; farklı konuları tek soruda birleştirme.
 9. Konu ilişkisi kesin değilse ve planda konu zorunlu değilse konuId alanını boş dize yap.
 10. Yalnızca şemaya uygun JSON döndür; Markdown veya ek açıklama döndürme.`;
+
+const ONARIM_TALIMATLARI = {
+    KAYNAK_UYUMU: "Soru, doğru cevap ve açıklamadaki ayırt edici kavramları birebir kaynak kanıtına dayandır.",
+    KAYNAK_KANITI: "Her kaynak referansı için kaynaktan birebir ve doğru cevabı destekleyen ayrı bir alıntı ver.",
+    KAYNAK_KONU_UYUSMAZLIGI: "Yalnızca soru planındaki izinli kaynak referanslarını kullan ve konu kimliğini değiştirme.",
+    BILINMEYEN_KONU_KIMLIGI: "Konu kimliğini soru planında verilen değerle aynı yaz.",
+    KONU_DAGILIMI: "Konu kimliğini soru planında verilen değerle aynı yaz.",
+    ZORLUK_DAGILIMI: "Zorluk değerini soru planında verilen değerle aynı yaz.",
+    TEKRARLAYAN_SORU: "Mevcut sorulardan farklı bir kavramı ölçen yeni bir soru üret.",
+    KAYNAK_REFERANSI: "Yalnızca soru planındaki izinli kaynak anahtarlarını kullan.",
+};
+
+const guvenliOnarimBaglaminiOlustur = (tanilama = {}) => {
+    const dogrulamaAltKodu = Object.hasOwn(ONARIM_TALIMATLARI, tanilama.dogrulamaAltKodu)
+        ? tanilama.dogrulamaAltKodu
+        : "DIGER";
+    const sayisalAlanlar = [
+        "destekAdayiSayisi",
+        "ortakKelimeSayisi",
+        "gerekenOrtakKelimeSayisi",
+        "kaynakReferansiSayisi",
+    ];
+    return {
+        dogrulamaAltKodu,
+        duzeltmeTalebi: ONARIM_TALIMATLARI[dogrulamaAltKodu] ||
+            "Soru planına ve bütün doğrulama kurallarına uyan yeni bir soru üret.",
+        metrikler: Object.fromEntries(sayisalAlanlar.map((alan) => [
+            alan,
+            Number.isFinite(tanilama[alan]) ? tanilama[alan] : null,
+        ])),
+    };
+};
 
 const testPartisiPromptunuOlustur = ({
     dersBilgisi,
@@ -1174,6 +1332,7 @@ const testPartisiPromptunuOlustur = ({
     izinliKonuIds,
     kacinilacakSorular = [],
     onarim = false,
+    onarimBaglami = null,
 }) => {
     const kaynakMetni = kaynaklar.map((kaynak) => {
         const konuEtiketleri = kaynakKonuKimlikleriniGetir(kaynak);
@@ -1184,9 +1343,13 @@ Ders açıklaması: ${dersBilgisi.aciklama || ""}
 Kapsam: ${kapsamTuru}
 Seçilen hedef: ${hedefBasligi || "Tüm ders"}
 İşlem: ${onarim ? "Geçersiz sorunun yerine tek yeni soru üret" : "Planlanan küçük test partisini üret"}
+${onarim ? `ONARIM_BAGLAMI: ${JSON.stringify(onarimBaglami)}` : ""}
 SORU_PLANI: ${JSON.stringify(soruPlani)}
 İzin verilen konu kimlikleri: ${izinliKonuIds.map((konu) => konu.konuId).join(", ") || "yok"}
-Kaçınılacak mevcut sorular: ${JSON.stringify(kacinilacakSorular)}
+Kaçınılacak mevcut sorular: ${JSON.stringify(kacinilacakSorular
+        .map((soru) => String(soru || "").trim().slice(0, 240))
+        .filter(Boolean)
+        .slice(-20))}
 
 <KAYNAK_ICERIGI>
 ${kaynakMetni}
@@ -1214,33 +1377,50 @@ export const geminiIleTestSorulariUret = async ({
 }, bagimliliklar = {}) => {
     const istemci = bagimliliklar.istemci || getGeminiClient();
     const partiBoyutu = Math.min(
-        TEST_PARTI_BOYUTU,
-        Math.max(1, Number(bagimliliklar.partiBoyutu) || TEST_PARTI_BOYUTU)
+        TEST_AZAMI_PARTI_BOYUTU,
+        Math.max(1, Number(bagimliliklar.partiBoyutu) || TEST_AZAMI_PARTI_BOYUTU)
     );
-    const maksimumOnarimDenemesi = Math.max(
+    const partiBasinaMaksimumOnarimDenemesi = Math.max(
         0,
         Number.isInteger(bagimliliklar.maksimumOnarimDenemesi)
             ? bagimliliklar.maksimumOnarimDenemesi
-            : TEST_MAKSIMUM_ONARIM_DENEMESI
+            : TEST_PARTI_BASINA_MAKSIMUM_ONARIM_DENEMESI
     );
     const maxDeneme = bagimliliklar.maxDeneme || 2;
     const bekle = bagimliliklar.bekle || ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+    const partiKaynakKarakterButcesi = bagimliliklar.partiKaynakKarakterButcesi ||
+        TEST_PARTI_KAYNAK_KARAKTER_BUTCESI;
     const soruPlani = testUretimPlaniniOlustur({
         soruSayisi,
         zorlukDagilimi,
         konuDagilimi,
     });
-    const partiler = soruPlaniniPartilereBol(soruPlani, partiBoyutu);
+    const etkinKaynaklar = kaynaklariFizikselOlarakTekillestir(kaynaklar);
+    const partiler = soruPlaniniPartilereBol({
+        soruPlani,
+        kaynaklar: etkinKaynaklar,
+        partiBoyutu,
+        karakterButcesi: partiKaynakKarakterButcesi,
+    });
+    const etkinSoruPlani = partiler.flatMap((parti) => parti.plan).map(
+        (soru, index) => ({ ...soru, sira: index + 1 })
+    );
     const apiCagriButcesi = {
         kullanilan: 0,
-        maksimum: (partiler.length + maksimumOnarimDenemesi) * maxDeneme,
+        maksimum: partiler.length * (1 + partiBasinaMaksimumOnarimDenemesi) * maxDeneme,
     };
     const toplamTokenKullanimi = { girdi: 0, cikti: 0, toplam: 0 };
     const tumHamSorular = [];
     let onarimDenemeSayisi = 0;
     let sonTanilama = null;
 
-    const cagriYap = async ({ plan, partiKaynaklari, kacinilacakSorular, onarim }) => {
+    const cagriYap = async ({
+        plan,
+        partiKaynaklari,
+        kacinilacakSorular,
+        onarim,
+        onarimBaglami = null,
+    }) => {
         const prompt = testPartisiPromptunuOlustur({
             dersBilgisi,
             kapsamTuru,
@@ -1250,6 +1430,7 @@ export const geminiIleTestSorulariUret = async ({
             izinliKonuIds,
             kacinilacakSorular,
             onarim,
+            onarimBaglami,
         });
         return yapilandirilmisGeminiCagrisi({
             istemci,
@@ -1272,22 +1453,27 @@ export const geminiIleTestSorulariUret = async ({
 
     for (let partiIndeksi = 0; partiIndeksi < partiler.length; partiIndeksi += 1) {
         const parti = partiler[partiIndeksi];
-        const partiKaynaklari = partiKaynaklariniSec({
-            kaynaklar,
+        const partiPaketi = partiKaynakPaketiniOlustur({
+            kaynaklar: etkinKaynaklar,
             soruPlani: parti.plan,
             partiIndeksi,
             partiSayisi: partiler.length,
-            karakterButcesi: bagimliliklar.partiKaynakKarakterButcesi ||
-                TEST_PARTI_KAYNAK_KARAKTER_BUTCESI,
+            karakterButcesi: partiKaynakKarakterButcesi,
         });
-        if (partiKaynaklari.length === 0) {
+        const partiKaynaklari = partiPaketi.kaynaklar;
+        const partiPlani = partiPaketi.soruPlani;
+        if (
+            partiKaynaklari.length === 0 ||
+            partiPlani.some((soru) => soru.izinliKaynakReferanslari.length === 0)
+        ) {
             throw gecersizTestYaniti({ altKod: "PARTI_KAYNAGI" });
         }
+        let partiOnarimDenemeSayisi = 0;
 
         let partiSonucu;
         try {
             partiSonucu = await cagriYap({
-                plan: parti.plan,
+                plan: partiPlani,
                 partiKaynaklari,
                 kacinilacakSorular: tumHamSorular.map((soru) => soru.metin),
                 onarim: false,
@@ -1309,19 +1495,21 @@ export const geminiIleTestSorulariUret = async ({
         while (true) {
             try {
                 testSorulariniDogrula({ sorular: partiHamSorular }, {
-                    soruSayisi: parti.plan.length,
-                    zorlukDagilimi: dagilimiSay(parti.plan.map((soru) => soru.zorluk)),
+                    soruSayisi: partiPlani.length,
+                    zorlukDagilimi: dagilimiSay(partiPlani.map((soru) => soru.zorluk)),
                     konuDagilimi: [...new Map(
-                        parti.plan.filter((soru) => soru.konuId).map((soru) => [
+                        partiPlani.filter((soru) => soru.konuId).map((soru) => [
                             soru.konuId,
-                            { konuId: soru.konuId, adet: parti.plan.filter(
-                                (aday) => aday.konuId === soru.konuId
-                            ).length },
+                            {
+                                konuId: soru.konuId, adet: partiPlani.filter(
+                                    (aday) => aday.konuId === soru.konuId
+                                ).length
+                            },
                         ])
                     ).values()],
                     kaynaklar: partiKaynaklari,
                     izinliKonuIds,
-                    soruPlani: parti.plan,
+                    soruPlani: partiPlani,
                     oncekiSorular: tumHamSorular,
                 });
                 break;
@@ -1329,7 +1517,7 @@ export const geminiIleTestSorulariUret = async ({
                 const yerelSoruIndeksi = hata?.tanilama?.soruIndeksi;
                 if (
                     !Number.isInteger(yerelSoruIndeksi) ||
-                    onarimDenemeSayisi >= maksimumOnarimDenemesi
+                    partiOnarimDenemeSayisi >= partiBasinaMaksimumOnarimDenemesi
                 ) {
                     hata.tanilama = {
                         ...sonTanilama,
@@ -1346,16 +1534,27 @@ export const geminiIleTestSorulariUret = async ({
                 }
 
                 onarimDenemeSayisi += 1;
+                partiOnarimDenemeSayisi += 1;
                 try {
+                    const onarimPlani = {
+                        ...partiPlani[yerelSoruIndeksi],
+                        sira: 1,
+                    };
+                    const izinliOnarimKaynaklari = new Set(
+                        onarimPlani.izinliKaynakReferanslari
+                    );
                     const onarimSonucu = await cagriYap({
-                        plan: [{ ...parti.plan[yerelSoruIndeksi], sira: 1 }],
-                        partiKaynaklari,
+                        plan: [onarimPlani],
+                        partiKaynaklari: partiKaynaklari.filter(
+                            (kaynak) => izinliOnarimKaynaklari.has(kaynak.anahtar)
+                        ),
                         kacinilacakSorular: [
                             ...tumHamSorular,
                             ...(Array.isArray(partiHamSorular) ? partiHamSorular : []),
                         ].filter((_, index) => index !== tumHamSorular.length + yerelSoruIndeksi)
                             .map((soru) => soru.metin),
                         onarim: true,
+                        onarimBaglami: guvenliOnarimBaglaminiOlustur(hata.tanilama),
                     });
                     tokenKullaniminiEkle(toplamTokenKullanimi, onarimSonucu.tokenKullanimi);
                     sonTanilama = onarimSonucu.tanilama;
@@ -1375,7 +1574,7 @@ export const geminiIleTestSorulariUret = async ({
                             "GEMINI_GECERSIZ_YANIT",
                             "GEMINI_GECERSIZ_TEST_YANITI",
                         ].includes(onarimHatasi?.kod) &&
-                        onarimDenemeSayisi < maksimumOnarimDenemesi
+                        partiOnarimDenemeSayisi < partiBasinaMaksimumOnarimDenemesi
                     ) {
                         continue;
                     }
@@ -1400,9 +1599,9 @@ export const geminiIleTestSorulariUret = async ({
             soruSayisi,
             zorlukDagilimi,
             konuDagilimi,
-            kaynaklar,
+            kaynaklar: etkinKaynaklar,
             izinliKonuIds,
-            soruPlani,
+            soruPlani: etkinSoruPlani,
         });
     } catch (hata) {
         hata.tanilama = {
