@@ -68,12 +68,26 @@ export const testTanilamaKaydiOlustur = (girdi = {}, simdi = () => new Date()) =
     maksimumDenemeSayisi: guvenliSayi(girdi.maksimumDenemeSayisi),
     partiSayisi: guvenliSayi(girdi.partiSayisi),
     partiIndeksi: guvenliSayi(girdi.partiIndeksi),
+    partiBoyutu: guvenliSayi(girdi.partiBoyutu),
+    kurtarmaDerinligi: guvenliSayi(girdi.kurtarmaDerinligi),
+    partiKucultmeSayisi: guvenliSayi(girdi.partiKucultmeSayisi),
+    kurtarmaNedeni: guvenliMetin(girdi.kurtarmaNedeni, 100),
+    onarimButcesiTukendiMi: guvenliBoolean(girdi.onarimButcesiTukendiMi),
+    dogrulamaKapsami: ["parti", "final"].includes(girdi.dogrulamaKapsami)
+        ? girdi.dogrulamaKapsami
+        : null,
+    istekMaxOutputTokens: guvenliSayi(girdi.istekMaxOutputTokens),
+    istekTimeoutMs: guvenliSayi(girdi.istekTimeoutMs),
     onarimDenemeSayisi: guvenliSayi(girdi.onarimDenemeSayisi),
     apiCagriSayisi: guvenliSayi(girdi.apiCagriSayisi),
     sdkCagriAsamasi: girdi.sdkCagriAsamasi === "models.generateContent"
         ? girdi.sdkCagriAsamasi
         : null,
     dogrulamaAltKodu: guvenliMetin(girdi.dogrulamaAltKodu, 100),
+    kaynakKanitiAltNedeni: guvenliTanimlayici(girdi.kaynakKanitiAltNedeni),
+    tekrarTuru: ["TAM_METIN", "KAVRAM_BENZERLIGI"].includes(girdi.tekrarTuru)
+        ? girdi.tekrarTuru
+        : null,
     soruIndeksi: guvenliSayi(girdi.soruIndeksi),
     konuKimligiIzinliMi: guvenliBoolean(girdi.konuKimligiIzinliMi),
     konuKimligiDagitimdaMi: guvenliBoolean(girdi.konuKimligiDagitimdaMi),
@@ -83,6 +97,24 @@ export const testTanilamaKaydiOlustur = (girdi = {}, simdi = () => new Date()) =
     ortakKelimeSayisi: guvenliSayi(girdi.ortakKelimeSayisi),
     gerekenOrtakKelimeSayisi: guvenliSayi(girdi.gerekenOrtakKelimeSayisi),
     kaynakReferansiSayisi: guvenliSayi(girdi.kaynakReferansiSayisi),
+    kanitSayisi: guvenliSayi(girdi.kanitSayisi),
+    eksikKanitReferansiSayisi: guvenliSayi(girdi.eksikKanitReferansiSayisi),
+    bilinmeyenKanitReferansiSayisi: guvenliSayi(girdi.bilinmeyenKanitReferansiSayisi),
+    bosAlintiSayisi: guvenliSayi(girdi.bosAlintiSayisi),
+    cokUzunAlintiSayisi: guvenliSayi(girdi.cokUzunAlintiSayisi),
+    cokKisaAlintiSayisi: guvenliSayi(girdi.cokKisaAlintiSayisi),
+    kaynaktaBulunmayanAlintiSayisi: guvenliSayi(girdi.kaynaktaBulunmayanAlintiSayisi),
+    anlamsizAlintiSayisi: guvenliSayi(girdi.anlamsizAlintiSayisi),
+    cevabiDesteklemeyenKanitSayisi: guvenliSayi(girdi.cevabiDesteklemeyenKanitSayisi),
+    soruyuDesteklemeyenKanitSayisi: guvenliSayi(girdi.soruyuDesteklemeyenKanitSayisi),
+    dogrulanmayanTeknikTerimSayisi: guvenliSayi(girdi.dogrulanmayanTeknikTerimSayisi),
+    tekrarBenzerlikPuani: guvenliSayi(girdi.tekrarBenzerlikPuani),
+    tekrarEdenOncekiSoruIndeksi: guvenliSayi(girdi.tekrarEdenOncekiSoruIndeksi),
+    tekrarOrtakKavramSayisi: guvenliSayi(girdi.tekrarOrtakKavramSayisi),
+    tekrarAdayKavramSayisi: guvenliSayi(girdi.tekrarAdayKavramSayisi),
+    onarimAdayiTukendiMi: guvenliBoolean(girdi.onarimAdayiTukendiMi),
+    icerikCesitliligiYetersizMi: guvenliBoolean(girdi.icerikCesitliligiYetersizMi),
+    kaynakBolumAdayiSayisi: guvenliSayi(girdi.kaynakBolumAdayiSayisi),
     kaynakBasinaEnYuksekOrtakKelimeSayisi: guvenliSayi(
         girdi.kaynakBasinaEnYuksekOrtakKelimeSayisi
     ),

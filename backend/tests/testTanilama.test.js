@@ -355,7 +355,7 @@ const testUret = (response) => geminiIleTestSorulariUret({
     maxDeneme: 1,
 });
 
-test("geçersiz JSON güvenli 502 ve JSON_PARSE tanılaması üretir", async () => {
+test("token sınırında kesilen JSON güvenli 502 ve CIKTI_TOKEN_SINIRI tanılaması üretir", async () => {
     await assert.rejects(
         testUret({
             text: "{gecersiz-json",
@@ -365,12 +365,27 @@ test("geçersiz JSON güvenli 502 ve JSON_PARSE tanılaması üretir", async () 
         (hata) => {
             assert.equal(hata.status, 502);
             assert.equal(hata.kod, "GEMINI_GECERSIZ_YANIT");
-            assert.equal(hata.tanilama?.dogrulamaAltKodu, "JSON_PARSE");
+            assert.equal(hata.tanilama?.dogrulamaAltKodu, "CIKTI_TOKEN_SINIRI");
             assert.equal(hata.tanilama?.jsonAyristirmaSonucu, "basarisiz");
             assert.equal(hata.tanilama?.finishReason, "MAX_TOKENS");
             assert.equal(hata.tanilama?.tokenKullanimi?.toplam, 18);
             return true;
         }
+    );
+});
+
+test("token sınırı dışındaki bozuk JSON ayrı JSON_PARSE tanılaması üretir", async () => {
+    await assert.rejects(
+        testUret({
+            text: "{gecersiz-json",
+            candidates: [{ finishReason: "STOP" }],
+        }),
+        (hata) => (
+            hata.status === 502 &&
+            hata.kod === "GEMINI_GECERSIZ_YANIT" &&
+            hata.tanilama?.dogrulamaAltKodu === "JSON_PARSE" &&
+            hata.tanilama?.finishReason === "STOP"
+        )
     );
 });
 
@@ -418,6 +433,14 @@ test("tanılama kaydı yalnızca beyaz listedeki metadata alanlarını yazar", (
         maksimumDenemeSayisi: 2,
         partiSayisi: 4,
         partiIndeksi: 2,
+        partiBoyutu: 5,
+        kurtarmaDerinligi: 1,
+        partiKucultmeSayisi: 1,
+        kurtarmaNedeni: "CIKTI_TOKEN_SINIRI",
+        onarimButcesiTukendiMi: true,
+        dogrulamaKapsami: "parti",
+        istekMaxOutputTokens: 6000,
+        istekTimeoutMs: 60000,
         onarimDenemeSayisi: 1,
         apiCagriSayisi: 5,
         sdkCagriAsamasi: "models.generateContent",
@@ -429,6 +452,26 @@ test("tanılama kaydı yalnızca beyaz listedeki metadata alanlarını yazar", (
         ortakKelimeSayisi: 1,
         gerekenOrtakKelimeSayisi: 2,
         kaynakReferansiSayisi: 2,
+        kaynakKanitiAltNedeni: "ALINTI_KAYNAKTA_YOK",
+        kanitSayisi: 3,
+        eksikKanitReferansiSayisi: 0,
+        bilinmeyenKanitReferansiSayisi: 0,
+        bosAlintiSayisi: 0,
+        cokUzunAlintiSayisi: 0,
+        cokKisaAlintiSayisi: 0,
+        kaynaktaBulunmayanAlintiSayisi: 1,
+        anlamsizAlintiSayisi: 0,
+        cevabiDesteklemeyenKanitSayisi: 1,
+        soruyuDesteklemeyenKanitSayisi: 0,
+        dogrulanmayanTeknikTerimSayisi: 1,
+        tekrarTuru: "KAVRAM_BENZERLIGI",
+        tekrarBenzerlikPuani: 0.82,
+        tekrarEdenOncekiSoruIndeksi: 7,
+        tekrarOrtakKavramSayisi: 4,
+        tekrarAdayKavramSayisi: 5,
+        onarimAdayiTukendiMi: true,
+        icerikCesitliligiYetersizMi: true,
+        kaynakBolumAdayiSayisi: 2,
         kaynakBasinaEnYuksekOrtakKelimeSayisi: 1,
         farkliFizikselKaynakSayisi: 2,
         ayniFizikselParcaTekrariVarMi: false,
@@ -473,6 +516,14 @@ test("tanılama kaydı yalnızca beyaz listedeki metadata alanlarını yazar", (
     assert.equal(kayit.maksimumDenemeSayisi, 2);
     assert.equal(kayit.partiSayisi, 4);
     assert.equal(kayit.partiIndeksi, 2);
+    assert.equal(kayit.partiBoyutu, 5);
+    assert.equal(kayit.kurtarmaDerinligi, 1);
+    assert.equal(kayit.partiKucultmeSayisi, 1);
+    assert.equal(kayit.kurtarmaNedeni, "CIKTI_TOKEN_SINIRI");
+    assert.equal(kayit.onarimButcesiTukendiMi, true);
+    assert.equal(kayit.dogrulamaKapsami, "parti");
+    assert.equal(kayit.istekMaxOutputTokens, 6000);
+    assert.equal(kayit.istekTimeoutMs, 60000);
     assert.equal(kayit.onarimDenemeSayisi, 1);
     assert.equal(kayit.apiCagriSayisi, 5);
     assert.equal(kayit.sdkCagriAsamasi, "models.generateContent");
@@ -483,6 +534,26 @@ test("tanılama kaydı yalnızca beyaz listedeki metadata alanlarını yazar", (
     assert.equal(kayit.ortakKelimeSayisi, 1);
     assert.equal(kayit.gerekenOrtakKelimeSayisi, 2);
     assert.equal(kayit.kaynakReferansiSayisi, 2);
+    assert.equal(kayit.kaynakKanitiAltNedeni, "ALINTI_KAYNAKTA_YOK");
+    assert.equal(kayit.kanitSayisi, 3);
+    assert.equal(kayit.eksikKanitReferansiSayisi, 0);
+    assert.equal(kayit.bilinmeyenKanitReferansiSayisi, 0);
+    assert.equal(kayit.bosAlintiSayisi, 0);
+    assert.equal(kayit.cokUzunAlintiSayisi, 0);
+    assert.equal(kayit.cokKisaAlintiSayisi, 0);
+    assert.equal(kayit.kaynaktaBulunmayanAlintiSayisi, 1);
+    assert.equal(kayit.anlamsizAlintiSayisi, 0);
+    assert.equal(kayit.cevabiDesteklemeyenKanitSayisi, 1);
+    assert.equal(kayit.soruyuDesteklemeyenKanitSayisi, 0);
+    assert.equal(kayit.dogrulanmayanTeknikTerimSayisi, 1);
+    assert.equal(kayit.tekrarTuru, "KAVRAM_BENZERLIGI");
+    assert.equal(kayit.tekrarBenzerlikPuani, 0.82);
+    assert.equal(kayit.tekrarEdenOncekiSoruIndeksi, 7);
+    assert.equal(kayit.tekrarOrtakKavramSayisi, 4);
+    assert.equal(kayit.tekrarAdayKavramSayisi, 5);
+    assert.equal(kayit.onarimAdayiTukendiMi, true);
+    assert.equal(kayit.icerikCesitliligiYetersizMi, true);
+    assert.equal(kayit.kaynakBolumAdayiSayisi, 2);
     assert.equal(kayit.kaynakBasinaEnYuksekOrtakKelimeSayisi, 1);
     assert.equal(kayit.farkliFizikselKaynakSayisi, 2);
     assert.equal(kayit.ayniFizikselParcaTekrariVarMi, false);

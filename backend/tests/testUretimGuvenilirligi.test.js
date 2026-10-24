@@ -94,6 +94,29 @@ const mockUretici = ({ donustur } = {}) => {
     };
 };
 
+const siraliGecerliYanitOlustur = () => {
+    let sira = 0;
+    return async (istek, donustur = (soru) => soru) => {
+        const plan = planiPrompttanGetir(istek.contents);
+        const sorular = plan.map((planlanan) => {
+            sira += 1;
+            return donustur(
+                gecerliHamSoru({ plan: planlanan, index: sira }),
+                { sira, plan: planlanan }
+            );
+        });
+        return {
+            text: JSON.stringify({ sorular }),
+            candidates: [{ finishReason: "STOP" }],
+            usageMetadata: {
+                promptTokenCount: 10,
+                candidatesTokenCount: 5,
+                totalTokenCount: 15,
+            },
+        };
+    };
+};
+
 const uret = (soruSayisi, uretici, ayarlar = {}) => geminiIleTestSorulariUret({
     dersBilgisi: { dersAdi: "Güvenilir Sistemler" },
     kapsamTuru: ayarlar.kapsamTuru || "tum_ders",
@@ -101,8 +124,8 @@ const uret = (soruSayisi, uretici, ayarlar = {}) => geminiIleTestSorulariUret({
     soruSayisi,
     zorlukDagilimi: ayarlar.zorlukDagilimi || zorlukDagiliminiOlustur("karisik", soruSayisi),
     konuDagilimi: ayarlar.konuDagilimi || [],
-    kaynaklar,
-    izinliKonuIds,
+    kaynaklar: ayarlar.kaynaklar || kaynaklar,
+    izinliKonuIds: ayarlar.izinliKonuIds || izinliKonuIds,
 }, {
     istemci: uretici.istemci,
     maxDeneme: ayarlar.maxDeneme || 1,
@@ -111,15 +134,19 @@ const uret = (soruSayisi, uretici, ayarlar = {}) => geminiIleTestSorulariUret({
     ...(ayarlar.partiKaynakKarakterButcesi
         ? { partiKaynakKarakterButcesi: ayarlar.partiKaynakKarakterButcesi }
         : {}),
+    ...(ayarlar.timeoutMs ? { timeoutMs: ayarlar.timeoutMs } : {}),
+    ...(Number.isInteger(ayarlar.maksimumKucultmeDerinligi)
+        ? { maksimumKucultmeDerinligi: ayarlar.maksimumKucultmeDerinligi }
+        : {}),
     bekle: ayarlar.bekle || (async () => {}),
     rastgele: ayarlar.rastgele || (() => 0),
 });
 
-test("5/10/15/20 soruluk testler uyarlanabilir en fazla on soruluk partilerde üretilir", async () => {
+test("5/10/15/20 soruluk testler güvenilir en fazla beş soruluk partilerde üretilir", async () => {
     for (const soruSayisi of [5, 10, 15, 20]) {
         const uretici = mockUretici();
         const sonuc = await uret(soruSayisi, uretici);
-        const beklenenPartiSayisi = Math.ceil(soruSayisi / 10);
+        const beklenenPartiSayisi = Math.ceil(soruSayisi / 5);
 
         assert.equal(sonuc.sorular.length, soruSayisi);
         assert.equal(uretici.istekler.length, beklenenPartiSayisi);
@@ -132,8 +159,9 @@ test("5/10/15/20 soruluk testler uyarlanabilir en fazla on soruluk partilerde ü
             const sema = istek.config.responseJsonSchema;
             assert.equal(istek.config.responseMimeType, "application/json");
             assert.ok(sema, "JSON response schema gönderilmeli");
-            assert.ok(sema.properties.sorular.maxItems <= 10);
+            assert.ok(sema.properties.sorular.maxItems <= 5);
             assert.equal(sema.properties.sorular.minItems, sema.properties.sorular.maxItems);
+            assert.equal(istek.config.maxOutputTokens, 6_000);
             assert.ok(istek.contents.length < 55_000, "Parti prompt'u kaynak bütçesini aşmamalı");
             assert.ok(
                 sema.properties.sorular.items.required.includes("kaynakKanitlari"),
@@ -143,25 +171,13 @@ test("5/10/15/20 soruluk testler uyarlanabilir en fazla on soruluk partilerde ü
     }
 });
 
-test("20 soruda uyarlanabilir partiler sabit beşli akıştan daha az çağrı ve prompt karakteri kullanır", async () => {
-    const uyarlanabilir = mockUretici();
-    const sabitBesli = mockUretici();
-    const uyarlanabilirSonuc = await uret(20, uyarlanabilir);
-    const sabitBesliSonuc = await uret(20, sabitBesli, { partiBoyutu: 5 });
+test("20 soruda güvenilir varsayılan parti boyutu dört kontrollü çağrı kullanır", async () => {
+    const uretici = mockUretici();
+    const sonuc = await uret(20, uretici);
 
-    const uyarlanabilirPromptKarakteri = uyarlanabilir.istekler.reduce(
-        (toplam, istek) => toplam + istek.contents.length,
-        0
-    );
-    const sabitPromptKarakteri = sabitBesli.istekler.reduce(
-        (toplam, istek) => toplam + istek.contents.length,
-        0
-    );
-    assert.equal(uyarlanabilir.istekler.length, 2);
-    assert.equal(sabitBesli.istekler.length, 4);
-    assert.ok(uyarlanabilirPromptKarakteri < sabitPromptKarakteri);
-    assert.deepEqual(uyarlanabilirSonuc.tokenKullanimi, { girdi: 20, cikti: 10, toplam: 30 });
-    assert.deepEqual(sabitBesliSonuc.tokenKullanimi, { girdi: 40, cikti: 20, toplam: 60 });
+    assert.equal(uretici.istekler.length, 4);
+    assert.ok(uretici.istekler.every((istek) => planiPrompttanGetir(istek.contents).length === 5));
+    assert.deepEqual(sonuc.tokenKullanimi, { girdi: 40, cikti: 20, toplam: 60 });
 });
 
 test("üç kapsam ve dört zorluk seçeneği tam soru kotasını korur", async () => {
@@ -517,6 +533,152 @@ test("aynı anlamı ölçen çok benzer soru TEKRARLAYAN_SORU olarak reddedilir"
     );
 });
 
+test("aynı soru kalıbındaki farklı teknik kavramlar tekrar sayılmaz", () => {
+    const ortakKaynak = {
+        ...kaynaklar[0],
+        konuId: "",
+        konuIds: [],
+        icerik: "TCP protokolü bağlantı yönelimli iletişim sağlar. DNS protokolü alan adlarını IP adreslerine çözümler.",
+    };
+    const soruOlustur = ({ kavram, cevap, aciklama, kanit }) => ({
+        metin: `Bilgisayar ağlarında ${kavram} protokolünün temel işlevini doğru biçimde açıklayan seçenek aşağıdakilerden hangisidir?`,
+        secenekler: [
+            { anahtar: "A", metin: cevap },
+            { anahtar: "B", metin: "Dosya sıkıştırma" },
+            { anahtar: "C", metin: "Görüntü işleme" },
+            { anahtar: "D", metin: "Bellek yönetimi" },
+        ],
+        dogruCevap: "A",
+        aciklama,
+        zorluk: "kolay",
+        konuId: "",
+        kaynakReferanslari: ["K1"],
+        kaynakKanitlari: [{ kaynakReferansi: "K1", alinti: kanit }],
+    });
+    const tcpSorusu = soruOlustur({
+        kavram: "TCP",
+        cevap: "Bağlantı yönelimli iletişim",
+        aciklama: "TCP protokolü bağlantı yönelimli iletişim sağlar.",
+        kanit: "TCP protokolü bağlantı yönelimli iletişim sağlar.",
+    });
+    const dnsSorusu = soruOlustur({
+        kavram: "DNS",
+        cevap: "Alan adlarını IP adreslerine çözümleme",
+        aciklama: "DNS protokolü alan adlarını IP adreslerine çözümler.",
+        kanit: "DNS protokolü alan adlarını IP adreslerine çözümler.",
+    });
+
+    const sonuc = testSorulariniDogrula({ sorular: [tcpSorusu, dnsSorusu] }, {
+        soruSayisi: 2,
+        zorlukDagilimi: { kolay: 2 },
+        kaynaklar: [ortakKaynak],
+        izinliKonuIds: [],
+        soruPlani: [
+            { sira: 1, zorluk: "kolay", konuId: "" },
+            { sira: 2, zorluk: "kolay", konuId: "" },
+        ],
+    });
+
+    assert.equal(sonuc.length, 2);
+});
+
+test("aynı teknik kavramı ölçen farklı ifadeli soru tekrar sayılmaya devam eder", () => {
+    const kaynak = {
+        ...kaynaklar[0],
+        konuId: "",
+        konuIds: [],
+        icerik: "TCP protokolü bağlantı yönelimli iletişim niteliğine sahiptir.",
+    };
+    const soruOlustur = (metin) => ({
+        metin,
+        secenekler: [
+            { anahtar: "A", metin: "Bağlantı yönelimli iletişim" },
+            { anahtar: "B", metin: "Görüntü sıkıştırma" },
+            { anahtar: "C", metin: "Bellek adresleme" },
+            { anahtar: "D", metin: "Dosya şifreleme" },
+        ],
+        dogruCevap: "A",
+        aciklama: "TCP protokolü bağlantı yönelimli iletişim niteliğine sahiptir.",
+        zorluk: "kolay",
+        konuId: "",
+        kaynakReferanslari: ["K1"],
+        kaynakKanitlari: [{
+            kaynakReferansi: "K1",
+            alinti: "TCP protokolü bağlantı yönelimli iletişim niteliğine sahiptir.",
+        }],
+    });
+    const ilkSoru = soruOlustur(
+        "TCP protokolü bağlantı yönelimli iletişim sağlar mı?"
+    );
+    const benzerSoru = soruOlustur(
+        "TCP protokolü bağlantı yönelimli iletişim sunar mı?"
+    );
+
+    assert.throws(
+        () => testSorulariniDogrula({ sorular: [benzerSoru] }, {
+            ...dogrulamaAyarlariniOlustur(kaynak, benzerSoru),
+            oncekiSorular: [ilkSoru],
+        }),
+        (hata) => {
+            assert.equal(hata.tanilama?.dogrulamaAltKodu, "TEKRARLAYAN_SORU");
+            assert.equal(hata.tanilama?.tekrarTuru, "KAVRAM_BENZERLIGI");
+            assert.ok(hata.tanilama?.tekrarBenzerlikPuani >= 0.65);
+            return true;
+        }
+    );
+});
+
+test("aynı kaynak için birden fazla geçerli birebir kanıt yanlış pozitif üretmez", () => {
+    const kaynak = {
+        ...kaynaklar[0],
+        konuId: "",
+        konuIds: [],
+        icerik: "TCP protokolü bağlantı yönelimli iletişim sağlar. TCP güvenilir aktarım için teslim onayları kullanır.",
+    };
+    const soru = {
+        metin: "TCP protokolünün bağlantı ve aktarım özellikleri nelerdir?",
+        secenekler: [
+            { anahtar: "A", metin: "Bağlantı yönelimli ve güvenilir aktarım" },
+            { anahtar: "B", metin: "Yalnızca görüntü işleme" },
+            { anahtar: "C", metin: "Dosya sıkıştırma" },
+            { anahtar: "D", metin: "Bellek adresleme" },
+        ],
+        dogruCevap: "A",
+        aciklama: "TCP bağlantı yönelimlidir ve teslim onaylarıyla güvenilir aktarımı destekler.",
+        zorluk: "kolay",
+        konuId: "",
+        kaynakReferanslari: ["K1"],
+        kaynakKanitlari: [
+            { kaynakReferansi: "K1", alinti: "TCP protokolü bağlantı yönelimli iletişim sağlar." },
+            { kaynakReferansi: "K1", alinti: "TCP güvenilir aktarım için teslim onayları kullanır." },
+        ],
+    };
+
+    const sonuc = testSorulariniDogrula(
+        { sorular: [soru] },
+        dogrulamaAyarlariniOlustur(kaynak, soru)
+    );
+    assert.equal(sonuc.length, 1);
+});
+
+test("kaynakta bulunmayan alıntı ayrıntılı güvenli alt nedenle reddedilir", () => {
+    const soru = gecerliHamSoru({ plan: { zorluk: "kolay", konuId: "konu-1" }, index: 1 });
+    soru.kaynakKanitlari[0].alinti = "Kaynakta bulunmayan ancak makul görünen farklı bir ifade.";
+
+    assert.throws(
+        () => testSorulariniDogrula(
+            { sorular: [soru] },
+            dogrulamaAyarlariniOlustur(kaynaklar[0], soru)
+        ),
+        (hata) => {
+            assert.equal(hata.tanilama?.dogrulamaAltKodu, "KAYNAK_KANITI");
+            assert.equal(hata.tanilama?.kaynakKanitiAltNedeni, "ALINTI_KAYNAKTA_YOK");
+            assert.equal(hata.tanilama?.kaynaktaBulunmayanAlintiSayisi, 1);
+            return true;
+        }
+    );
+});
+
 test("tek geçersiz soru sınırlı onarımla değiştirilir, başarılı sorular korunur", async () => {
     let ilkPartiSorulari;
     const uretici = mockUretici({
@@ -548,10 +710,391 @@ test("tek geçersiz soru sınırlı onarımla değiştirilir, başarılı sorula
     assert.doesNotMatch(uretici.istekler[1].contents, /uydurma kaynak/);
 });
 
+test("uzun ama geçerli yapılandırılmış JSON beş soruluk partide doğrulanır", async () => {
+    const yanitla = siraliGecerliYanitOlustur();
+    let istek;
+    const istemci = {
+        models: {
+            async generateContent(girdi) {
+                istek = girdi;
+                return yanitla(girdi, (soru) => ({
+                    ...soru,
+                    aciklama: `${soru.aciklama} ${"Kavram1 güvenilir açıklama ".repeat(120)}`,
+                }));
+            },
+        },
+    };
+    const sonuc = await uret(5, { istemci, istekler: [] });
+
+    assert.equal(sonuc.sorular.length, 5);
+    assert.equal(istek.config.maxOutputTokens, 6_000);
+    assert.ok(sonuc.sorular.every((soru) => soru.aciklama.length > 2_000));
+});
+
+test("sonraki partide MAX_TOKENS ile kesilen JSON küçük partilere bölünerek kurtarılır", async () => {
+    const istekler = [];
+    const yanitla = siraliGecerliYanitOlustur();
+    const istemci = {
+        models: {
+            async generateContent(istek) {
+                istekler.push(istek);
+                if (istekler.length === 2) {
+                    return {
+                        text: '{"sorular":[',
+                        candidates: [{ finishReason: "MAX_TOKENS" }],
+                        usageMetadata: {
+                            promptTokenCount: 100,
+                            candidatesTokenCount: 6_000,
+                            totalTokenCount: 6_100,
+                        },
+                    };
+                }
+                return yanitla(istek);
+            },
+        },
+    };
+    const sonuc = await uret(15, { istemci, istekler });
+
+    assert.equal(sonuc.sorular.length, 15);
+    assert.equal(istekler.length, 5);
+    assert.deepEqual(istekler.map((istek) => planiPrompttanGetir(istek.contents).length), [5, 5, 2, 3, 5]);
+    assert.equal(new Set(sonuc.sorular.map((soru) => soru.metin)).size, 15);
+});
+
+test("eksik soru sayısı döndüren parti kalan planı kontrollü biçimde bölerek tamamlanır", async () => {
+    const istekler = [];
+    const yanitla = siraliGecerliYanitOlustur();
+    const istemci = {
+        models: {
+            async generateContent(istek) {
+                istekler.push(istek);
+                const yanit = await yanitla(istek);
+                if (istekler.length === 1) {
+                    const veri = JSON.parse(yanit.text);
+                    yanit.text = JSON.stringify({ sorular: veri.sorular.slice(0, -1) });
+                }
+                return yanit;
+            },
+        },
+    };
+    const sonuc = await uret(5, { istemci, istekler });
+
+    assert.equal(sonuc.sorular.length, 5);
+    assert.equal(istekler.length, 3);
+    assert.deepEqual(istekler.map((istek) => planiPrompttanGetir(istek.contents).length), [5, 2, 3]);
+});
+
+test("aynı partideki iki geçersiz soru ayrı ayrı onarılır", async () => {
+    const uretici = mockUretici({
+        donustur(soru, { cagri, sira }) {
+            if (cagri === 1 && [2, 4].includes(sira)) {
+                return {
+                    ...soru,
+                    kaynakReferanslari: ["K99"],
+                    kaynakKanitlari: [{ kaynakReferansi: "K99", alinti: "geçersiz" }],
+                };
+            }
+            return soru;
+        },
+    });
+    const sonuc = await uret(5, uretici, { maksimumOnarimDenemesi: 2 });
+
+    assert.equal(sonuc.sorular.length, 5);
+    assert.equal(uretici.istekler.length, 3);
+    assert.match(uretici.istekler[1].contents, /ONARIM_BAGLAMI/);
+    assert.match(uretici.istekler[2].contents, /ONARIM_BAGLAMI/);
+});
+
+test("tekrarlayan soru yalnızca ilgili soru değiştirilerek onarılır", async () => {
+    let ilkSoru;
+    const uretici = mockUretici({
+        donustur(soru, { cagri, sira }) {
+            if (cagri === 1 && sira === 1) ilkSoru = structuredClone(soru);
+            if (cagri === 1 && sira === 2) {
+                return { ...structuredClone(ilkSoru), zorluk: soru.zorluk };
+            }
+            return soru;
+        },
+    });
+    const sonuc = await uret(5, uretici);
+
+    assert.equal(sonuc.sorular.length, 5);
+    assert.equal(uretici.istekler.length, 2);
+    assert.equal(new Set(sonuc.sorular.map((soru) => soru.metin)).size, 5);
+    assert.match(uretici.istekler[1].contents, /"dogrulamaAltKodu":"TEKRARLAYAN_SORU"/);
+});
+
+test("tekrarlayan soru onarımında aynı konuya ait denenmemiş kaynak kontrollü seçilir", async () => {
+    let ilkSoru;
+    const uretici = mockUretici({
+        donustur(soru, { cagri, sira }) {
+            if (cagri === 1 && sira === 1) ilkSoru = structuredClone(soru);
+            if (cagri === 1 && sira === 2) {
+                return { ...structuredClone(ilkSoru), zorluk: soru.zorluk };
+            }
+            return soru;
+        },
+    });
+    const alternatifKaynak = {
+        ...kaynaklar[0],
+        anahtar: "K3",
+        materyalId: "materyal-3",
+        dosyaAdi: "uc.pdf",
+        parcaIndex: 1,
+    };
+
+    const sonuc = await uret(5, uretici, {
+        kaynaklar: [kaynaklar[0], alternatifKaynak],
+        izinliKonuIds: [izinliKonuIds[0]],
+        konuDagilimi: [{ konuId: "konu-1", adet: 5 }],
+    });
+
+    const onarimIstegi = uretici.istekler[1];
+    const onarimPlani = planiPrompttanGetir(onarimIstegi.contents);
+    assert.equal(sonuc.sorular.length, 5);
+    assert.deepEqual(onarimPlani[0].izinliKaynakReferanslari, ["K3"]);
+    assert.deepEqual(
+        onarimIstegi.config.responseJsonSchema.properties.sorular.items.properties
+            .kaynakReferanslari.items.enum,
+        ["K3"]
+    );
+    assert.match(onarimIstegi.contents, /"farkliKaynakSecildiMi":true/);
+    assert.equal(sonuc.sorular[1].kaynaklar[0].materyalId, "materyal-3");
+});
+
+test("gerçek 20 soru zincirinde kaynak-konu onarımı sonrası küçülen partideki tekrar kurtarılır", async () => {
+    const istekler = [];
+    const yanitla = siraliGecerliYanitOlustur();
+    let ilkSoruMetni = "";
+    let sdkCagrisi = 0;
+    const istemci = {
+        models: {
+            async generateContent(istek) {
+                sdkCagrisi += 1;
+                istekler.push(istek);
+                if (sdkCagrisi === 1) {
+                    throw Object.assign(new Error("geçici"), {
+                        name: "ApiError",
+                        status: 503,
+                    });
+                }
+                const yanit = await yanitla(istek);
+                const veri = JSON.parse(yanit.text);
+                if (sdkCagrisi === 2) ilkSoruMetni = veri.sorular[0].metin;
+
+                if ([4, 5, 6].includes(sdkCagrisi)) {
+                    const soru = veri.sorular[0];
+                    const izinliKaynak = soru.kaynakReferanslari[0];
+                    const uyumsuzKaynak = izinliKaynak === "K1" ? "K2" : "K1";
+                    soru.kaynakReferanslari = [uyumsuzKaynak];
+                    soru.kaynakKanitlari = [{
+                        kaynakReferansi: uyumsuzKaynak,
+                        alinti: soru.aciklama,
+                    }];
+                }
+                if (sdkCagrisi === 7) veri.sorular[0].metin = ilkSoruMetni;
+
+                return { ...yanit, text: JSON.stringify(veri) };
+            },
+        },
+    };
+
+    const sonuc = await uret(20, { istemci, istekler }, {
+        maxDeneme: 2,
+        konuDagilimi: [
+            { konuId: "konu-1", adet: 10 },
+            { konuId: "konu-2", adet: 10 },
+        ],
+    });
+
+    assert.equal(sonuc.sorular.length, 20);
+    assert.equal(new Set(sonuc.sorular.map((soru) => soru.metin)).size, 20);
+    assert.equal(sonuc.sorular[0].metin, ilkSoruMetni);
+    assert.equal(sonuc.sorular.filter((soru) => soru.konuId === "konu-1").length, 10);
+    assert.equal(sonuc.sorular.filter((soru) => soru.konuId === "konu-2").length, 10);
+    assert.deepEqual(
+        sonuc.sorular.reduce((dagilim, soru) => {
+            dagilim[soru.zorluk] = (dagilim[soru.zorluk] || 0) + 1;
+            return dagilim;
+        }, {}),
+        zorlukDagiliminiOlustur("karisik", 20)
+    );
+    assert.ok(sonuc.sorular.every((soru) => soru.kaynaklar.every((kaynak) => (
+        (soru.konuId === "konu-1" && kaynak.materyalId === "materyal-1") ||
+        (soru.konuId === "konu-2" && kaynak.materyalId === "materyal-2")
+    ))));
+    assert.equal(sdkCagrisi, 10);
+    const kaynakOnarimPlani = planiPrompttanGetir(istekler[4].contents)[0];
+    assert.equal(kaynakOnarimPlani.izinliKaynakReferanslari.length, 1);
+    assert.deepEqual(
+        istekler[4].config.responseJsonSchema.properties.sorular.items.properties
+            .kaynakReferanslari.items.enum,
+        kaynakOnarimPlani.izinliKaynakReferanslari
+    );
+    assert.match(istekler[7].contents, /ONARIM_STRATEJISI/);
+});
+
+test("gerçek Materyal logundaki 15 çağrılık KAYNAK_KANITI zinciri hedefli onarımla tamamlanır", async () => {
+    const istekler = [];
+    const yanitla = siraliGecerliYanitOlustur();
+    let sdkCagrisi = 0;
+    const kanitiSil = (soru) => {
+        soru.kaynakKanitlari = [];
+    };
+    const istemci = {
+        models: {
+            async generateContent(istek) {
+                sdkCagrisi += 1;
+                istekler.push(istek);
+                const yanit = await yanitla(istek);
+                const veri = JSON.parse(yanit.text);
+
+                if ([1, 4].includes(sdkCagrisi)) {
+                    kanitiSil(veri.sorular[0]);
+                    kanitiSil(veri.sorular[1]);
+                }
+                if (sdkCagrisi === 7) {
+                    kanitiSil(veri.sorular[0]);
+                    kanitiSil(veri.sorular[1]);
+                    kanitiSil(veri.sorular[2]);
+                }
+                if (sdkCagrisi === 11) kanitiSil(veri.sorular[2]);
+                if (
+                    [12, 13].includes(sdkCagrisi) &&
+                    !istek.contents.includes("KANIT_STRATEJISI")
+                ) kanitiSil(veri.sorular[0]);
+                if (sdkCagrisi === 15) kanitiSil(veri.sorular[0]);
+
+                return { ...yanit, text: JSON.stringify(veri) };
+            },
+        },
+    };
+
+    const sonuc = await uret(20, { istemci, istekler }, { kapsamTuru: "materyal" });
+
+    assert.equal(sonuc.sorular.length, 20);
+    assert.equal(new Set(sonuc.sorular.map((soru) => soru.metin)).size, 20);
+    assert.equal(sdkCagrisi, 12);
+    assert.match(istekler[11].contents, /KANIT_STRATEJISI/);
+});
+
+test("gerçek Konu logundaki 11 çağrılık TEKRARLAYAN_SORU zinciri kavram çeşitliliğiyle tamamlanır", async () => {
+    const istekler = [];
+    const yanitla = siraliGecerliYanitOlustur();
+    let sdkCagrisi = 0;
+    let ilkSoruMetni = "";
+    const tekrarla = (soru) => {
+        soru.metin = ilkSoruMetni;
+    };
+    const istemci = {
+        models: {
+            async generateContent(istek) {
+                sdkCagrisi += 1;
+                istekler.push(istek);
+                const yanit = await yanitla(istek);
+                const veri = JSON.parse(yanit.text);
+                if (sdkCagrisi === 1) {
+                    ilkSoruMetni = veri.sorular[0].metin;
+                    tekrarla(veri.sorular[1]);
+                    tekrarla(veri.sorular[2]);
+                }
+                if (sdkCagrisi === 4) {
+                    tekrarla(veri.sorular[0]);
+                    tekrarla(veri.sorular[1]);
+                }
+                if (sdkCagrisi === 7) tekrarla(veri.sorular[2]);
+                if (
+                    [8, 9].includes(sdkCagrisi) &&
+                    !istek.contents.includes("KAVRAM_CESITLILIGI")
+                ) tekrarla(veri.sorular[0]);
+                if (sdkCagrisi === 11) tekrarla(veri.sorular[0]);
+                return { ...yanit, text: JSON.stringify(veri) };
+            },
+        },
+    };
+
+    const sonuc = await uret(20, { istemci, istekler }, {
+        kapsamTuru: "konu",
+        kaynaklar: [kaynaklar[0]],
+        izinliKonuIds: [izinliKonuIds[0]],
+        konuDagilimi: [{ konuId: "konu-1", adet: 20 }],
+    });
+
+    assert.equal(sonuc.sorular.length, 20);
+    assert.equal(new Set(sonuc.sorular.map((soru) => soru.metin)).size, 20);
+    assert.equal(sdkCagrisi, 9);
+    assert.match(istekler[7].contents, /KAVRAM_CESITLILIGI/);
+});
+
+test("tek kaynak bölümünde çeşitlilik tükenirse geçerli parti yeniden üretilmeden anlamlı 422 döner", async () => {
+    let ilkSoru;
+    const kisaKaynak = {
+        ...kaynaklar[0],
+        icerik: Array.from({ length: 20 }, (_, index) => kanitMetni(index + 1)).join(" "),
+    };
+    const uretici = mockUretici({
+        donustur(soru, { cagri, sira }) {
+            if (cagri === 1 && sira === 1) ilkSoru = structuredClone(soru);
+            if ((cagri === 1 && sira === 2) || cagri > 1) {
+                return { ...soru, metin: ilkSoru.metin };
+            }
+            return soru;
+        },
+    });
+
+    await assert.rejects(
+        uret(5, uretici, { kaynaklar: [kisaKaynak] }),
+        (hata) => {
+            assert.equal(hata.status, 422);
+            assert.equal(hata.kod, "YETERSIZ_TEST_ICERIGI");
+            assert.equal(hata.tanilama?.dogrulamaAltKodu, "TEKRARLAYAN_SORU");
+            assert.equal(hata.tanilama?.icerikCesitliligiYetersizMi, true);
+            assert.equal(hata.tanilama?.onarimAdayiTukendiMi, true);
+            assert.equal(hata.tanilama?.onarimDenemeSayisi, 1);
+            assert.equal(hata.tanilama?.apiCagriSayisi, 2);
+            assert.equal(hata.tanilama?.partiKucultmeSayisi, 0);
+            return true;
+        }
+    );
+    assert.deepEqual(
+        uretici.istekler.map((istek) => planiPrompttanGetir(istek.contents).length),
+        [5, 1]
+    );
+});
+
+test("aynı kaynak bölümünde yinelenen KAYNAK_KANITI hatası ikinci kez çağrılmaz", async () => {
+    const kisaKaynak = {
+        ...kaynaklar[0],
+        icerik: Array.from({ length: 20 }, (_, index) => kanitMetni(index + 1)).join(" "),
+    };
+    const uretici = mockUretici({
+        donustur(soru, { sira }) {
+            if (sira === 1 || sira > 5) return { ...soru, kaynakKanitlari: [] };
+            return soru;
+        },
+    });
+
+    await assert.rejects(
+        uret(5, uretici, { kaynaklar: [kisaKaynak] }),
+        (hata) => {
+            assert.equal(hata.status, 502);
+            assert.equal(hata.kod, "GEMINI_GECERSIZ_TEST_YANITI");
+            assert.equal(hata.tanilama?.dogrulamaAltKodu, "KAYNAK_KANITI");
+            assert.equal(hata.tanilama?.kaynakKanitiAltNedeni, "EKSIK_KANIT_REFERANSI");
+            assert.equal(hata.tanilama?.onarimAdayiTukendiMi, true);
+            assert.equal(hata.tanilama?.onarimDenemeSayisi, 1);
+            assert.equal(hata.tanilama?.apiCagriSayisi, 2);
+            assert.equal(hata.tanilama?.partiKucultmeSayisi, 0);
+            return true;
+        }
+    );
+    assert.equal(uretici.istekler.length, 2);
+});
+
 test("farklı partilerdeki geçersiz soruların her biri kendi sınırlı bütçesiyle onarılır", async () => {
     const uretici = mockUretici({
         donustur(soru, { cagri, sira }) {
-            if ((cagri === 1 && sira === 3) || (cagri === 3 && sira === 12)) {
+            if ((cagri === 1 && sira === 3) || (cagri === 3 && sira === 8)) {
                 return {
                     ...soru,
                     kaynakReferanslari: ["K99"],
@@ -563,7 +1106,7 @@ test("farklı partilerdeki geçersiz soruların her biri kendi sınırlı bütç
     });
     const sonuc = await uret(20, uretici, { maksimumOnarimDenemesi: 1 });
     assert.equal(sonuc.sorular.length, 20);
-    assert.equal(uretici.istekler.length, 4);
+    assert.equal(uretici.istekler.length, 6);
     assert.match(uretici.istekler[1].contents, /ONARIM_BAGLAMI/);
     assert.match(uretici.istekler[3].contents, /ONARIM_BAGLAMI/);
 });
@@ -583,11 +1126,14 @@ test("onarım deneme sınırı sonsuz döngüyü ve eksik test kaydını engelle
         (hata) => {
             assert.equal(hata.kod, "GEMINI_GECERSIZ_TEST_YANITI");
             assert.equal(hata.tanilama?.onarimDenemeSayisi, 2);
-            assert.equal(hata.tanilama?.apiCagriSayisi, 3);
+            assert.equal(hata.tanilama?.apiCagriSayisi, 4);
+            assert.equal(hata.tanilama?.onarimButcesiTukendiMi, true);
+            assert.equal(hata.tanilama?.partiKucultmeSayisi, 1);
+            assert.equal(hata.tanilama?.kurtarmaDerinligi, 1);
             return true;
         }
     );
-    assert.equal(uretici.istekler.length, 3);
+    assert.equal(uretici.istekler.length, 4);
 });
 
 test("503 geçici hatası exponential backoff ile bir kez yeniden denenir", async () => {
@@ -622,4 +1168,50 @@ test("503 geçici hatası exponential backoff ile bir kez yeniden denenir", asyn
     assert.equal(sonuc.sorular.length, 5);
     assert.equal(cagrilar, 2);
     assert.deepEqual(beklemeler, [400]);
+});
+
+test("sonraki partideki 503 yalnızca o SDK çağrısını yeniden dener", async () => {
+    const yanitla = siraliGecerliYanitOlustur();
+    const istekler = [];
+    let sdkCagrisi = 0;
+    const istemci = {
+        models: {
+            async generateContent(istek) {
+                sdkCagrisi += 1;
+                istekler.push(istek);
+                if (sdkCagrisi === 2) {
+                    throw Object.assign(new Error("geçici"), { name: "ApiError", status: 503 });
+                }
+                return yanitla(istek);
+            },
+        },
+    };
+    const sonuc = await uret(15, { istemci, istekler }, { maxDeneme: 2 });
+
+    assert.equal(sonuc.sorular.length, 15);
+    assert.equal(sdkCagrisi, 4);
+    assert.equal(istekler.filter((istek) => planiPrompttanGetir(istek.contents).length === 5).length, 4);
+});
+
+test("test üretimi zaman aşımını 504 olarak sınırlar ve parti küçültmeyle çoğaltmaz", async () => {
+    let cagrilar = 0;
+    const istemci = {
+        models: {
+            async generateContent() {
+                cagrilar += 1;
+                return new Promise(() => {});
+            },
+        },
+    };
+
+    await assert.rejects(
+        uret(5, { istemci, istekler: [] }, { timeoutMs: 5, maxDeneme: 1 }),
+        (hata) => {
+            assert.equal(hata.status, 504);
+            assert.equal(hata.kod, "GEMINI_ZAMAN_ASIMI");
+            assert.equal(hata.tanilama?.partiKucultmeSayisi, 0);
+            return true;
+        }
+    );
+    assert.equal(cagrilar, 1);
 });
