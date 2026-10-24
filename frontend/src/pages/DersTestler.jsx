@@ -29,10 +29,15 @@ import {
     testHedefBilgisi,
     testIlerlemeBilgisi,
     testKapsamEtiketi,
+    testOlusturmaButonuDevreDisiMi,
     testOlusturmaGirdisiOlustur,
     testSonucYolu,
     testZorlukEtiketi,
 } from "../utils/testlerYardimcilari.mjs";
+import {
+    testlerIstegiGuncelMi,
+    testlerYuklemeSonucunuOlustur,
+} from "../utils/testlerYuklemeYardimcilari.mjs";
 
 const kapsamlar = [
     { deger: "tum_ders", etiket: "Tüm Ders" },
@@ -148,26 +153,44 @@ function DersTestler() {
     const [eylemdekiTestId, setEylemdekiTestId] = useState("");
     const [eylemHatasi, setEylemHatasi] = useState("");
 
-    const monteRef = useRef(true);
     const aktifDersRef = useRef(dersId);
     const olusturuluyorRef = useRef(false);
+    const sayfaControllerRef = useRef(null);
     const listeControllerRef = useRef(null);
     const olusturmaControllerRef = useRef(null);
     const eylemControllerRef = useRef(null);
     aktifDersRef.current = dersId;
 
     useEffect(() => () => {
-        monteRef.current = false;
+        sayfaControllerRef.current?.abort();
         listeControllerRef.current?.abort();
         olusturmaControllerRef.current?.abort();
         eylemControllerRef.current?.abort();
     }, []);
 
     useEffect(() => {
+        olusturmaControllerRef.current?.abort();
+        eylemControllerRef.current?.abort();
+        olusturmaControllerRef.current = null;
+        eylemControllerRef.current = null;
+        olusturuluyorRef.current = false;
+        setOlusturuluyor(false);
+        setEylemdekiTestId("");
+    }, [dersId]);
+
+    useEffect(() => {
         const controller = new AbortController();
         const istekDersId = dersId;
+        sayfaControllerRef.current?.abort();
+        sayfaControllerRef.current = controller;
         listeControllerRef.current?.abort();
-        listeControllerRef.current = controller;
+
+        const istekGuncelMi = () => testlerIstegiGuncelMi({
+            controller,
+            aktifController: sayfaControllerRef.current,
+            istekDersId,
+            aktifDersId: aktifDersRef.current,
+        });
 
         setSayfaYukleniyor(true);
         setListelerYenileniyor(false);
@@ -184,64 +207,36 @@ function DersTestler() {
         setKonuId("");
 
         const verileriGetir = async () => {
-            const sonuclar = await Promise.allSettled([
-                testlerApi.materyalleriGetir(istekDersId, controller.signal),
-                testlerApi.konuHaritasiniGetir(istekDersId, controller.signal),
-                testlerApi.devamEdenTestleriGetir(istekDersId, controller.signal),
-                testlerApi.tamamlananTestleriGetir(istekDersId, controller.signal),
-            ]);
-            if (
-                controller.signal.aborted ||
-                !monteRef.current ||
-                aktifDersRef.current !== istekDersId
-            ) return;
+            try {
+                const sonuclar = await Promise.allSettled([
+                    testlerApi.materyalleriGetir(istekDersId, controller.signal),
+                    testlerApi.konuHaritasiniGetir(istekDersId, controller.signal),
+                    testlerApi.devamEdenTestleriGetir(istekDersId, controller.signal),
+                    testlerApi.tamamlananTestleriGetir(istekDersId, controller.signal),
+                ]);
+                if (!istekGuncelMi()) return;
 
-            const [materyalSonucu, konuSonucu, devamSonucu, tamamlananSonucu] = sonuclar;
-            if (materyalSonucu.status === "fulfilled") {
-                setMateryaller(materyalSonucu.value.data?.materyaller || []);
-            } else if (!istekIptalEdildiMi(materyalSonucu.reason)) {
-                setSecenekHatalari((mevcut) => ({
-                    ...mevcut,
-                    materyal: kullaniciHataMesaji(
-                        materyalSonucu.reason,
-                        "Materyaller yüklenemedi."
-                    ),
-                }));
+                const yuklemeSonucu = testlerYuklemeSonucunuOlustur(sonuclar, {
+                    istekIptalEdildiMi,
+                    hataMesajiOlustur: kullaniciHataMesaji,
+                });
+                setMateryaller(yuklemeSonucu.materyaller);
+                setKonuHaritasi(yuklemeSonucu.konuHaritasi);
+                setDevamEdenTestler(yuklemeSonucu.devamEdenTestler);
+                setTamamlananTestler(yuklemeSonucu.tamamlananTestler);
+                setSecenekHatalari(yuklemeSonucu.secenekHatalari);
+                setListeHatalari(yuklemeSonucu.listeHatalari);
+            } catch (hata) {
+                if (!istekGuncelMi() || istekIptalEdildiMi(hata)) return;
+                const mesaj = kullaniciHataMesaji(
+                    hata,
+                    "Test verileri yüklenemedi. Lütfen tekrar deneyin."
+                );
+                setSecenekHatalari({ materyal: mesaj, konu: mesaj });
+                setListeHatalari({ devam: mesaj, tamamlanan: mesaj });
+            } finally {
+                if (istekGuncelMi()) setSayfaYukleniyor(false);
             }
-
-            if (konuSonucu.status === "fulfilled") {
-                setKonuHaritasi(konuSonucu.value.data?.harita || null);
-            } else if (!istekIptalEdildiMi(konuSonucu.reason)) {
-                setSecenekHatalari((mevcut) => ({
-                    ...mevcut,
-                    konu: kullaniciHataMesaji(konuSonucu.reason, "Konular yüklenemedi."),
-                }));
-            }
-
-            if (devamSonucu.status === "fulfilled") {
-                setDevamEdenTestler(devamSonucu.value.data?.testler || []);
-            } else if (!istekIptalEdildiMi(devamSonucu.reason)) {
-                setListeHatalari((mevcut) => ({
-                    ...mevcut,
-                    devam: kullaniciHataMesaji(
-                        devamSonucu.reason,
-                        "Devam eden testler yüklenemedi."
-                    ),
-                }));
-            }
-
-            if (tamamlananSonucu.status === "fulfilled") {
-                setTamamlananTestler(tamamlananSonucu.value.data?.testler || []);
-            } else if (!istekIptalEdildiMi(tamamlananSonucu.reason)) {
-                setListeHatalari((mevcut) => ({
-                    ...mevcut,
-                    tamamlanan: kullaniciHataMesaji(
-                        tamamlananSonucu.reason,
-                        "Geçmiş testler yüklenemedi."
-                    ),
-                }));
-            }
-            setSayfaYukleniyor(false);
         };
 
         void verileriGetir();
@@ -253,38 +248,49 @@ function DersTestler() {
         const controller = new AbortController();
         listeControllerRef.current?.abort();
         listeControllerRef.current = controller;
-        if (monteRef.current) {
-            setListelerYenileniyor(true);
-            setListeHatalari({ devam: "", tamamlanan: "" });
-        }
+        const istekGuncelMi = () => testlerIstegiGuncelMi({
+            controller,
+            aktifController: listeControllerRef.current,
+            istekDersId,
+            aktifDersId: aktifDersRef.current,
+        });
 
-        const [devamSonucu, tamamlananSonucu] = await Promise.allSettled([
-            testlerApi.devamEdenTestleriGetir(istekDersId, controller.signal),
-            testlerApi.tamamlananTestleriGetir(istekDersId, controller.signal),
-        ]);
-        if (
-            controller.signal.aborted ||
-            !monteRef.current ||
-            aktifDersRef.current !== istekDersId
-        ) return;
+        setListelerYenileniyor(true);
+        setListeHatalari({ devam: "", tamamlanan: "" });
 
-        if (devamSonucu.status === "fulfilled") {
-            setDevamEdenTestler(devamSonucu.value.data?.testler || []);
-        } else if (!istekIptalEdildiMi(devamSonucu.reason)) {
-            setListeHatalari((mevcut) => ({
-                ...mevcut,
-                devam: kullaniciHataMesaji(devamSonucu.reason, "Devam eden testler yenilenemedi."),
-            }));
+        try {
+            const [devamSonucu, tamamlananSonucu] = await Promise.allSettled([
+                testlerApi.devamEdenTestleriGetir(istekDersId, controller.signal),
+                testlerApi.tamamlananTestleriGetir(istekDersId, controller.signal),
+            ]);
+            if (!istekGuncelMi()) return;
+
+            if (devamSonucu.status === "fulfilled") {
+                setDevamEdenTestler(devamSonucu.value.data?.testler || []);
+            } else if (!istekIptalEdildiMi(devamSonucu.reason)) {
+                setListeHatalari((mevcut) => ({
+                    ...mevcut,
+                    devam: kullaniciHataMesaji(devamSonucu.reason, "Devam eden testler yenilenemedi."),
+                }));
+            }
+            if (tamamlananSonucu.status === "fulfilled") {
+                setTamamlananTestler(tamamlananSonucu.value.data?.testler || []);
+            } else if (!istekIptalEdildiMi(tamamlananSonucu.reason)) {
+                setListeHatalari((mevcut) => ({
+                    ...mevcut,
+                    tamamlanan: kullaniciHataMesaji(tamamlananSonucu.reason, "Geçmiş testler yenilenemedi."),
+                }));
+            }
+        } catch (hata) {
+            if (!istekGuncelMi() || istekIptalEdildiMi(hata)) return;
+            const mesaj = kullaniciHataMesaji(
+                hata,
+                "Test listeleri yenilenemedi. Lütfen tekrar deneyin."
+            );
+            setListeHatalari({ devam: mesaj, tamamlanan: mesaj });
+        } finally {
+            if (istekGuncelMi()) setListelerYenileniyor(false);
         }
-        if (tamamlananSonucu.status === "fulfilled") {
-            setTamamlananTestler(tamamlananSonucu.value.data?.testler || []);
-        } else if (!istekIptalEdildiMi(tamamlananSonucu.reason)) {
-            setListeHatalari((mevcut) => ({
-                ...mevcut,
-                tamamlanan: kullaniciHataMesaji(tamamlananSonucu.reason, "Geçmiş testler yenilenemedi."),
-            }));
-        }
-        setListelerYenileniyor(false);
     }, [dersId]);
 
     const kullanilabilirMateryaller = useMemo(
@@ -322,6 +328,11 @@ function DersTestler() {
         materyalId,
         konuId,
     }), [kapsamTuru, soruSayisi, zorluk, materyalId, konuId]);
+    const olusturmaDevreDisi = testOlusturmaButonuDevreDisiMi({
+        sayfaYukleniyor,
+        olusturuluyor,
+        olusturmaGirdisi,
+    });
 
     const secimiDegistir = (degistirici, deger) => {
         degistirici(deger);
@@ -344,6 +355,12 @@ function DersTestler() {
         const controller = new AbortController();
         olusturmaControllerRef.current?.abort();
         olusturmaControllerRef.current = controller;
+        const istekGuncelMi = () => testlerIstegiGuncelMi({
+            controller,
+            aktifController: olusturmaControllerRef.current,
+            istekDersId,
+            aktifDersId: aktifDersRef.current,
+        });
         olusturuluyorRef.current = true;
         setOlusturuluyor(true);
         setOlusturmaHatasi("");
@@ -357,27 +374,21 @@ function DersTestler() {
             );
             const yeniTest = yanit.data?.test;
             if (!yeniTest?._id) throw new Error("Test yanıtı eksik döndü.");
-            if (
-                controller.signal.aborted ||
-                !monteRef.current ||
-                aktifDersRef.current !== istekDersId
-            ) return;
+            if (!istekGuncelMi()) return;
             setOlusturulanTest(yeniTest);
             void listeleriYenile();
         } catch (hata) {
-            if (
-                !istekIptalEdildiMi(hata) &&
-                monteRef.current &&
-                aktifDersRef.current === istekDersId
-            ) {
+            if (!istekIptalEdildiMi(hata) && istekGuncelMi()) {
                 setOlusturmaHatasi(testIslemiHataMesaji(
                     hata,
                     "Test oluşturulamadı. Lütfen tekrar deneyin."
                 ));
             }
         } finally {
-            olusturuluyorRef.current = false;
-            if (monteRef.current && aktifDersRef.current === istekDersId) {
+            if (olusturmaControllerRef.current === controller) {
+                olusturuluyorRef.current = false;
+            }
+            if (istekGuncelMi()) {
                 setOlusturuluyor(false);
             }
         }
@@ -396,33 +407,31 @@ function DersTestler() {
         const controller = new AbortController();
         eylemControllerRef.current?.abort();
         eylemControllerRef.current = controller;
+        const istekGuncelMi = () => testlerIstegiGuncelMi({
+            controller,
+            aktifController: eylemControllerRef.current,
+            istekDersId,
+            aktifDersId: aktifDersRef.current,
+        });
         setEylemdekiTestId(testId);
         try {
             const yanit = await testlerApi.testiBaslat(istekDersId, testId, controller.signal);
             const baslatilanTest = yanit.data?.test;
             if (!baslatilanTest?._id) throw new Error("Test başlatma yanıtı eksik döndü.");
-            if (
-                !controller.signal.aborted &&
-                monteRef.current &&
-                aktifDersRef.current === istekDersId
-            ) {
+            if (istekGuncelMi()) {
                 navigate(testCozmeYolu(istekDersId, testId), {
                     state: { test: baslatilanTest },
                 });
             }
         } catch (hata) {
-            if (
-                !istekIptalEdildiMi(hata) &&
-                monteRef.current &&
-                aktifDersRef.current === istekDersId
-            ) {
+            if (!istekIptalEdildiMi(hata) && istekGuncelMi()) {
                 setEylemHatasi(testIslemiHataMesaji(
                     hata,
                     "Test başlatılamadı. Lütfen tekrar deneyin."
                 ));
             }
         } finally {
-            if (monteRef.current && aktifDersRef.current === istekDersId) {
+            if (istekGuncelMi()) {
                 setEylemdekiTestId("");
             }
         }
@@ -436,14 +445,19 @@ function DersTestler() {
         ? "border-[#31435F] bg-[#14213A] text-[#D7DEFF] hover:border-violet-400/60 hover:bg-[#192947]"
         : "border-[#D9DDE8] bg-white text-[#4B5563] hover:border-violet-300 hover:bg-violet-50";
 
+    const hedefHatasi = kapsamTuru === "materyal"
+        ? secenekHatalari.materyal
+        : kapsamTuru === "konu"
+            ? secenekHatalari.konu
+            : "";
     const hedefUyarisi = kapsamTuru === "materyal"
-        ? (secenekHatalari.materyal || (
+        ? (hedefHatasi || (
             !sayfaYukleniyor && kullanilabilirMateryaller.length === 0
                 ? "Test oluşturulabilecek hazır materyal bulunmuyor."
                 : ""
         ))
         : kapsamTuru === "konu"
-            ? (secenekHatalari.konu || (
+            ? (hedefHatasi || (
                 !sayfaYukleniyor && konuSecenekleri.length === 0
                     ? "Test oluşturulabilecek hazır konu bulunmuyor."
                     : ""
@@ -561,7 +575,7 @@ function DersTestler() {
                     <button
                         type="button"
                         onClick={testiOlustur}
-                        disabled={sayfaYukleniyor || olusturuluyor || !olusturmaGirdisi}
+                        disabled={olusturmaDevreDisi}
                         className="inline-flex h-[46px] items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#6555F3] to-[#8270FF] px-3 text-[12px] font-bold text-white shadow-lg shadow-indigo-950/20 transition-all hover:from-[#5948E7] hover:to-[#7461F4] disabled:cursor-not-allowed disabled:opacity-55 xl:col-span-2"
                     >
                         {olusturuluyor ? (
@@ -607,11 +621,17 @@ function DersTestler() {
                                     isDark={isDark}
                                 />
                             )}
-                            {hedefUyarisi && (
+                            {hedefHatasi ? (
+                                <div className="mt-3">
+                                    <HataBildirimi
+                                        isDark={isDark}
+                                        mesaj={hedefHatasi}
+                                        onRetry={() => setYenilemeAnahtari((deger) => deger + 1)}
+                                    />
+                                </div>
+                            ) : hedefUyarisi && (
                                 <p className={`mt-2 text-[11px] leading-5 ${
-                                    (secenekHatalari.materyal || secenekHatalari.konu)
-                                        ? "text-rose-400"
-                                        : metinIkincil
+                                    metinIkincil
                                 }`}>
                                     {hedefUyarisi}
                                 </p>

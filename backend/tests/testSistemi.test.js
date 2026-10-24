@@ -125,6 +125,8 @@ const ornekSorular = (adet, zorluk = "orta") => Array.from(
 const uretimBagimliliklari = ({
     parcalar = metinParcalari,
     geminiTestUret,
+    testTanilamaYaz,
+    korelasyonIdOlustur,
 } = {}) => {
     let kaydedilen;
     const bagimliliklar = {
@@ -178,6 +180,8 @@ const uretimBagimliliklari = ({
         })),
         semanticArama: async () => ({ sonuclar: [] }),
         kaynakButcesi: 40_000,
+        ...(testTanilamaYaz ? { testTanilamaYaz } : {}),
+        ...(korelasyonIdOlustur ? { korelasyonIdOlustur } : {}),
     };
     return { bagimliliklar, kaydiGetir: () => kaydedilen };
 };
@@ -305,6 +309,16 @@ test("tum_ders, materyal ve konu üretimleri yalnızca doğrulanmış kapsamdaki
                 String(materyalId),
                 String(ikinciMateryalId),
             ]));
+            assert.deepEqual(
+                new Map(geminiGirdisi.izinliKonuIds.map(
+                    (konu) => [konu.konuId, konu.konuTuru]
+                )),
+                new Map([
+                    ["top-veri-yapilari", "ana"],
+                    ["sub-yigin", "alt"],
+                    ["sub-kuyruk", "alt"],
+                ])
+            );
             assert.equal(
                 geminiGirdisi.konuDagilimi.reduce((toplam, konu) => toplam + konu.adet, 0),
                 5
@@ -315,6 +329,114 @@ test("tum_ders, materyal ve konu üretimleri yalnızca doğrulanmış kapsamdaki
         assert.equal(kaydiGetir().kapsamTuru, girdi.kapsamTuru);
         assert.equal(kaydiGetir().sorular.length, 5);
     }
+});
+
+test("başarısız üretim güvenli korelasyonlu metadata kaydı bırakır ve hatayı değiştirmez", async () => {
+    const kayitlar = [];
+    const asilHata = Object.assign(new Error("Güvenli genel hata mesajı"), {
+        status: 502,
+        kod: "GEMINI_GECERSIZ_TEST_YANITI",
+        tanilama: {
+            asama: "TEST_DOGRULAMA",
+            dogrulamaAltKodu: "KAYNAK_UYUMU",
+            soruIndeksi: 3,
+            geminiYanitiBos: false,
+            jsonAyristirmaSonucu: "basarili",
+            uretilenSoruSayisi: 5,
+            destekAdayiSayisi: 8,
+            kaynakKelimeSayisi: 4,
+            ortakKelimeSayisi: 1,
+            gerekenOrtakKelimeSayisi: 2,
+            kaynakReferansiSayisi: 2,
+            kaynakBasinaEnYuksekOrtakKelimeSayisi: 1,
+            farkliFizikselKaynakSayisi: 2,
+            ayniFizikselParcaTekrariVarMi: false,
+            orijinalSdkHataSinifi: "ApiError",
+            orijinalHttpDurumu: 503,
+            saglayiciHataKodu: "UNAVAILABLE",
+            agHataKodu: null,
+            hataKaynagi: "saglayici_http",
+            retryUygunMu: true,
+            retryEdildiMi: true,
+            gercekDenemeSayisi: 2,
+            maksimumDenemeSayisi: 2,
+            sdkCagriAsamasi: "models.generateContent",
+        },
+    });
+    const { bagimliliklar } = uretimBagimliliklari({
+        geminiTestUret: async () => { throw asilHata; },
+        korelasyonIdOlustur: () => "sabit-korelasyon-id",
+        testTanilamaYaz: (kayit) => kayitlar.push(kayit),
+    });
+
+    await assert.rejects(
+        testOlustur({
+            kullaniciId,
+            dersId,
+            kapsamTuru: "tum_ders",
+            soruSayisi: 5,
+            zorluk: "karisik",
+        }, bagimliliklar),
+        (hata) => hata === asilHata
+    );
+
+    assert.equal(kayitlar.length, 1);
+    assert.deepEqual(kayitlar[0], {
+        korelasyonId: "sabit-korelasyon-id",
+        kapsamTuru: "tum_ders",
+        istenenSoruSayisi: 5,
+        istenenZorluk: "karisik",
+        model: "gemini-3.5-flash-lite",
+        kaynakMateryalSayisi: 2,
+        kaynakMetinParcasiSayisi: 2,
+        konuSayisi: 2,
+        toplamKaynakKarakterSayisi: metinParcalari.reduce(
+            (toplam, parca) => toplam + parca.icerik.trim().length,
+            0
+        ),
+        asama: "TEST_DOGRULAMA",
+        dogrulamaAltKodu: "KAYNAK_UYUMU",
+        soruIndeksi: 3,
+        geminiYanitiBos: false,
+        jsonAyristirmaSonucu: "basarili",
+        uretilenSoruSayisi: 5,
+        destekAdayiSayisi: 8,
+        kaynakKelimeSayisi: 4,
+        ortakKelimeSayisi: 1,
+        gerekenOrtakKelimeSayisi: 2,
+        kaynakReferansiSayisi: 2,
+        kaynakBasinaEnYuksekOrtakKelimeSayisi: 1,
+        farkliFizikselKaynakSayisi: 2,
+        ayniFizikselParcaTekrariVarMi: false,
+        orijinalSdkHataSinifi: "ApiError",
+        orijinalHttpDurumu: 503,
+        saglayiciHataKodu: "UNAVAILABLE",
+        agHataKodu: null,
+        hataKaynagi: "saglayici_http",
+        retryUygunMu: true,
+        retryEdildiMi: true,
+        gercekDenemeSayisi: 2,
+        maksimumDenemeSayisi: 2,
+        sdkCagriAsamasi: "models.generateContent",
+        httpDurumu: 502,
+        uygulamaHataKodu: "GEMINI_GECERSIZ_TEST_YANITI",
+    });
+});
+
+test("başarılı test üretimi ayrıntılı hata tanılaması yazmaz", async () => {
+    const kayitlar = [];
+    const { bagimliliklar } = uretimBagimliliklari({
+        testTanilamaYaz: (kayit) => kayitlar.push(kayit),
+    });
+    await testOlustur({
+        kullaniciId,
+        dersId,
+        kapsamTuru: "materyal",
+        materyalId,
+        soruSayisi: 5,
+        zorluk: "orta",
+    }, bagimliliklar);
+    assert.deepEqual(kayitlar, []);
 });
 
 test("konu kapsamı mevcut semantik aramayı konu materyalleriyle sınırlar", async () => {

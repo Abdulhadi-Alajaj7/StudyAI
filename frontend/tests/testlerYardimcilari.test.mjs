@@ -10,18 +10,34 @@ import {
     testCozmeYolu,
     testHedefBilgisi,
     testIlerlemeBilgisi,
+    testOlusturmaButonuDevreDisiMi,
     testOlusturmaGirdisiOlustur,
     testSonucYolu,
 } from "../src/utils/testlerYardimcilari.mjs";
 
 test("test oluşturma girdisi yalnızca seçilen kapsama ait kimliği taşır", () => {
-    assert.deepEqual(testOlusturmaGirdisiOlustur({
+    const tumDersGirdisi = testOlusturmaGirdisiOlustur({
         kapsamTuru: "tum_ders",
         soruSayisi: 10,
         zorluk: "karisik",
         materyalId: "m1",
         konuId: "k1",
-    }), { kapsamTuru: "tum_ders", soruSayisi: 10, zorluk: "karisik" });
+    });
+    assert.deepEqual(tumDersGirdisi, {
+        kapsamTuru: "tum_ders",
+        soruSayisi: 10,
+        zorluk: "karisik",
+    });
+    assert.equal(testOlusturmaButonuDevreDisiMi({
+        sayfaYukleniyor: false,
+        olusturuluyor: false,
+        olusturmaGirdisi: tumDersGirdisi,
+    }), false);
+    assert.equal(testOlusturmaButonuDevreDisiMi({
+        sayfaYukleniyor: true,
+        olusturuluyor: false,
+        olusturmaGirdisi: tumDersGirdisi,
+    }), true);
     assert.deepEqual(testOlusturmaGirdisiOlustur({
         kapsamTuru: "materyal",
         soruSayisi: 5,

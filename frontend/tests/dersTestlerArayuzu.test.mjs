@@ -22,14 +22,30 @@ const sonucKaynagi = await readFile(
 test("test formu hedef seçimini kapsama göre açar ve geçersiz girdide oluşturmayı kapatır", () => {
     assert.match(sayfaKaynagi, /kapsamTuru === "materyal" \|\| kapsamTuru === "konu"/);
     assert.match(sayfaKaynagi, /kapsamTuru === "materyal" \? \(/);
-    assert.match(sayfaKaynagi, /disabled=\{sayfaYukleniyor \|\| olusturuluyor \|\| !olusturmaGirdisi\}/);
+    assert.match(sayfaKaynagi, /testOlusturmaButonuDevreDisiMi/);
+    assert.match(sayfaKaynagi, /disabled=\{olusturmaDevreDisi\}/);
 });
 
 test("çift oluşturma ve eski ders yanıtları senkron kilit ve ders kimliğiyle engellenir", () => {
     assert.match(sayfaKaynagi, /olusturuluyorRef\.current/);
     assert.match(sayfaKaynagi, /Promise\.allSettled/);
-    assert.match(sayfaKaynagi, /aktifDersRef\.current !== istekDersId/);
+    assert.match(sayfaKaynagi, /testlerIstegiGuncelMi/);
+    assert.match(sayfaKaynagi, /aktifDersId: aktifDersRef\.current/);
     assert.match(sayfaKaynagi, /controller\.abort\(\)/);
+});
+
+test("StrictMode tekrar kurulumu kalıcı monte bayrağına bağlı değildir ve yükleme finally ile kapanır", () => {
+    assert.doesNotMatch(sayfaKaynagi, /monteRef/);
+    assert.match(sayfaKaynagi, /sayfaControllerRef\.current = controller/);
+    assert.match(sayfaKaynagi, /finally \{\s*if \(istekGuncelMi\(\)\) setSayfaYukleniyor\(false\);/);
+});
+
+test("liste hataları skeleton yerine yeniden deneme eylemiyle gösterilir", () => {
+    assert.match(sayfaKaynagi, /listeHatalari\.devam \? \(/);
+    assert.match(sayfaKaynagi, /listeHatalari\.tamamlanan \? \(/);
+    assert.match(sayfaKaynagi, /onRetry=\{\(\) => setYenilemeAnahtari/);
+    assert.match(sayfaKaynagi, /Devam eden test bulunmuyor/);
+    assert.match(sayfaKaynagi, /Henüz tamamlanmış test yok/);
 });
 
 test("çözme ve sonuç yolları gerçek ekranlara bağlanır", () => {

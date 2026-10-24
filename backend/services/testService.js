@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import Ders from "../models/Ders.js";
 import Materyal from "../models/Materyal.js";
 import MetinParcasi from "../models/MetinParcasi.js";
@@ -9,6 +10,7 @@ import {
     geminiIleTestSorulariUret,
     VARSAYILAN_GEMINI_MODELI,
 } from "./geminiService.js";
+import { testTanilamaKaydiYaz } from "./testTanilamaService.js";
 
 const VARSAYILAN_KAYNAK_BUTCESI = 160_000;
 const MINIMUM_SORU_BASI_KARAKTER = 80;
@@ -58,6 +60,8 @@ const bagimliliklariGetir = (bagimliliklar = {}) => ({
     geminiTestUret: bagimliliklar.geminiTestUret || geminiIleTestSorulariUret,
     kaynakButcesi: bagimliliklar.kaynakButcesi || kaynakButcesiGetir(),
     simdi: bagimliliklar.simdi || (() => new Date()),
+    korelasyonIdOlustur: bagimliliklar.korelasyonIdOlustur || randomUUID,
+    testTanilamaYaz: bagimliliklar.testTanilamaYaz || testTanilamaKaydiYaz,
 });
 
 const dersBulunamadiHatasi = () => new TestSistemiHatasi(
@@ -103,12 +107,14 @@ const konulariDuzlestir = (harita) => (harita?.anaKonular || []).flatMap((anaKon
     const ana = {
         konuId: anaKonu.konuId,
         baslik: anaKonu.baslik,
+        konuTuru: "ana",
         sorgu: [anaKonu.baslik, anaKonu.aciklama].filter(Boolean).join(" "),
         kaynakMateryalIds: anaKaynaklar,
     };
     const altlar = (anaKonu.altKonular || []).map((altKonu) => ({
         konuId: altKonu.konuId,
         baslik: altKonu.baslik,
+        konuTuru: "alt",
         sorgu: [
             anaKonu.baslik,
             anaKonu.aciklama,
@@ -477,7 +483,11 @@ const kaynaklariHazirla = async ({
         materyaller,
         kaynaklar: kaynakKayitlariniOlustur(benzersizParcaKonulari, materyaller),
         konuDagilimi,
-        izinliKonuIds: tumKonular.map(({ konuId, baslik }) => ({ konuId, baslik })),
+        izinliKonuIds: tumKonular.map(({ konuId, baslik, konuTuru }) => ({
+            konuId,
+            baslik,
+            konuTuru,
+        })),
         kaynakSurumleri: materyaller.map((materyal) => ({
             materyalId: materyal._id,
             aktifIslemeId: materyal.aktifIslemeId,
@@ -523,60 +533,106 @@ export const testOlustur = async ({
     zorluk = "karisik",
 }, bagimliliklar = {}) => {
     const deps = bagimliliklariGetir(bagimliliklar);
-    const ders = await dersiGetir({ kullaniciId, dersId }, deps.DersModel);
-    const hedef = await hedefiDogrula({
-        kullaniciId,
-        dersId,
+    const tanilama = {
+        korelasyonId: deps.korelasyonIdOlustur(),
         kapsamTuru,
-        materyalId,
-        konuId,
-    }, deps);
-    const kaynakVerisi = await kaynaklariHazirla({
-        kullaniciId,
-        dersId,
-        kapsamTuru,
-        hedef,
-        soruSayisi,
-    }, deps);
-    const zorlukDagilimi = zorlukDagiliminiOlustur(zorluk, soruSayisi);
-    const geminiSonucu = await deps.geminiTestUret({
-        dersBilgisi: { dersAdi: ders.dersAdi, aciklama: ders.aciklama },
-        kapsamTuru,
-        hedefBasligi: hedef.materyal
-            ? (hedef.materyal.orijinalDosyaAdi || hedef.materyal.dosyaAdi)
-            : (hedef.konu?.baslik || ders.dersAdi),
-        soruSayisi,
-        zorlukDagilimi,
-        konuDagilimi: kaynakVerisi.konuDagilimi,
-        kaynaklar: kaynakVerisi.kaynaklar,
-        izinliKonuIds: kaynakVerisi.izinliKonuIds,
-    });
+        istenenSoruSayisi: soruSayisi,
+        istenenZorluk: zorluk,
+        model: process.env.GEMINI_TEST_MODELI || VARSAYILAN_GEMINI_MODELI,
+    };
+    let asama = "DERS_DOGRULAMA";
 
-    await kaynakSurumleriniDogrula({
-        kullaniciId,
-        dersId,
-        kapsamTuru,
-        hedef,
-        kaynakSurumleri: kaynakVerisi.kaynakSurumleri,
-    }, deps);
+    try {
+        const ders = await dersiGetir({ kullaniciId, dersId }, deps.DersModel);
+        asama = "HEDEF_DOGRULAMA";
+        const hedef = await hedefiDogrula({
+            kullaniciId,
+            dersId,
+            kapsamTuru,
+            materyalId,
+            konuId,
+        }, deps);
+        asama = "KAYNAK_HAZIRLAMA";
+        const kaynakVerisi = await kaynaklariHazirla({
+            kullaniciId,
+            dersId,
+            kapsamTuru,
+            hedef,
+            soruSayisi,
+        }, deps);
+        Object.assign(tanilama, {
+            kaynakMateryalSayisi: kaynakVerisi.materyaller.length,
+            kaynakMetinParcasiSayisi: kaynakVerisi.kaynaklar.length,
+            konuSayisi: new Set(
+                kaynakVerisi.kaynaklar.map((kaynak) => String(kaynak.konuId || ""))
+                    .filter(Boolean)
+            ).size,
+            toplamKaynakKarakterSayisi: kaynakVerisi.kaynaklar.reduce(
+                (toplam, kaynak) => toplam + String(kaynak.icerik || "").length,
+                0
+            ),
+        });
+        const zorlukDagilimi = zorlukDagiliminiOlustur(zorluk, soruSayisi);
+        asama = "GEMINI_URETIMI";
+        const geminiSonucu = await deps.geminiTestUret({
+            dersBilgisi: { dersAdi: ders.dersAdi, aciklama: ders.aciklama },
+            kapsamTuru,
+            hedefBasligi: hedef.materyal
+                ? (hedef.materyal.orijinalDosyaAdi || hedef.materyal.dosyaAdi)
+                : (hedef.konu?.baslik || ders.dersAdi),
+            soruSayisi,
+            zorlukDagilimi,
+            konuDagilimi: kaynakVerisi.konuDagilimi,
+            kaynaklar: kaynakVerisi.kaynaklar,
+            izinliKonuIds: kaynakVerisi.izinliKonuIds,
+        });
 
-    const testBelgesi = await deps.TestModel.create({
-        kullaniciId,
-        dersId,
-        kapsamTuru,
-        materyalId: kapsamTuru === "materyal" ? materyalId : null,
-        konuId: kapsamTuru === "konu" ? konuId : "",
-        konuBasligi: hedef.konu?.baslik || "",
-        soruSayisi,
-        zorluk,
-        sorular: geminiSonucu.sorular,
-        kaynakSurumleri: kaynakVerisi.kaynakSurumleri,
-        kullanilanModel: geminiSonucu.model ||
-            process.env.GEMINI_TEST_MODELI ||
-            VARSAYILAN_GEMINI_MODELI,
-        durum: "hazirlandi",
-    });
-    return belgeyiNesneyeCevir(testBelgesi);
+        asama = "KAYNAK_SURUM_DOGRULAMA";
+        await kaynakSurumleriniDogrula({
+            kullaniciId,
+            dersId,
+            kapsamTuru,
+            hedef,
+            kaynakSurumleri: kaynakVerisi.kaynakSurumleri,
+        }, deps);
+
+        asama = "TEST_KAYDI";
+        const testBelgesi = await deps.TestModel.create({
+            kullaniciId,
+            dersId,
+            kapsamTuru,
+            materyalId: kapsamTuru === "materyal" ? materyalId : null,
+            konuId: kapsamTuru === "konu" ? konuId : "",
+            konuBasligi: hedef.konu?.baslik || "",
+            soruSayisi,
+            zorluk,
+            sorular: geminiSonucu.sorular,
+            kaynakSurumleri: kaynakVerisi.kaynakSurumleri,
+            kullanilanModel: geminiSonucu.model ||
+                process.env.GEMINI_TEST_MODELI ||
+                VARSAYILAN_GEMINI_MODELI,
+            durum: "hazirlandi",
+        });
+        return belgeyiNesneyeCevir(testBelgesi);
+    } catch (hata) {
+        const dogrulamaHatasi = hata?.name === "ValidationError" || hata?.name === "CastError";
+        try {
+            deps.testTanilamaYaz({
+                ...tanilama,
+                ...hata?.tanilama,
+                asama: hata?.tanilama?.asama || asama,
+                httpDurumu: Number.isInteger(hata?.status)
+                    ? hata.status
+                    : (dogrulamaHatasi ? 400 : 500),
+                uygulamaHataKodu: typeof hata?.kod === "string"
+                    ? hata.kod
+                    : (dogrulamaHatasi ? "GECERSIZ_TEST_VERISI" : "TEST_SISTEMI_SUNUCU_HATASI"),
+            });
+        } catch {
+            // Tanılama altyapısı, asıl HTTP hata davranışını değiştirmemelidir.
+        }
+        throw hata;
+    }
 };
 
 const sahiplikFiltresi = ({ kullaniciId, dersId, testId }) => ({

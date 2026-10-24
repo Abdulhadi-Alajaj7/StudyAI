@@ -21,11 +21,17 @@ export const getGeminiClient = (httpOptions = undefined) => {
 };
 
 export class GeminiSohbetHatasi extends Error {
-    constructor(mesaj, { status = 503, kod = "GEMINI_SERVIS_HATASI", neden = null } = {}) {
+    constructor(mesaj, {
+        status = 503,
+        kod = "GEMINI_SERVIS_HATASI",
+        neden = null,
+        tanilama = null,
+    } = {}) {
         super(mesaj, neden ? { cause: neden } : undefined);
         this.name = "GeminiSohbetHatasi";
         this.status = status;
         this.kod = kod;
+        this.tanilama = tanilama;
     }
 }
 
@@ -40,21 +46,90 @@ const jsonMetniniAyikla = (hamMetin) => {
     return JSON.parse(metin);
 };
 
+const GECICI_GEMINI_HATA_KODLARI = new Set([
+    "GEMINI_ZAMAN_ASIMI",
+    "GEMINI_KOTA_ASIMI",
+    "GEMINI_GECICI_HATA",
+]);
+
+const httpDurumunuGetir = (hata) => {
+    for (const aday of [hata?.status, hata?.statusCode]) {
+        const durum = Number(aday);
+        if (Number.isInteger(durum) && durum >= 100 && durum <= 599) return durum;
+    }
+    const kod = Number(hata?.code);
+    return Number.isInteger(kod) && kod >= 100 && kod <= 599 ? kod : null;
+};
+
+const guvenliHataTanimlayicisi = (deger) => {
+    const metin = typeof deger === "number" ? String(deger) : deger;
+    return typeof metin === "string" && /^[A-Za-z][A-Za-z0-9_.-]{0,79}$/.test(metin)
+        ? metin
+        : null;
+};
+
+const saglayiciHataKodunuGetir = (hata) => {
+    const dogrudanKod = guvenliHataTanimlayicisi(hata?.error?.status);
+    if (dogrudanKod) return dogrudanKod;
+    try {
+        const govde = JSON.parse(String(hata?.message || ""));
+        return guvenliHataTanimlayicisi(govde?.error?.status);
+    } catch {
+        return null;
+    }
+};
+
+const hamGeminiHataTanilamasiniOlustur = (hata) => {
+    const metin = String(hata?.message || "").toLowerCase();
+    const orijinalHttpDurumu = httpDurumunuGetir(hata);
+    const agHataKodu = guvenliHataTanimlayicisi(hata?.cause?.code) || (
+        orijinalHttpDurumu == null
+            ? guvenliHataTanimlayicisi(hata?.code)
+            : null
+    );
+    let hataKaynagi = "bilinmiyor";
+    if (hata?.kod === "GEMINI_ZAMAN_ASIMI") {
+        hataKaynagi = "uygulama_timeout";
+    } else if (orijinalHttpDurumu != null) {
+        hataKaynagi = "saglayici_http";
+    } else if (
+        agHataKodu ||
+        metin.includes("econn") ||
+        metin.includes("network") ||
+        metin.includes("fetch failed")
+    ) {
+        hataKaynagi = "ag";
+    } else if (hata instanceof SyntaxError || metin.includes("boş yanıt")) {
+        hataKaynagi = "yanit_isleme";
+    }
+
+    return {
+        orijinalSdkHataSinifi: guvenliHataTanimlayicisi(
+            hata?.name || hata?.constructor?.name
+        ),
+        orijinalHttpDurumu,
+        saglayiciHataKodu: saglayiciHataKodunuGetir(hata),
+        agHataKodu,
+        hataKaynagi,
+        sdkCagriAsamasi: "models.generateContent",
+    };
+};
+
 const geminiHatasiniSiniflandir = (hata) => {
     if (hata instanceof GeminiSohbetHatasi) return hata;
     const metin = String(hata?.message || "").toLowerCase();
-    const durum = Number(hata?.status || hata?.statusCode || hata?.code);
+    const durum = httpDurumunuGetir(hata);
 
     if (hata?.kod === "GEMINI_ZAMAN_ASIMI" || metin.includes("timeout") || metin.includes("zaman aşımı")) {
         return new GeminiSohbetHatasi(
             "Yapay zekâ yanıtı zamanında alınamadı. Aynı isteği güvenle yeniden deneyebilirsiniz.",
-            { status: 504, kod: "GEMINI_ZAMAN_ASIMI", neden: hata }
+            { status: 504, kod: "GEMINI_ZAMAN_ASIMI", neden: hata, tanilama: hata?.tanilama }
         );
     }
     if (durum === 429 || metin.includes("429") || metin.includes("quota") || metin.includes("rate limit")) {
         return new GeminiSohbetHatasi(
             "Yapay zekâ hizmetinin kullanım sınırına ulaşıldı. Lütfen kısa süre sonra yeniden deneyin.",
-            { status: 429, kod: "GEMINI_KOTA_ASIMI", neden: hata }
+            { status: 429, kod: "GEMINI_KOTA_ASIMI", neden: hata, tanilama: hata?.tanilama }
         );
     }
     if (
@@ -66,18 +141,18 @@ const geminiHatasiniSiniflandir = (hata) => {
     ) {
         return new GeminiSohbetHatasi(
             "Yapay zekâ hizmetine geçici olarak ulaşılamıyor. Aynı isteği yeniden deneyebilirsiniz.",
-            { status: 503, kod: "GEMINI_GECICI_HATA", neden: hata }
+            { status: 503, kod: "GEMINI_GECICI_HATA", neden: hata, tanilama: hata?.tanilama }
         );
     }
     if (hata instanceof SyntaxError || metin.includes("boş yanıt")) {
         return new GeminiSohbetHatasi(
             "Yapay zekâ hizmetinden geçerli bir yanıt alınamadı. Aynı isteği yeniden deneyebilirsiniz.",
-            { status: 502, kod: "GEMINI_GECERSIZ_YANIT", neden: hata }
+            { status: 502, kod: "GEMINI_GECERSIZ_YANIT", neden: hata, tanilama: hata?.tanilama }
         );
     }
     return new GeminiSohbetHatasi(
         "Yapay zekâ yanıtı şu anda oluşturulamadı. Aynı isteği güvenle yeniden deneyebilirsiniz.",
-        { status: 503, kod: "GEMINI_SERVIS_HATASI", neden: hata }
+        { status: 503, kod: "GEMINI_SERVIS_HATASI", neden: hata, tanilama: hata?.tanilama }
     );
 };
 
@@ -123,22 +198,51 @@ const yapilandirilmisGeminiCagrisi = async ({
                 }),
                 timeoutMs
             );
+            const tokenKullanimi = {
+                girdi: response?.usageMetadata?.promptTokenCount,
+                cikti: response?.usageMetadata?.candidatesTokenCount,
+                toplam: response?.usageMetadata?.totalTokenCount,
+            };
+            const yanitMetni = String(response?.text || "").trim();
+            const sdkTanilamasi = {
+                geminiYanitiBos: !yanitMetni,
+                jsonAyristirmaSonucu: "bilinmiyor",
+                finishReason: response?.candidates?.[0]?.finishReason ?? null,
+                tokenKullanimi,
+            };
+            let veri;
+            try {
+                veri = jsonMetniniAyikla(response?.text);
+                sdkTanilamasi.jsonAyristirmaSonucu = "basarili";
+                sdkTanilamasi.uretilenSoruSayisi = Array.isArray(veri?.sorular)
+                    ? veri.sorular.length
+                    : null;
+            } catch (hata) {
+                hata.tanilama = {
+                    ...sdkTanilamasi,
+                    jsonAyristirmaSonucu: "basarisiz",
+                    asama: "JSON_AYRISTIRMA",
+                    dogrulamaAltKodu: !yanitMetni ? "BOS_YANIT" : "JSON_PARSE",
+                };
+                throw hata;
+            }
             return {
-                veri: jsonMetniniAyikla(response?.text),
-                tokenKullanimi: {
-                    girdi: response?.usageMetadata?.promptTokenCount,
-                    cikti: response?.usageMetadata?.candidatesTokenCount,
-                    toplam: response?.usageMetadata?.totalTokenCount,
-                },
+                veri,
+                tokenKullanimi,
+                tanilama: sdkTanilamasi,
             };
         } catch (hata) {
             sonHata = geminiHatasiniSiniflandir(hata);
-            const gecici = [
-                "GEMINI_ZAMAN_ASIMI",
-                "GEMINI_KOTA_ASIMI",
-                "GEMINI_GECICI_HATA",
-            ].includes(sonHata.kod);
-            if (!gecici || deneme === maxDeneme) break;
+            const retryUygunMu = GECICI_GEMINI_HATA_KODLARI.has(sonHata.kod);
+            sonHata.tanilama = {
+                ...sonHata.tanilama,
+                ...hamGeminiHataTanilamasiniOlustur(hata),
+                retryUygunMu,
+                retryEdildiMi: deneme > 1,
+                gercekDenemeSayisi: deneme,
+                maksimumDenemeSayisi: maxDeneme,
+            };
+            if (!retryUygunMu || deneme === maxDeneme) break;
             await bekle(250 * deneme);
         }
     }
@@ -412,9 +516,24 @@ const jaccardBenzerligi = (solMetin, sagMetin) => {
     return ortak / (sol.size + sag.size - ortak);
 };
 
-const gecersizTestYaniti = () => new GeminiSohbetHatasi(
+const gecersizTestYaniti = ({
+    altKod = "DIGER",
+    soruIndeksi = null,
+    uretilenSoruSayisi = null,
+    ekTanilama = {},
+} = {}) => new GeminiSohbetHatasi(
     "Yapay zekâ hizmetinden doğrulanabilir ve geçerli test soruları alınamadı. Aynı isteği yeniden deneyebilirsiniz.",
-    { status: 502, kod: "GEMINI_GECERSIZ_TEST_YANITI" }
+    {
+        status: 502,
+        kod: "GEMINI_GECERSIZ_TEST_YANITI",
+        tanilama: {
+            asama: "TEST_DOGRULAMA",
+            dogrulamaAltKodu: altKod,
+            soruIndeksi,
+            uretilenSoruSayisi,
+            ...ekTanilama,
+        },
+    }
 );
 
 /**
@@ -430,15 +549,30 @@ export const testSorulariniDogrula = (veri, {
     kaynaklar,
     izinliKonuIds = [],
 } = {}) => {
+    const uretilenSoruSayisi = Array.isArray(veri?.sorular) ? veri.sorular.length : null;
+    const gecersiz = (altKod, soruIndeksi = null, ekTanilama = {}) => gecersizTestYaniti({
+        altKod,
+        soruIndeksi,
+        uretilenSoruSayisi,
+        ekTanilama,
+    });
     if (!Array.isArray(veri?.sorular) || veri.sorular.length !== soruSayisi) {
-        throw gecersizTestYaniti();
+        throw gecersiz("SORU_SAYISI");
     }
 
     const kaynakHaritasi = new Map(
         (kaynaklar || []).map((kaynak) => [String(kaynak.anahtar), kaynak])
     );
     const konuHaritasi = new Map(
-        (izinliKonuIds || []).map((konu) => [String(konu.konuId), konu.baslik || ""])
+        (izinliKonuIds || []).map((konu) => [String(konu.konuId), {
+            baslik: konu.baslik || "",
+            konuTuru: ["ana", "alt"].includes(konu.konuTuru)
+                ? konu.konuTuru
+                : "bilinmiyor",
+        }])
+    );
+    const dagitimKonuKimlikleri = new Set(
+        (konuDagilimi || []).map((konu) => String(konu.konuId))
     );
     const beklenenZorluklar = new Map(
         Object.entries(zorlukDagilimi || {}).map(([zorluk, adet]) => [zorluk, adet])
@@ -447,18 +581,21 @@ export const testSorulariniDogrula = (veri, {
     const gercekKonuDagilimi = new Map();
     const gorulenSorular = [];
 
-    const sorular = veri.sorular.map((hamSoru) => {
+    const sorular = veri.sorular.map((hamSoru, soruIndeksi) => {
         const metin = testMetniniTemizle(hamSoru?.metin, 4_000);
         const aciklama = testMetniniTemizle(hamSoru?.aciklama, 6_000);
         const zorluk = testMetniniTemizle(hamSoru?.zorluk, 20);
         const dogruCevap = testMetniniTemizle(hamSoru?.dogruCevap, 1).toUpperCase();
-        if (!metin || !aciklama || !beklenenZorluklar.has(zorluk)) {
-            throw gecersizTestYaniti();
+        if (!metin || !aciklama) throw gecersiz("EKSIK_ALAN", soruIndeksi);
+        if (!beklenenZorluklar.has(zorluk)) {
+            throw gecersiz("ZORLUK_DAGILIMI", soruIndeksi);
         }
-        if (!TEST_SECENEKLERI.includes(dogruCevap)) throw gecersizTestYaniti();
+        if (!TEST_SECENEKLERI.includes(dogruCevap)) {
+            throw gecersiz("DOGRU_CEVAP", soruIndeksi);
+        }
 
         if (!Array.isArray(hamSoru?.secenekler) || hamSoru.secenekler.length !== 4) {
-            throw gecersizTestYaniti();
+            throw gecersiz("SECENEK_FORMATI", soruIndeksi);
         }
         const secenekler = hamSoru.secenekler.map((hamSecenek) => ({
             anahtar: testMetniniTemizle(hamSecenek?.anahtar, 1).toUpperCase(),
@@ -469,7 +606,7 @@ export const testSorulariniDogrula = (veri, {
             secenekler.map((secenek) => secenek.anahtar).join("") !== "ABCD" ||
             new Set(secenekler.map((secenek) => testMetniniNormalizeEt(secenek.metin))).size !== 4
         ) {
-            throw gecersizTestYaniti();
+            throw gecersiz("SECENEK_FORMATI", soruIndeksi);
         }
 
         const kaynakAnahtarlari = [...new Set(
@@ -482,7 +619,7 @@ export const testSorulariniDogrula = (veri, {
             kaynakAnahtarlari.length === 0 ||
             kaynakAnahtarlari.some((anahtar) => !kaynakHaritasi.has(anahtar))
         ) {
-            throw gecersizTestYaniti();
+            throw gecersiz("KAYNAK_REFERANSI", soruIndeksi);
         }
 
         const secilenKaynaklar = kaynakAnahtarlari.map(
@@ -500,22 +637,103 @@ export const testSorulariniDogrula = (veri, {
         const ortakKelimeSayisi = [...destekAdaylari].filter(
             (kelime) => kaynakKelimeKumesi.has(kelime)
         ).length;
+        const gerekenOrtakKelimeSayisi = Math.min(2, destekAdaylari.size);
         if (
             destekAdaylari.size === 0 ||
-            ortakKelimeSayisi < Math.min(2, destekAdaylari.size)
+            ortakKelimeSayisi < gerekenOrtakKelimeSayisi
         ) {
-            throw gecersizTestYaniti();
+            const kaynakBasinaOrtakKelimeSayilari = secilenKaynaklar.map((kaynak) => {
+                const kaynakKelimeleri = kelimeKumesi(kaynak.icerik);
+                return [...destekAdaylari].filter(
+                    (kelime) => kaynakKelimeleri.has(kelime)
+                ).length;
+            });
+            const fizikselKaynakAnahtarlari = secilenKaynaklar.map((kaynak) => {
+                const materyalKimligi = kaynak?.materyalId == null
+                    ? ""
+                    : String(kaynak.materyalId).trim();
+                return materyalKimligi && Number.isInteger(kaynak?.parcaIndex)
+                    ? `${materyalKimligi}:${kaynak.parcaIndex}`
+                    : null;
+            });
+            const fizikselKaynaklarHesaplanabilirMi = fizikselKaynakAnahtarlari.every(Boolean);
+            const farkliFizikselKaynakSayisi = fizikselKaynaklarHesaplanabilirMi
+                ? new Set(fizikselKaynakAnahtarlari).size
+                : null;
+            throw gecersiz("KAYNAK_UYUMU", soruIndeksi, {
+                destekAdayiSayisi: destekAdaylari.size,
+                kaynakKelimeSayisi: kaynakKelimeKumesi.size,
+                ortakKelimeSayisi,
+                gerekenOrtakKelimeSayisi,
+                kaynakReferansiSayisi: kaynakAnahtarlari.length,
+                kaynakBasinaEnYuksekOrtakKelimeSayisi:
+                    kaynakBasinaOrtakKelimeSayilari.length > 0
+                        ? Math.max(...kaynakBasinaOrtakKelimeSayilari)
+                        : null,
+                farkliFizikselKaynakSayisi,
+                ayniFizikselParcaTekrariVarMi: fizikselKaynaklarHesaplanabilirMi
+                    ? farkliFizikselKaynakSayisi < secilenKaynaklar.length
+                    : null,
+            });
         }
 
         const konuId = testMetniniTemizle(hamSoru?.konuId, 200);
-        if (konuId && !konuHaritasi.has(konuId)) throw gecersizTestYaniti();
+        const kaynakKonuKimlikleri = secilenKaynaklar
+            .map((kaynak) => kaynak.konuId ? String(kaynak.konuId) : "")
+            .filter(Boolean);
+        const fizikselParcaKonuHaritasi = new Map();
+        let fizikselParcaKimligiEksik = false;
+        for (const kaynak of secilenKaynaklar) {
+            if (kaynak.materyalId == null || !Number.isInteger(kaynak.parcaIndex)) {
+                fizikselParcaKimligiEksik = true;
+                continue;
+            }
+            const fizikselAnahtar = `${String(kaynak.materyalId)}:${kaynak.parcaIndex}`;
+            if (!fizikselParcaKonuHaritasi.has(fizikselAnahtar)) {
+                fizikselParcaKonuHaritasi.set(fizikselAnahtar, new Set());
+            }
+            if (kaynak.konuId) {
+                fizikselParcaKonuHaritasi.get(fizikselAnahtar).add(String(kaynak.konuId));
+            }
+        }
+        const konuTanilamasi = (izinliMi) => ({
+            konuKimligiIzinliMi: izinliMi,
+            konuKimligiDagitimdaMi: dagitimKonuKimlikleri.has(konuId),
+            konuKimligiTuru: izinliMi
+                ? (konuHaritasi.get(konuId)?.konuTuru || "bilinmiyor")
+                : "bilinmiyor",
+            kaynakReferansiSayisi: kaynakAnahtarlari.length,
+            eslesenKaynakKonuSayisi: kaynakKonuKimlikleri.filter(
+                (kaynakKonuId) => kaynakKonuId === konuId
+            ).length,
+            uyusmayanKaynakKonuSayisi: kaynakKonuKimlikleri.filter(
+                (kaynakKonuId) => kaynakKonuId !== konuId
+            ).length,
+            farkliKaynakKonuSayisi: new Set(kaynakKonuKimlikleri).size,
+            ayniFizikselParcaFarkliKonuEtiketiVarMi: fizikselParcaKimligiEksik
+                ? null
+                : [...fizikselParcaKonuHaritasi.values()].some(
+                    (konuKimlikleri) => konuKimlikleri.size > 1
+                ),
+        });
+        if (konuId && !konuHaritasi.has(konuId)) {
+            throw gecersiz(
+                "BILINMEYEN_KONU_KIMLIGI",
+                soruIndeksi,
+                konuTanilamasi(false)
+            );
+        }
         if (
             konuId &&
             secilenKaynaklar.some((kaynak) => (
                 kaynak.konuId && String(kaynak.konuId) !== konuId
             ))
         ) {
-            throw gecersizTestYaniti();
+            throw gecersiz(
+                "KAYNAK_KONU_UYUSMAZLIGI",
+                soruIndeksi,
+                konuTanilamasi(true)
+            );
         }
         gercekKonuDagilimi.set(konuId, (gercekKonuDagilimi.get(konuId) || 0) + 1);
 
@@ -526,7 +744,7 @@ export const testSorulariniDogrula = (veri, {
                 onceki === normalizeSoru || jaccardBenzerligi(onceki, normalizeSoru) >= 0.8
             ))
         ) {
-            throw gecersizTestYaniti();
+            throw gecersiz("TEKRARLAYAN_SORU", soruIndeksi);
         }
         gorulenSorular.push(normalizeSoru);
         gercekZorluklar.set(zorluk, (gercekZorluklar.get(zorluk) || 0) + 1);
@@ -553,7 +771,7 @@ export const testSorulariniDogrula = (veri, {
             aciklama,
             zorluk,
             konuId,
-            konuBasligi: konuId ? konuHaritasi.get(konuId) : "",
+            konuBasligi: konuId ? konuHaritasi.get(konuId)?.baslik : "",
             kaynaklar: [...materyalKaynaklari.values()].map((kaynak) => ({
                 ...kaynak,
                 parcaIndeksleri: [...new Set(kaynak.parcaIndeksleri)].sort(
@@ -567,19 +785,19 @@ export const testSorulariniDogrula = (veri, {
 
     for (const [zorluk, beklenenAdet] of beklenenZorluklar) {
         if ((gercekZorluklar.get(zorluk) || 0) !== beklenenAdet) {
-            throw gecersizTestYaniti();
+            throw gecersiz("ZORLUK_DAGILIMI");
         }
     }
     for (const konu of konuDagilimi) {
         if ((gercekKonuDagilimi.get(String(konu.konuId)) || 0) !== konu.adet) {
-            throw gecersizTestYaniti();
+            throw gecersiz("KONU_DAGILIMI");
         }
     }
     if (
         konuDagilimi.length > 0 &&
         (gercekKonuDagilimi.get("") || 0) > 0
     ) {
-        throw gecersizTestYaniti();
+        throw gecersiz("KONU_DAGILIMI");
     }
     return sorular;
 };
@@ -624,7 +842,7 @@ Konu dağılımı: ${JSON.stringify(konuDagilimi)}
 ${kaynakMetni}
 </KAYNAK_ICERIGI>`;
 
-    const { veri, tokenKullanimi } = await yapilandirilmisGeminiCagrisi({
+    const { veri, tokenKullanimi, tanilama } = await yapilandirilmisGeminiCagrisi({
         istemci,
         modelAdi,
         prompt,
@@ -635,14 +853,22 @@ ${kaynakMetni}
         bekle: bagimliliklar.bekle || ((ms) => new Promise((resolve) => setTimeout(resolve, ms))),
     });
 
-    return {
-        sorular: testSorulariniDogrula(veri, {
+    let sorular;
+    try {
+        sorular = testSorulariniDogrula(veri, {
             soruSayisi,
             zorlukDagilimi,
             konuDagilimi,
             kaynaklar,
             izinliKonuIds,
-        }),
+        });
+    } catch (hata) {
+        hata.tanilama = { ...tanilama, ...hata.tanilama };
+        throw hata;
+    }
+
+    return {
+        sorular,
         tokenKullanimi,
         model: modelAdi,
     };

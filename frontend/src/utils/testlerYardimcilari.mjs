@@ -46,6 +46,12 @@ export const testOlusturmaGirdisiOlustur = ({
     return { kapsamTuru, soruSayisi: sayi, zorluk };
 };
 
+export const testOlusturmaButonuDevreDisiMi = ({
+    sayfaYukleniyor,
+    olusturuluyor,
+    olusturmaGirdisi,
+}) => Boolean(sayfaYukleniyor || olusturuluyor || !olusturmaGirdisi);
+
 export const testKapsamEtiketi = (kapsamTuru) => (
     kapsamEtiketleri[kapsamTuru] || "Test"
 );
