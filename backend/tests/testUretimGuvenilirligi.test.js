@@ -8,6 +8,10 @@ import {
     testUretimPlaniniOlustur,
 } from "../services/geminiService.js";
 import { zorlukDagiliminiOlustur } from "../services/testService.js";
+import {
+    TEST_URETIM_IZLEME_ETIKETI,
+    testUretimIzleyicisiOlustur,
+} from "../services/testUretimIzlemeService.js";
 
 const kanitMetni = (index) => `Kavram${index} Değer${index} ile güvenilir biçimde açıklanır.`;
 const kapsamliKaynakMetni = Array.from({ length: 120 }, (_, index) => kanitMetni(index + 1)).join(" ");
@@ -140,7 +144,14 @@ const uret = (soruSayisi, uretici, ayarlar = {}) => geminiIleTestSorulariUret({
         : {}),
     bekle: ayarlar.bekle || (async () => {}),
     rastgele: ayarlar.rastgele || (() => 0),
+    ...(ayarlar.uretimIzleyicisi
+        ? { uretimIzleyicisi: ayarlar.uretimIzleyicisi }
+        : {}),
 });
+
+const izlemeKayitlariniAyikla = (satirlar) => satirlar.map((satir) => JSON.parse(
+    satir.slice(`${TEST_URETIM_IZLEME_ETIKETI} `.length)
+));
 
 test("5/10/15/20 soruluk testler güvenilir en fazla beş soruluk partilerde üretilir", async () => {
     for (const soruSayisi of [5, 10, 15, 20]) {
@@ -710,6 +721,44 @@ test("tek geçersiz soru sınırlı onarımla değiştirilir, başarılı sorula
     assert.doesNotMatch(uretici.istekler[1].contents, /uydurma kaynak/);
 });
 
+test("terminal izleme gerçek hedefli onarımı ve onarım SDK çağrısını birer kez sayar", async () => {
+    const satirlar = [];
+    const izleyici = testUretimIzleyicisiOlustur({
+        korelasyonId: "kor-onarim",
+        kapsamTuru: "materyal",
+        soruSayisi: 5,
+        zorluk: "karisik",
+    }, {
+        logger: (satir) => satirlar.push(satir),
+        ortam: { NODE_ENV: "development" },
+    });
+    const uretici = mockUretici({
+        donustur(soru, { cagri, sira }) {
+            if (cagri === 1 && sira === 3) {
+                return { ...soru, kaynakReferanslari: ["K99"] };
+            }
+            return soru;
+        },
+    });
+
+    izleyici.baslat();
+    const sonuc = await uret(5, uretici, { uretimIzleyicisi: izleyici });
+    izleyici.tamamla({ sonuc: "basarili" });
+
+    assert.equal(sonuc.sorular.length, 5);
+    const kayitlar = izlemeKayitlariniAyikla(satirlar);
+    const onarim = kayitlar.find((kayit) => kayit.olay === "soru_onarimi");
+    assert.equal(onarim.hataNedeni, "KAYNAK_REFERANSI");
+    assert.equal(onarim.soruIndeksi, 2);
+    assert.equal(onarim.onarimDenemesi, 1);
+    const ozet = kayitlar.at(-1);
+    assert.equal(ozet.toplamSdkCagriSayisi, 2);
+    assert.equal(ozet.ilkUretimCagriSayisi, 1);
+    assert.equal(ozet.onarimCagriSayisi, 1);
+    assert.equal(ozet.toplamOnarimDenemesi, 1);
+    assert.deepEqual(ozet.tokenKullanimi, { girdi: 20, cikti: 10, toplam: 30 });
+});
+
 test("uzun ama geçerli yapılandırılmış JSON beş soruluk partide doğrulanır", async () => {
     const yanitla = siraliGecerliYanitOlustur();
     let istek;
@@ -782,6 +831,50 @@ test("eksik soru sayısı döndüren parti kalan planı kontrollü biçimde böl
     assert.equal(sonuc.sorular.length, 5);
     assert.equal(istekler.length, 3);
     assert.deepEqual(istekler.map((istek) => planiPrompttanGetir(istek.contents).length), [5, 2, 3]);
+});
+
+test("terminal izleme parti küçültmeyi ve iki gerçek kurtarma çağrısını kaydeder", async () => {
+    const satirlar = [];
+    const izleyici = testUretimIzleyicisiOlustur({
+        korelasyonId: "kor-kurtarma",
+        kapsamTuru: "tum_ders",
+        soruSayisi: 5,
+        zorluk: "kolay",
+    }, {
+        logger: (satir) => satirlar.push(satir),
+        ortam: { NODE_ENV: "development" },
+    });
+    const istekler = [];
+    const yanitla = siraliGecerliYanitOlustur();
+    const istemci = {
+        models: {
+            async generateContent(istek) {
+                istekler.push(istek);
+                const yanit = await yanitla(istek);
+                if (istekler.length === 1) {
+                    const veri = JSON.parse(yanit.text);
+                    yanit.text = JSON.stringify({ sorular: veri.sorular.slice(0, -1) });
+                }
+                return yanit;
+            },
+        },
+    };
+
+    izleyici.baslat();
+    const sonuc = await uret(5, { istemci, istekler }, { uretimIzleyicisi: izleyici });
+    izleyici.tamamla({ sonuc: "basarili" });
+
+    assert.equal(sonuc.sorular.length, 5);
+    const kayitlar = izlemeKayitlariniAyikla(satirlar);
+    const kucultme = kayitlar.find((kayit) => kayit.olay === "parti_kucultme");
+    assert.equal(kucultme.neden, "SORU_SAYISI");
+    assert.equal(kucultme.oncekiPartiBoyutu, 5);
+    assert.deepEqual(kucultme.yeniPartiBoyutlari, [2, 3]);
+    const ozet = kayitlar.at(-1);
+    assert.equal(ozet.toplamSdkCagriSayisi, 3);
+    assert.equal(ozet.ilkUretimCagriSayisi, 1);
+    assert.equal(ozet.kurtarmaCagriSayisi, 2);
+    assert.equal(ozet.sdkRetryCagriSayisi, 0);
 });
 
 test("aynı partideki iki geçersiz soru ayrı ayrı onarılır", async () => {
@@ -1168,6 +1261,59 @@ test("503 geçici hatası exponential backoff ile bir kez yeniden denenir", asyn
     assert.equal(sonuc.sorular.length, 5);
     assert.equal(cagrilar, 2);
     assert.deepEqual(beklemeler, [400]);
+});
+
+test("terminal izleme gerçek SDK retry çağrısını toplamdan ve ilk üretimden ayrı sayar", async () => {
+    const satirlar = [];
+    const izleyici = testUretimIzleyicisiOlustur({
+        korelasyonId: "kor-retry",
+        kapsamTuru: "tum_ders",
+        soruSayisi: 5,
+        zorluk: "kolay",
+    }, {
+        logger: (satir) => satirlar.push(satir),
+        ortam: { NODE_ENV: "development" },
+    });
+    const basariliUretici = mockUretici();
+    let sdkCagrisi = 0;
+    const istemci = {
+        models: {
+            async generateContent(istek) {
+                sdkCagrisi += 1;
+                if (sdkCagrisi === 1) {
+                    throw Object.assign(new Error("geçici"), { name: "ApiError", status: 503 });
+                }
+                return basariliUretici.istemci.models.generateContent(istek);
+            },
+        },
+    };
+
+    izleyici.baslat();
+    const sonuc = await geminiIleTestSorulariUret({
+        dersBilgisi: { dersAdi: "Ağlar" },
+        kapsamTuru: "tum_ders",
+        soruSayisi: 5,
+        zorlukDagilimi: { kolay: 5 },
+        kaynaklar,
+        izinliKonuIds,
+    }, {
+        istemci,
+        uretimIzleyicisi: izleyici,
+        maxDeneme: 2,
+        maksimumOnarimDenemesi: 0,
+        bekle: async () => {},
+        rastgele: () => 0,
+    });
+    izleyici.tamamla({ sonuc: "basarili" });
+
+    assert.equal(sonuc.sorular.length, 5);
+    assert.equal(sdkCagrisi, 2);
+    const ozetSatiri = satirlar.find((satir) => satir.includes("test_uretimi_tamamlandi"));
+    const ozet = JSON.parse(ozetSatiri.slice(ozetSatiri.indexOf("{") ));
+    assert.equal(ozet.toplamSdkCagriSayisi, 2);
+    assert.equal(ozet.ilkUretimCagriSayisi, 1);
+    assert.equal(ozet.sdkRetryCagriSayisi, 1);
+    assert.deepEqual(ozet.tokenKullanimi, { girdi: 10, cikti: 5, toplam: 15 });
 });
 
 test("sonraki partideki 503 yalnızca o SDK çağrısını yeniden dener", async () => {

@@ -200,6 +200,8 @@ const yapilandirilmisGeminiCagrisi = async ({
     rastgele = Math.random,
     responseJsonSchema = null,
     apiCagriButcesi = null,
+    uretimIzleyicisi = null,
+    sdkCagriBaglami = null,
 }) => {
     let sonHata;
     for (let deneme = 1; deneme <= maxDeneme; deneme += 1) {
@@ -213,6 +215,14 @@ const yapilandirilmisGeminiCagrisi = async ({
             );
         }
         if (apiCagriButcesi) apiCagriButcesi.kullanilan += 1;
+        try {
+            uretimIzleyicisi?.sdkCagrisiBasladi?.({
+                ...sdkCagriBaglami,
+                sdkDenemesi: deneme,
+            });
+        } catch {
+            // Terminal izleme, gerçek SDK çağrısını engellememelidir.
+        }
         try {
             const response = await zamanAsimliCalistir(
                 (abortSignal) => istemci.models.generateContent({
@@ -234,6 +244,11 @@ const yapilandirilmisGeminiCagrisi = async ({
                 cikti: response?.usageMetadata?.candidatesTokenCount,
                 toplam: response?.usageMetadata?.totalTokenCount,
             };
+            try {
+                uretimIzleyicisi?.sdkCagrisiTamamlandi?.({ tokenKullanimi });
+            } catch {
+                // Terminal izleme, Gemini yanıtının işlenmesini engellememelidir.
+            }
             const yanitMetni = String(response?.text || "").trim();
             const sdkTanilamasi = {
                 geminiYanitiBos: !yanitMetni,
@@ -1706,6 +1721,7 @@ export const geminiIleTestSorulariUret = async ({
     modelAdi = process.env.GEMINI_TEST_MODELI || VARSAYILAN_GEMINI_MODELI,
 }, bagimliliklar = {}) => {
     const istemci = bagimliliklar.istemci || getGeminiClient();
+    const uretimIzleyicisi = bagimliliklar.uretimIzleyicisi || null;
     const partiBoyutu = Math.min(
         TEST_AZAMI_PARTI_BOYUTU,
         Math.max(1, Number(bagimliliklar.partiBoyutu) || TEST_AZAMI_PARTI_BOYUTU)
@@ -1776,6 +1792,7 @@ export const geminiIleTestSorulariUret = async ({
         onarim,
         onarimBaglami = null,
         onarimStratejisi = null,
+        cagriBaglami = null,
     }) => {
         const prompt = testPartisiPromptunuOlustur({
             dersBilgisi,
@@ -1808,6 +1825,8 @@ export const geminiIleTestSorulariUret = async ({
                 zorluklar: plan.map((soru) => soru.zorluk),
             }),
             apiCagriButcesi,
+            uretimIzleyicisi,
+            sdkCagriBaglami: cagriBaglami,
         });
     };
 
@@ -1943,6 +1962,12 @@ export const geminiIleTestSorulariUret = async ({
                 partiKaynaklari,
                 kacinilacakSorular: oncekiSorular.map((soru) => soru.metin),
                 onarim: false,
+                cagriBaglami: {
+                    anaCagriTuru: kurtarmaDerinligi > 0 ? "kurtarma" : "uretim",
+                    partiIndeksi,
+                    partiBoyutu: partiPlani.length,
+                    kurtarmaDerinligi,
+                },
             });
         } catch (hata) {
             throw hataTanilamasiniTamamla(hata, {
@@ -2073,6 +2098,15 @@ export const geminiIleTestSorulariUret = async ({
                         onarimButceAnahtari,
                         hataBazliOnarimDenemesi
                     );
+                    try {
+                        uretimIzleyicisi?.onarimBasladi?.({
+                            hataNedeni: dogrulamaAltKodu,
+                            soruIndeksi: baslangicIndeksi + yerelSoruIndeksi,
+                            onarimDenemesi: hataBazliOnarimDenemesi,
+                        });
+                    } catch {
+                        // Terminal izleme, soru onarımını engellememelidir.
+                    }
                     const secilenKaynakAnahtarlari = secilenOnarimKaynaklari.map(
                         (kaynak) => kaynak.anahtar
                     );
@@ -2090,6 +2124,12 @@ export const geminiIleTestSorulariUret = async ({
                         kacinilacakSorular,
                         onarim: true,
                         onarimBaglami: guvenliOnarimBaglaminiOlustur(hata.tanilama),
+                        cagriBaglami: {
+                            anaCagriTuru: "onarim",
+                            partiIndeksi,
+                            partiBoyutu: 1,
+                            kurtarmaDerinligi,
+                        },
                         onarimStratejisi: {
                             deneme: hataBazliOnarimDenemesi,
                             neden: dogrulamaAltKodu,
@@ -2184,6 +2224,15 @@ export const geminiIleTestSorulariUret = async ({
             const orta = Math.floor(plan.length / 2);
             const solPlan = plan.slice(0, orta);
             const sagPlan = plan.slice(orta);
+            try {
+                uretimIzleyicisi?.partiKucultuldu?.({
+                    neden: sonKurtarmaNedeni,
+                    oncekiPartiBoyutu: plan.length,
+                    yeniPartiBoyutlari: [solPlan.length, sagPlan.length],
+                });
+            } catch {
+                // Terminal izleme, parti kurtarmasını engellememelidir.
+            }
             const solSorular = await partiyiKurtararakUret({
                 plan: solPlan,
                 partiIndeksi,

@@ -129,6 +129,7 @@ const uretimBagimliliklari = ({
     geminiTestUret,
     testTanilamaYaz,
     korelasyonIdOlustur,
+    testUretimIzleyicisiOlustur,
 } = {}) => {
     let kaydedilen;
     const bagimliliklar = {
@@ -184,6 +185,7 @@ const uretimBagimliliklari = ({
         kaynakButcesi: 40_000,
         ...(testTanilamaYaz ? { testTanilamaYaz } : {}),
         ...(korelasyonIdOlustur ? { korelasyonIdOlustur } : {}),
+        ...(testUretimIzleyicisiOlustur ? { testUretimIzleyicisiOlustur } : {}),
     };
     return { bagimliliklar, kaydiGetir: () => kaydedilen };
 };
@@ -518,6 +520,7 @@ test("aynı fiziksel parça farklı konu etiketleriyle çoğaltılmaz, konu küm
 
 test("başarısız üretim güvenli korelasyonlu metadata kaydı bırakır ve hatayı değiştirmez", async () => {
     const kayitlar = [];
+    const izlemeTamamlamalari = [];
     const asilHata = Object.assign(new Error("Güvenli genel hata mesajı"), {
         status: 502,
         kod: "GEMINI_GECERSIZ_TEST_YANITI",
@@ -556,6 +559,10 @@ test("başarısız üretim güvenli korelasyonlu metadata kaydı bırakır ve ha
         geminiTestUret: async () => { throw asilHata; },
         korelasyonIdOlustur: () => "sabit-korelasyon-id",
         testTanilamaYaz: (kayit) => kayitlar.push(kayit),
+        testUretimIzleyicisiOlustur: () => ({
+            baslat() {},
+            tamamla(ozet) { izlemeTamamlamalari.push(ozet); },
+        }),
     });
 
     await assert.rejects(
@@ -570,6 +577,11 @@ test("başarısız üretim güvenli korelasyonlu metadata kaydı bırakır ve ha
     );
 
     assert.equal(kayitlar.length, 1);
+    assert.deepEqual(izlemeTamamlamalari, [{
+        sonuc: "basarisiz",
+        hataKodu: "GEMINI_GECERSIZ_TEST_YANITI",
+        altNeden: "KAYNAK_UYUMU",
+    }]);
     assert.equal(kaydiGetir(), undefined, "Başarısız üretim atomik olarak kaydedilmemeli");
     assert.deepEqual(kayitlar[0], {
         korelasyonId: "sabit-korelasyon-id",
@@ -631,6 +643,43 @@ test("başarılı test üretimi ayrıntılı hata tanılaması yazmaz", async ()
         zorluk: "orta",
     }, bagimliliklar);
     assert.deepEqual(kayitlar, []);
+});
+
+test("test üretimi korelasyonlu terminal izleyicisini Gemini akışına bağlar ve başarıyla kapatır", async () => {
+    const olaylar = [];
+    const izleyici = {
+        baslat() { olaylar.push("basladi"); },
+        tamamla(ozet) { olaylar.push(ozet); },
+    };
+    let geminiIzleyicisi;
+    const { bagimliliklar } = uretimBagimliliklari({
+        korelasyonIdOlustur: () => "terminal-korelasyon-id",
+        testUretimIzleyicisiOlustur: (meta) => {
+            assert.deepEqual(meta, {
+                korelasyonId: "terminal-korelasyon-id",
+                kapsamTuru: "materyal",
+                soruSayisi: 5,
+                zorluk: "orta",
+            });
+            return izleyici;
+        },
+        geminiTestUret: async ({ soruSayisi }, ikinciBagimliliklar) => {
+            geminiIzleyicisi = ikinciBagimliliklar.uretimIzleyicisi;
+            return { sorular: ornekSorular(soruSayisi), model: "test-model" };
+        },
+    });
+
+    await testOlustur({
+        kullaniciId,
+        dersId,
+        kapsamTuru: "materyal",
+        materyalId,
+        soruSayisi: 5,
+        zorluk: "orta",
+    }, bagimliliklar);
+
+    assert.equal(geminiIzleyicisi, izleyici);
+    assert.deepEqual(olaylar, ["basladi", { sonuc: "basarili" }]);
 });
 
 test("konu kapsamı mevcut semantik aramayı konu materyalleriyle sınırlar", async () => {

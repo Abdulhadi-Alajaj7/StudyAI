@@ -15,6 +15,7 @@ import {
     VARSAYILAN_GEMINI_MODELI,
 } from "./geminiService.js";
 import { testTanilamaKaydiYaz } from "./testTanilamaService.js";
+import { testUretimIzleyicisiOlustur } from "./testUretimIzlemeService.js";
 
 const VARSAYILAN_KAYNAK_BUTCESI = 160_000;
 const MINIMUM_SORU_BASI_KARAKTER = 80;
@@ -69,6 +70,8 @@ const bagimliliklariGetir = (bagimliliklar = {}) => ({
     simdi: bagimliliklar.simdi || (() => new Date()),
     korelasyonIdOlustur: bagimliliklar.korelasyonIdOlustur || randomUUID,
     testTanilamaYaz: bagimliliklar.testTanilamaYaz || testTanilamaKaydiYaz,
+    testUretimIzleyicisiOlustur: bagimliliklar.testUretimIzleyicisiOlustur ||
+        testUretimIzleyicisiOlustur,
 });
 
 const dersBulunamadiHatasi = () => new TestSistemiHatasi(
@@ -625,6 +628,18 @@ export const testOlustur = async ({
         istenenZorluk: zorluk,
         model: process.env.GEMINI_TEST_MODELI || VARSAYILAN_GEMINI_MODELI,
     };
+    let uretimIzleyicisi = null;
+    try {
+        uretimIzleyicisi = deps.testUretimIzleyicisiOlustur({
+            korelasyonId: tanilama.korelasyonId,
+            kapsamTuru,
+            soruSayisi,
+            zorluk,
+        });
+        uretimIzleyicisi?.baslat?.();
+    } catch {
+        // Terminal izleme, test üretimini başlatmayı engellememelidir.
+    }
     let asama = "DERS_DOGRULAMA";
 
     try {
@@ -670,6 +685,8 @@ export const testOlustur = async ({
             konuDagilimi: kaynakVerisi.konuDagilimi,
             kaynaklar: kaynakVerisi.kaynaklar,
             izinliKonuIds: kaynakVerisi.izinliKonuIds,
+        }, {
+            uretimIzleyicisi,
         });
 
         asama = "KAYNAK_SURUM_DOGRULAMA";
@@ -698,6 +715,11 @@ export const testOlustur = async ({
                 VARSAYILAN_GEMINI_MODELI,
             durum: "hazirlandi",
         });
+        try {
+            uretimIzleyicisi?.tamamla?.({ sonuc: "basarili" });
+        } catch {
+            // Terminal izleme, başarılı test sonucunu değiştirmemelidir.
+        }
         return belgeyiNesneyeCevir(testBelgesi);
     } catch (hata) {
         const dogrulamaHatasi = hata?.name === "ValidationError" || hata?.name === "CastError";
@@ -715,6 +737,18 @@ export const testOlustur = async ({
             });
         } catch {
             // Tanılama altyapısı, asıl HTTP hata davranışını değiştirmemelidir.
+        }
+        try {
+            uretimIzleyicisi?.tamamla?.({
+                sonuc: "basarisiz",
+                hataKodu: typeof hata?.kod === "string"
+                    ? hata.kod
+                    : (dogrulamaHatasi ? "GECERSIZ_TEST_VERISI" : "TEST_SISTEMI_SUNUCU_HATASI"),
+                altNeden: hata?.tanilama?.kaynakKanitiAltNedeni ||
+                    hata?.tanilama?.dogrulamaAltKodu || null,
+            });
+        } catch {
+            // Terminal izleme, asıl HTTP hata davranışını değiştirmemelidir.
         }
         throw hata;
     }

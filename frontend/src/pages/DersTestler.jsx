@@ -40,10 +40,12 @@ import {
 } from "../utils/testlerYuklemeYardimcilari.mjs";
 
 const kapsamlar = [
-    { deger: "tum_ders", etiket: "Tüm Ders" },
-    { deger: "materyal", etiket: "Materyal" },
+    // Geçici olarak yeni test oluşturmada devre dışı:
+    // { deger: "tum_ders", etiket: "Tüm Ders" },
+    // { deger: "materyal", etiket: "Materyal" },
     { deger: "konu", etiket: "Konu" },
 ];
+const gizliKapsamArayuzuGorunur = false;
 const soruSayilari = [5, 10, 15, 20];
 const zorluklar = [
     { deger: "kolay", etiket: "Kolay" },
@@ -131,7 +133,7 @@ function DersTestler() {
     const { dersId } = useParams();
     const navigate = useNavigate();
 
-    const [kapsamTuru, setKapsamTuru] = useState("tum_ders");
+    const [kapsamTuru, setKapsamTuru] = useState("konu");
     const [soruSayisi, setSoruSayisi] = useState(10);
     const [zorluk, setZorluk] = useState("karisik");
     const [materyalId, setMateryalId] = useState("");
@@ -493,34 +495,64 @@ function DersTestler() {
                 </div>
 
                 <div className="grid gap-5 px-4 py-5 sm:px-5 xl:grid-cols-12 xl:items-end">
-                    <fieldset className="xl:col-span-4">
-                        <legend className={`mb-2 text-[12px] font-bold ${metinAna}`}>Kapsam</legend>
-                        <div className={`grid h-[46px] grid-cols-3 rounded-xl border p-1 ${
-                            isDark ? "border-[#2A3B59] bg-[#0C1728]" : "border-[#DCE1EA] bg-[#F8FAFC]"
-                        }`}>
-                            {kapsamlar.map((secenek) => {
-                                const secili = kapsamTuru === secenek.deger;
-                                return (
-                                    <button
-                                        key={secenek.deger}
-                                        type="button"
-                                        aria-pressed={secili}
-                                        disabled={olusturuluyor}
-                                        onClick={() => kapsamiDegistir(secenek.deger)}
-                                        className={`rounded-lg px-1 text-[11px] font-semibold transition-colors sm:text-[12px] ${
-                                            secili
-                                                ? "bg-[#6558E8] text-white shadow-sm"
-                                                : isDark
-                                                    ? "text-[#AEB8CA] hover:text-white"
-                                                    : "text-[#64748B] hover:text-[#111827]"
-                                        } disabled:cursor-not-allowed disabled:opacity-60`}
-                                    >
-                                        {secenek.etiket}
-                                    </button>
-                                );
-                            })}
-                        </div>
+                    <fieldset className="min-w-0 xl:col-span-4">
+                        <legend className={`mb-2 text-[12px] font-bold ${metinAna}`}>Konu Seçimi</legend>
+                        <OzetSecimDropdown
+                            id="test-konu"
+                            value={konuId}
+                            onChange={(deger) => secimiDegistir(setKonuId, deger)}
+                            options={konuDropdownSecenekleri}
+                            disabled={olusturuluyor || sayfaYukleniyor || konuDropdownSecenekleri.length === 0}
+                            emptyLabel={sayfaYukleniyor ? "Konular yükleniyor..." : "Hazır konu yok"}
+                            tur="konu"
+                            isDark={isDark}
+                        />
+                        {hedefHatasi ? (
+                            <div className="mt-3">
+                                <HataBildirimi
+                                    isDark={isDark}
+                                    mesaj={hedefHatasi}
+                                    onRetry={() => setYenilemeAnahtari((deger) => deger + 1)}
+                                />
+                            </div>
+                        ) : hedefUyarisi && (
+                            <p className={`mt-2 text-[11px] leading-5 ${metinIkincil}`}>
+                                {hedefUyarisi}
+                            </p>
+                        )}
                     </fieldset>
+
+                    {/* Kapsam seçenekleri yeniden açıldığında kullanılmak üzere görünüm dışında korunuyor. */}
+                    {gizliKapsamArayuzuGorunur && (
+                        <fieldset className="xl:col-span-4">
+                            <legend className={`mb-2 text-[12px] font-bold ${metinAna}`}>Kapsam</legend>
+                            <div className={`grid h-[46px] grid-cols-1 rounded-xl border p-1 ${
+                                isDark ? "border-[#2A3B59] bg-[#0C1728]" : "border-[#DCE1EA] bg-[#F8FAFC]"
+                            }`}>
+                                {kapsamlar.map((secenek) => {
+                                    const secili = kapsamTuru === secenek.deger;
+                                    return (
+                                        <button
+                                            key={secenek.deger}
+                                            type="button"
+                                            aria-pressed={secili}
+                                            disabled={olusturuluyor}
+                                            onClick={() => kapsamiDegistir(secenek.deger)}
+                                            className={`rounded-lg px-1 text-[11px] font-semibold transition-colors sm:text-[12px] ${
+                                                secili
+                                                    ? "bg-[#6558E8] text-white shadow-sm"
+                                                    : isDark
+                                                        ? "text-[#AEB8CA] hover:text-white"
+                                                        : "text-[#64748B] hover:text-[#111827]"
+                                            } disabled:cursor-not-allowed disabled:opacity-60`}
+                                        >
+                                            {secenek.etiket}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        </fieldset>
+                    )}
 
                     <fieldset className="xl:col-span-3">
                         <legend className={`mb-2 text-[12px] font-bold ${metinAna}`}>Soru Sayısı</legend>
@@ -592,7 +624,8 @@ function DersTestler() {
                     </button>
                 </div>
 
-                {(kapsamTuru === "materyal" || kapsamTuru === "konu") && (
+                {gizliKapsamArayuzuGorunur &&
+                    (kapsamTuru === "materyal" || kapsamTuru === "konu") && (
                     <div className={`border-t px-4 py-4 sm:px-5 ${altKenarlik}`}>
                         <div className="max-w-xl">
                             <label className={`mb-2 block text-[12px] font-bold ${metinAna}`}>
