@@ -57,6 +57,14 @@ const dersSchema = new mongoose.Schema(
         hazirlamaAsamasi: { type: String, default: "metinler" },
         hazirlamaHatasi: { type: String, default: "" },
         hazirlamaHataKodu: { type: String, default: "" },
+        hazirlamaTanilama: {
+            type: new mongoose.Schema({
+                orijinalHttpDurumu: Number, saglayiciHataKodu: String, kotaTuru: String,
+                retryAfterMs: Number, agHataKodu: String, asama: String, model: String,
+                deneme: Number, sureMs: Number,
+            }, { _id: false }),
+            default: null,
+        },
         hazirlamaToken: { type: mongoose.Schema.Types.ObjectId, default: null, select: false },
         hazirlamaSonYenileme: { type: Date, default: null },
         sohbetSurumu: {

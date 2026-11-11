@@ -1,4 +1,6 @@
-import React, { useState, useEffect } from "react";
+import SilmeGostergesi from "../components/SilmeGostergesi";
+import { kullaniciHataMesaji } from "../utils/kullaniciHatasi.mjs";
+import React, { useState, useEffect, useRef } from "react";
 import { useOutletContext, useNavigate } from "react-router-dom";
 import api from "../api";
 import { dersDetayYolu, dersDuzenlemeYolu } from "../utils/dersDetayYollari.mjs";
@@ -19,7 +21,11 @@ function Derslerim() {
     const [dersler, setDersler] = useState([]);
     const [loading, setLoading] = useState(true);
     const [hata, setHata] = useState(null);
+    const [silmeHatasi, setSilmeHatasi] = useState("");
     const [aramaMetni, setAramaMetni] = useState("");
+
+    const [siliniyor, setSiliniyor] = useState(false);
+    const silmeIstekRef = useRef(false);
 
     const [silModalAcik, setSilModalAcik] = useState(false);
     const [silinecekDers, setSilinecekDers] = useState(null);
@@ -62,14 +68,21 @@ function Derslerim() {
     };
 
     const handleSil = async () => {
-        if (!silinecekDers) return;
+        if (!silinecekDers || silmeIstekRef.current) return;
+        silmeIstekRef.current = true;
+        setSiliniyor(true);
+        setSilmeHatasi("");
+        const silinecekId = silinecekDers._id;
         try {
-            await api.delete(`/dersler/${silinecekDers._id}`, { withCredentials: true });
-            setSilModalAcik(false);
+            await api.delete(`/dersler/${silinecekId}`, { withCredentials: true });
+            setDersler(onceki => onceki.filter(d => d._id !== silinecekId));
             setSilinecekDers(null);
-            dersleriGetir();
         } catch (err) {
-            alert(err.response?.data?.hata || "Silme işlemi başarısız.");
+            setSilmeHatasi(kullaniciHataMesaji(err, "Silme işlemi başarısız. Dersiniz listede korundu."));
+        } finally {
+            setSilModalAcik(false);
+            silmeIstekRef.current = false;
+            setSiliniyor(false);
         }
     };
 
@@ -79,7 +92,8 @@ function Derslerim() {
     };
 
     return (
-        <div className="max-w-[1440px] mx-auto pb-10">
+        <>
+        <div className="max-w-[1440px] mx-auto pb-10" inert={siliniyor || undefined} aria-hidden={siliniyor || undefined}>
             {/* Header */}
             <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-8">
                 <div>
@@ -152,6 +166,7 @@ function Derslerim() {
             </div>
 
             {/* Main Content */}
+            {silmeHatasi && <p role="alert" className="mb-6 rounded-xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-500">{silmeHatasi}</p>}
             {loading ? (
                 <div className="py-20 flex justify-center">
                     <div className="w-10 h-10 border-4 border-[#4F46E5]/30 border-t-[#4F46E5] rounded-full animate-spin"></div>
@@ -198,7 +213,7 @@ function Derslerim() {
             )}
 
             {/* Delete Confirmation Modal */}
-            {silModalAcik && (
+            {silModalAcik && !siliniyor && (
                 <div className={`fixed inset-0 z-50 flex items-center justify-center p-4 ${modalOverlay}`}>
                     <div className={`w-full max-w-sm rounded-2xl border shadow-xl p-6 ${cardBg}`} onClick={e => e.stopPropagation()}>
                         <div className="w-12 h-12 rounded-full bg-red-500/10 flex items-center justify-center mb-4 mx-auto">
@@ -226,6 +241,8 @@ function Derslerim() {
                 </div>
             )}
         </div>
+        {siliniyor && <SilmeGostergesi isDark={isDark} />}
+        </>
     );
 }
 

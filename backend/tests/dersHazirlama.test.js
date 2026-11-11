@@ -8,7 +8,7 @@ import path from "node:path";
 const kullaniciId = new mongoose.Types.ObjectId();
 const dersId = new mongoose.Types.ObjectId();
 let dersler, materyaller, parcalar, haritalar, embeddingCagrilari, haritaCagrilari;
-let embeddingHatasi, haritaHatasi, bekleyenEmbedding, silinenDosyalar;
+let embeddingHatasi, haritaHatasi, bekleyenEmbedding, silinenDosyalar, embeddingIslemCagrilari;
 const ayni = (a, b) => String(a ?? "") === String(b ?? "");
 const kopya = v => {
     if (!v || typeof v !== "object" || v instanceof mongoose.Types.ObjectId) return v;
@@ -112,7 +112,12 @@ mock.module("../services/metinParcalamaService.js", { namedExports: {
     },
 } });
 mock.module("../services/embeddingService.js", { namedExports: {
+    async materyalEmbeddingHazirliginiKontrolEt(m, islemeId) {
+        const ps = parcalar.filter(p => ayni(p.materyalId, m._id) && ayni(p.islemeId, islemeId));
+        return { toplam: ps.length, hazirMi: ps.length > 0 && ps.every(p => p.embeddingDurumu === "hazir" && p.embedding), model: "mock", boyut: 3 };
+    },
     async materyalEmbeddingleriniOlustur(m, islemeId) {
+        embeddingIslemCagrilari++;
         const p = parcalar.find(p => ayni(p.materyalId, m._id) && ayni(p.islemeId, islemeId));
         if (!p.embedding) {
             embeddingCagrilari.push(String(m._id));
@@ -151,7 +156,7 @@ const req = () => ({ params: { id: String(dersId), dersId: String(dersId) }, use
 const res = () => ({ statusCode: 200, status(s) { this.statusCode = s; return this; }, json(body) { this.body = body; return this; } });
 const calistir = async () => {
     const islem = await hazirlamayiBaslat(dersId, kullaniciId);
-    if (islem.yeni) await dersiHazirla(islem.ders, kullaniciId, islem.token);
+    if (islem.yeni) await dersiHazirla(islem.ders, kullaniciId, islem.token, islem.plan);
     return islem;
 };
 const materyalEkle = () => {
@@ -164,6 +169,7 @@ const materyalEkle = () => {
 beforeEach(() => {
     dersler = [{ _id: dersId, kullaniciId, dersAdi: "Ders", materyallerOnaylandi: false, aktifMateryalIslemSayisi: 0, hazirlamaDurumu: "bekliyor" }];
     materyaller = []; parcalar = []; haritalar = []; embeddingCagrilari = []; haritaCagrilari = 0;
+    embeddingIslemCagrilari = 0;
     embeddingHatasi = null; haritaHatasi = null; bekleyenEmbedding = null; silinenDosyalar = [];
 });
 
@@ -250,8 +256,11 @@ test("harita hatasında metin ve embedding korunur; tekrar denemede aynı sürü
     await calistir();
     assert.equal(dersler[0].materyallerOnaylandi, false);
     assert.equal(m.embeddingDurumu, "hazir");
+    const retry = await hazirlamayiBaslat(dersId, kullaniciId);
+    assert.equal(retry.ders.hazirlamaAsamasi, "harita");
     haritaHatasi = null;
-    await calistir();
+    await dersiHazirla(retry.ders, kullaniciId, retry.token, retry.plan);
+    assert.equal(embeddingIslemCagrilari, 1);
     assert.equal(embeddingCagrilari.length, 1);
     assert.equal(String(materyaller[0].aktifIslemeId), surum);
     assert.equal(dersler[0].materyallerOnaylandi, true);
@@ -314,4 +323,24 @@ test("başka kullanıcı hazırlama başlatamaz veya durum okuyamaz", async () =
     const yanit = res(); await dersHazirlamaDurumu({ ...req(), user: { _id: digeri } }, yanit);
     assert.equal(yanit.statusCode, 404);
     assert.equal(dersler[0].hazirlamaDurumu, "bekliyor");
+});
+
+test("harita hatasından sonra iki retry aynı anda tek iş alır; eski token yeni durumu bozamaz", async () => {
+    materyalEkle();
+    const ilk = await hazirlamayiBaslat(dersId, kullaniciId);
+    haritaHatasi = Object.assign(new Error("servis"), { status: 503 });
+    await dersiHazirla(ilk.ders, kullaniciId, ilk.token, ilk.plan);
+    const [a, b] = await Promise.all([hazirlamayiBaslat(dersId, kullaniciId), hazirlamayiBaslat(dersId, kullaniciId)]);
+    assert.equal([a, b].filter(s => s.yeni).length, 1);
+    const yeni = a.yeni ? a : b;
+    assert.equal(yeni.ders.hazirlamaAsamasi, "harita");
+    const durum = res(); await dersHazirlamaDurumu(req(), durum);
+    assert.equal(durum.body.ders.hazirlamaAsamasi, "harita");
+    await dersiHazirla(ilk.ders, kullaniciId, ilk.token, ilk.plan);
+    assert.equal(dersler[0].hazirlamaDurumu, "isleniyor");
+    assert.equal(String(dersler[0].hazirlamaToken), String(yeni.token));
+    haritaHatasi = null;
+    await dersiHazirla(yeni.ders, kullaniciId, yeni.token, yeni.plan);
+    assert.equal(embeddingIslemCagrilari, 1);
+    assert.equal(dersler[0].materyallerOnaylandi, true);
 });

@@ -33,9 +33,9 @@ test("eksik, bilinmeyen veya onaysız tamamlandı bilgisi başarıya dönüştü
     }
 });
 
-test("yeniden deneme isteği beklerken eski hata veya başarı yeni işlem için kullanılmaz", () => {
+test("yeniden deneme isteği beklerken önceki başarılı adımlar korunur; hata adımı bekler", () => {
     const ders = { hazirlamaDurumu: "hata", hazirlamaAsamasi: "harita" };
-    assert.deepEqual(hazirlamaAdimlariniGetir(ders, true).map(a => a.durum), ["bekliyor", "bekliyor", "bekliyor", "bekliyor"]);
+    assert.deepEqual(hazirlamaAdimlariniGetir(ders, true).map(a => a.durum), ["tamamlandi", "tamamlandi", "bekliyor", "bekliyor"]);
 });
 
 test("yalnız sunucunun kalıcı onayı son adımı başarılı gösterir", () => {

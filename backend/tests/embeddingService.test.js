@@ -86,6 +86,7 @@ test("geçici 429 hatasında üstel geri çekilme ile yeniden dener", async () =
                 if (cagri < 3) {
                     const hata = new Error("429 rate limit");
                     hata.status = 429;
+                    hata.headers = { "retry-after": "2" };
                     throw hata;
                 }
                 return { embeddings: [{ values: [1, 0, 0] }] };
@@ -102,7 +103,7 @@ test("geçici 429 hatasında üstel geri çekilme ile yeniden dener", async () =
     });
 
     assert.equal(cagri, 3);
-    assert.deepEqual(beklemeler, [500, 1000]);
+    assert.deepEqual(beklemeler, [2000, 2000]);
     assert.deepEqual(sonuc[0], [1, 0, 0]);
 });
 

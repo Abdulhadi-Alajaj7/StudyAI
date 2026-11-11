@@ -1,3 +1,4 @@
+import { geminiHazirlamaHatasiniSiniflandir, geminiRetryBeklemesiniGetir, geminiTanilamasiniLogla } from "../utils/geminiHazirlamaHatasi.js";
 import crypto from "node:crypto";
 import MetinParcasi from "../models/MetinParcasi.js";
 import { getGeminiClient } from "./geminiService.js";
@@ -132,39 +133,14 @@ const kotaSirasinaGir = (tahminiToken, ayarlar, beklet) => {
     return gorev;
 };
 
-const hataGeciciMi = (hata) => {
-    // Yerel RPD sınırı Pasifik gün dönümüne kadar düzelmez; kısa backoff ile
-    // yeniden denemek yalnızca isteği geciktirir. Sağlayıcı 429'ları ise sınırlı
-    // biçimde retry edilmeye devam eder.
-    if (hata?.kod === "EMBEDDING_GUNLUK_LIMIT") return false;
-    const durum = hata?.status ?? hata?.statusCode ?? hata?.code;
-    const mesaj = String(hata?.message || "").toLowerCase();
-    return durum === 429 || (Number(durum) >= 500 && Number(durum) < 600) ||
-        mesaj.includes("429") || mesaj.includes("quota") || mesaj.includes("rate limit") ||
-        mesaj.includes("timeout") || mesaj.includes("econnreset") || mesaj.includes("temporarily unavailable");
-};
-
-const embeddingHatasiniSiniflandir = (hata) => {
-    if (hata?.kod) return hata;
-
-    const mesaj = String(hata?.message || "Embedding servisi hatası.");
-    const kucuk = mesaj.toLowerCase();
-    const sonuc = new Error(mesaj);
-    sonuc.cause = hata;
-
-    if (Number(hata?.status ?? hata?.statusCode ?? hata?.code) === 429 || mesaj.includes("429") || kucuk.includes("quota") || kucuk.includes("rate limit")) {
-        sonuc.kod = "EMBEDDING_KOTA_ASIMI";
-        sonuc.status = 429;
-    } else if (mesaj.includes("401") || mesaj.includes("403") || kucuk.includes("api key")) {
-        sonuc.kod = "EMBEDDING_YETKISIZ";
-        sonuc.status = 503;
-    } else if (mesaj.includes("404") || kucuk.includes("not found")) {
-        sonuc.kod = "EMBEDDING_MODEL_BULUNAMADI";
-        sonuc.status = 503;
-    } else {
-        sonuc.kod = "EMBEDDING_SERVIS_HATASI";
-        sonuc.status = 503;
-    }
+const embeddingHatasiniSiniflandir = hata => {
+    if (hata?.guvenliHazirlamaHatasi) return hata;
+    const sonuc = geminiHazirlamaHatasiniSiniflandir(hata);
+    sonuc.hazirlamaKodu = sonuc.kod;
+    // Mevcut semantik arama istemcilerinin hata kodlarını koru.
+    const kodlar = { GEMINI_429: "EMBEDDING_KOTA_ASIMI", GEMINI_GUNLUK_KOTA: "EMBEDDING_GUNLUK_LIMIT",
+        GEMINI_503: "EMBEDDING_SERVIS_HATASI", GEMINI_YAPILANDIRMA: "EMBEDDING_YETKISIZ", GEMINI_MODEL_BULUNAMADI: "EMBEDDING_MODEL_BULUNAMADI" };
+    sonuc.kod = kodlar[sonuc.kod] || sonuc.kod;
     return sonuc;
 };
 
@@ -182,17 +158,22 @@ const embeddingIstegiYap = async ({
     const metinler = Array.isArray(contents) ? contents : [contents];
 
     for (let deneme = 1; deneme <= ayarlar.maksDeneme; deneme++) {
+        const baslangic = performance.now();
         try {
             await sahipligiDogrula?.();
             if (limitUygula) {
                 await kotaSirasinaGir(tahminiTokenSayisi(metinler), ayarlar, beklet);
             }
             await sahipligiDogrula?.();
-            return await istemci.models.embedContent({ model, contents, config });
+            const yanit = await istemci.models.embedContent({ model, contents, config });
+            geminiTanilamasiniLogla({ asama: "embedding", model, deneme, sureMs: performance.now() - baslangic, yanit });
+            return yanit;
         } catch (hata) {
-            sonHata = hata;
-            if (!hataGeciciMi(hata) || deneme === ayarlar.maksDeneme) break;
-            await beklet(500 * (2 ** (deneme - 1)));
+            sonHata = embeddingHatasiniSiniflandir(hata);
+            geminiTanilamasiniLogla({ asama: "embedding", model, deneme, sureMs: performance.now() - baslangic, hata: sonHata });
+            const bekleme = geminiRetryBeklemesiniGetir(sonHata, deneme);
+            if (deneme === ayarlar.maksDeneme || bekleme == null) break;
+            await beklet(bekleme);
         }
     }
 
@@ -286,24 +267,32 @@ const girdiHashi = (icerik, baslik, ayarlar) => crypto
     .update(`${ayarlar.model}\0${ayarlar.boyut}\0${baslik}\0${icerik}`)
     .digest("hex");
 
+const vektorGecerliMi = (vektor, boyut) => Array.isArray(vektor) && vektor.length === boyut &&
+    vektor.every(Number.isFinite) && vektor.some(v => v !== 0);
+const parcaEmbeddingiGuncelMi = (parca, baslik, ayarlar) => parca.embeddingDurumu === "hazir" &&
+    parca.embeddingModel === ayarlar.model && parca.embeddingBoyutu === ayarlar.boyut &&
+    parca.embeddingGirdiHash === girdiHashi(parca.icerik, baslik, ayarlar) && vektorGecerliMi(parca.embedding, ayarlar.boyut);
+const embeddingParcalariniGetir = (materyal, islemeId) => MetinParcasi.find({
+    kullaniciId: materyal.kullaniciId, dersId: materyal.dersId, materyalId: materyal._id, islemeId,
+}).select("+embedding icerik parcaIndex embeddingGirdiHash embeddingModel embeddingBoyutu embeddingDurumu").sort({ parcaIndex: 1 }).lean();
+
+export const materyalEmbeddingHazirliginiKontrolEt = async (materyal, islemeId, ayarlar = embeddingAyarlariGetir()) => {
+    const parcalar = await embeddingParcalariniGetir(materyal, islemeId);
+    const baslik = materyal.orijinalDosyaAdi || materyal.dosyaAdi || "none";
+    const eksikParcaSayisi = parcalar.filter(p => !parcaEmbeddingiGuncelMi(p, baslik, ayarlar)).length;
+    return { toplam: parcalar.length, hazirMi: parcalar.length > 0 && eksikParcaSayisi === 0, eksikParcaSayisi,
+        model: ayarlar.model, boyut: ayarlar.boyut };
+};
+
 export const materyalEmbeddingleriniOlustur = async (materyal, islemeId, secenekler = {}) => {
     const ayarlar = secenekler.ayarlar || embeddingAyarlariGetir();
     const baslik = materyal.orijinalDosyaAdi || materyal.dosyaAdi || "none";
-    const parcalar = await MetinParcasi.find({
-        kullaniciId: materyal.kullaniciId,
-        dersId: materyal.dersId,
-        materyalId: materyal._id,
-        islemeId,
-    })
-        .select("+embedding icerik parcaIndex")
-        .sort({ parcaIndex: 1 })
-        .lean();
-
-    if (parcalar.length === 0) {
-        return { toplam: 0, apiIleOlusturulan: 0, onbellektenKullanilan: 0, ...ayarlar };
-    }
-
-    const hashler = parcalar.map((parca) => girdiHashi(parca.icerik, baslik, ayarlar));
+    const parcalar = await embeddingParcalariniGetir(materyal, islemeId);
+    if (!parcalar.length) return { toplam: 0, apiIleOlusturulan: 0, onbellektenKullanilan: 0, ...ayarlar };
+    const hashler = parcalar.map(p => girdiHashi(p.icerik, baslik, ayarlar));
+    const hazirKimlikler = new Set(parcalar.filter(p => parcaEmbeddingiGuncelMi(p, baslik, ayarlar)).map(p => String(p._id)));
+    if (hazirKimlikler.size === parcalar.length) return { toplam: parcalar.length, apiIleOlusturulan: 0,
+        onbellektenKullanilan: parcalar.length, model: ayarlar.model, boyut: ayarlar.boyut };
     const onbellekKayitlari = await MetinParcasi.find({
         kullaniciId: materyal.kullaniciId,
         embeddingGirdiHash: { $in: [...new Set(hashler)] },
@@ -314,9 +303,9 @@ export const materyalEmbeddingleriniOlustur = async (materyal, islemeId, secenek
         .select("+embedding embeddingGirdiHash")
         .lean();
 
-    const vektorHaritasi = new Map();
+    const vektorHaritasi = new Map(parcalar.filter(p => hazirKimlikler.has(String(p._id))).map((p) => [p.embeddingGirdiHash, p.embedding]));
     for (const kayit of onbellekKayitlari) {
-        if (Array.isArray(kayit.embedding) && kayit.embedding.length === ayarlar.boyut) {
+        if (vektorGecerliMi(kayit.embedding, ayarlar.boyut)) {
             vektorHaritasi.set(kayit.embeddingGirdiHash, kayit.embedding);
         }
     }
@@ -344,7 +333,7 @@ export const materyalEmbeddingleriniOlustur = async (materyal, islemeId, secenek
             partiKaydet: async (baslangic, vektorler) => {
                 await secenekler.sahipligiDogrula?.();
                 const parti = new Map(vektorler.map((vektor, i) => [eksikHashler[baslangic + i], vektor]));
-                await sureOlc("embedding_veritabani_kaydi", () => MetinParcasi.bulkWrite(parcalar.flatMap((parca, i) => parti.has(hashler[i]) ? [{
+                await sureOlc("embedding_veritabani_kaydi", () => MetinParcasi.bulkWrite(parcalar.flatMap((parca, i) => parti.has(hashler[i]) && !hazirKimlikler.has(String(parca._id)) ? [{
                     updateOne: {
                         filter: { _id: parca._id, islemeId },
                         update: { $set: {
@@ -362,7 +351,7 @@ export const materyalEmbeddingleriniOlustur = async (materyal, islemeId, secenek
         const simdi = new Date();
         const yeniHashler = new Set(eksikHashler);
         // Yeni partiler zaten kaydedildi; yalnız önbellekten alınanları bu sürüme yaz.
-        const onbellekYazmalari = parcalar.flatMap((parca, index) => yeniHashler.has(hashler[index]) ? [] : [{
+        const onbellekYazmalari = parcalar.flatMap((parca, index) => yeniHashler.has(hashler[index]) || hazirKimlikler.has(String(parca._id)) ? [] : [{
             updateOne: {
                 filter: { _id: parca._id, islemeId },
                 update: {

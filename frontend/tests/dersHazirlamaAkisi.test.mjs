@@ -52,7 +52,7 @@ test("hazır sayfası doğrudan açılırsa onay sunucudan doğrulanır; taslak 
 
 test("hazırlama modalı materyal sayfasının üzerinde açılır; arka plan etkileşimi ve ikinci onay modalı engellenir", () => {
     assert.match(kaynak, /const hazirlamaModalAcik = hazirlaniyor \|\| \(ders\?\.hazirlamaDurumu === "hata" && !materyalKontrol\)/);
-    assert.match(kaynak, /inert=\{hazirlamaModalAcik \|\| undefined\}/);
+    assert.match(kaynak, /inert=\{hazirlamaModalAcik \|\| siliniyor \|\| undefined\}/);
     assert.match(kaynak, /onayModalAcik && !hazirlamaModalAcik/);
     assert.ok(kaynak.indexOf("Ders Materyallerini Ekle") < kaynak.indexOf("{hazirlamaModalAcik && <DersHazirlamaEkrani"));
     assert.doesNotMatch(kaynak, /if \(hazirlaniyor[^}]*return <DersHazirlamaEkrani/);

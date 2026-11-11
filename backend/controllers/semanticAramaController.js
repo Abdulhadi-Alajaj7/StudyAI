@@ -1,5 +1,6 @@
 import mongoose from "mongoose";
 import Materyal from "../models/Materyal.js";
+import Ders from "../models/Ders.js";
 import { semanticAramaYap } from "../services/semanticAramaService.js";
 import {
     embeddingAyarlariGetir,
@@ -60,7 +61,15 @@ export const materyalEmbeddingleriniYenile = async (req, res) => {
     }
 
     let materyal;
+    let kilitliDersId;
     try {
+        const mevcut = await Materyal.findOne({ _id: materyalId, kullaniciId }).select("dersId");
+        if (!mevcut) return res.status(404).json({ hata: "Materyal bulunamadı." });
+        const ders = await Ders.findOneAndUpdate({
+            _id: mevcut.dersId, kullaniciId, temizleniyor: { $ne: true }, hazirlamaDurumu: { $ne: "isleniyor" },
+        }, { $inc: { aktifMateryalIslemSayisi: 1 } }, { new: true });
+        if (!ders) return res.status(409).json({ hata: "Ders hazırlanırken semantik dizin ayrıca yenilenemez." });
+        kilitliDersId = mevcut.dersId;
         materyal = await Materyal.findOneAndUpdate(
             {
                 _id: materyalId,
@@ -122,5 +131,12 @@ export const materyalEmbeddingleriniYenile = async (req, res) => {
             hata: status === 409 ? hata.message : embeddingKullaniciHatasi(hata),
             kod: hata.kod || "EMBEDDING_YENILEME_HATASI"
         });
+    } finally {
+        if (kilitliDersId) {
+            await Ders.updateOne({ _id: kilitliDersId, kullaniciId, aktifMateryalIslemSayisi: { $gt: 0 } },
+                { $inc: { aktifMateryalIslemSayisi: -1 } }).catch(() => {
+                console.error("[EmbeddingYenileme] Materyal işlem kilidi bırakılamadı.");
+            });
+        }
     }
 };

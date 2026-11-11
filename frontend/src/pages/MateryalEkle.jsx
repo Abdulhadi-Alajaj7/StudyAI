@@ -1,3 +1,4 @@
+import SilmeGostergesi from "../components/SilmeGostergesi";
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useOutletContext, useNavigate, useLocation, useParams } from "react-router-dom";
 import api from "../api";
@@ -21,6 +22,9 @@ function MateryalEkle() {
     const uiPrefs = uiPrefsRef.current;
 
     const [materyaller, setMateryaller] = useState([]);
+    const [siliniyor, setSiliniyor] = useState(false);
+    const silmeIstekRef = useRef(false);
+    const silmeSurumuRef = useRef(0);
     const [yukleniyor, setYukleniyor] = useState(false);
     const [hata, setHata] = useState("");
     const [bilgi, setBilgi] = useState("");
@@ -39,7 +43,7 @@ function MateryalEkle() {
     const hazirlaniyor = onaylaniyor || ders?.hazirlamaDurumu === "isleniyor";
     const tumMateryallerHazir = materyaller.length > 0 &&
         materyaller.every(m => m.durum === "hazir" && m.aktifIslemeId);
-    const devamButonuAktif = durumYuklendi && !hazirlaniyor && !yukleniyor && tumMateryallerHazir;
+    const devamButonuAktif = durumYuklendi && !hazirlaniyor && !siliniyor && !yukleniyor && tumMateryallerHazir;
 
     const cardBg = isDark ? "bg-[#162137] border-[#26334A]" : "bg-white border-[#E7E5EF]";
     const textPrimary = isDark ? "text-[#F8FAFC]" : "text-[#0F172A]";
@@ -77,9 +81,13 @@ function MateryalEkle() {
     }, [dersId, navigate, uiPrefs]);
 
     const materyalleriGetir = useCallback(async () => {
+        if (silmeIstekRef.current) return;
+        const sorguSurumu = silmeSurumuRef.current;
         try {
             const res = await api.get(`/materyaller/ders/${dersId}`, { withCredentials: true });
-            setMateryaller(res.data.materyaller || []);
+            if (sorguSurumu === silmeSurumuRef.current && !silmeIstekRef.current) {
+                setMateryaller(res.data.materyaller || []);
+            }
         } catch (err) {
             console.error("Materyaller getirilemedi", err);
         }
@@ -98,13 +106,13 @@ function MateryalEkle() {
     }, [dersGetir, materyalleriGetir]);
 
     const handleDosyaSec = () => {
-        if (durumYuklendi && !hazirlaniyor && !yuklemeDevamEdiyorRef.current) {
+        if (durumYuklendi && !hazirlaniyor && !silmeIstekRef.current && !yuklemeDevamEdiyorRef.current) {
             fileInputRef.current?.click();
         }
     };
 
     const dosyalariYukle = async (dosyaListesi) => {
-        if (!durumYuklendi || hazirlaniyor || yuklemeDevamEdiyorRef.current) return;
+        if (!durumYuklendi || hazirlaniyor || silmeIstekRef.current || yuklemeDevamEdiyorRef.current) return;
 
         const { gecerliDosyalar, hatalar: dogrulamaHatalari } =
             materyalDosyalariniDogrula(dosyaListesi);
@@ -194,14 +202,20 @@ function MateryalEkle() {
     };
 
     const materyalSil = async (id) => {
-        if (!durumYuklendi || hazirlaniyor) return;
+        if (!durumYuklendi || hazirlaniyor || silmeIstekRef.current) return;
         if (!window.confirm("Bu materyali silmek istediğinize emin misiniz?")) return;
-
+        silmeIstekRef.current = true;
+        silmeSurumuRef.current++;
+        setSiliniyor(true);
+        setHata("");
         try {
             await api.delete(`/materyaller/${id}`, { withCredentials: true });
-            setMateryaller(materyaller.filter(m => m._id !== id));
+            setMateryaller(onceki => onceki.filter(m => m._id !== id));
         } catch (err) {
-            setHata(kullaniciHataMesaji(err, "Materyal silinirken bir hata oluştu."));
+            setHata(kullaniciHataMesaji(err, "Materyal silinirken bir hata oluştu. Materyaliniz korundu."));
+        } finally {
+            silmeIstekRef.current = false;
+            setSiliniyor(false);
         }
     };
 
@@ -243,7 +257,7 @@ function MateryalEkle() {
         if (devamButonuAktif) setOnayModalAcik(true);
     };
     const handleOnayla = async () => {
-        if (onayIstekRef.current || hazirlaniyor) return;
+        if (onayIstekRef.current || hazirlaniyor || silmeIstekRef.current) return;
         onayIstekRef.current = true;
         setOnaylaniyor(true);
         setMateryalKontrol(false);
@@ -268,7 +282,7 @@ function MateryalEkle() {
 
     return (
         <>
-        <div className="max-w-[1200px] mx-auto pb-10" inert={hazirlamaModalAcik || undefined} aria-hidden={hazirlamaModalAcik || undefined}>
+        <div className="max-w-[1200px] mx-auto pb-10" inert={hazirlamaModalAcik || siliniyor || undefined} aria-hidden={hazirlamaModalAcik || siliniyor || undefined}>
             <div className="mb-8">
                 <h1 className={`text-[32px] md:text-[38px] font-bold tracking-tight ${textPrimary}`}>Ders Materyallerini Ekle</h1>
                 {ders && (
@@ -660,6 +674,7 @@ function MateryalEkle() {
                 </div>
             )}
         </div>
+        {siliniyor && <SilmeGostergesi isDark={isDark} materyal />}
         {hazirlamaModalAcik && <DersHazirlamaEkrani
             ders={ders}
             isDark={isDark}

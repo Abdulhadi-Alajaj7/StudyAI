@@ -1,9 +1,9 @@
+import { geminiHazirlamaHatasiniSiniflandir } from "../utils/geminiHazirlamaHatasi.js";
 import mongoose from "mongoose";
 import Ders from "../models/Ders.js";
 import Materyal from "../models/Materyal.js";
-import MetinParcasi from "../models/MetinParcasi.js";
 import KonuHaritasi from "../models/KonuHaritasi.js";
-import { materyalEmbeddingleriniOlustur } from "./embeddingService.js";
+import { materyalEmbeddingleriniOlustur, materyalEmbeddingHazirliginiKontrolEt } from "./embeddingService.js";
 import { konuHaritasiUretVeKaydet, konuHaritasiGuncellikKontrolu } from "./konuHaritasiService.js";
 import { konuHaritasiKilitAlmaKosulu } from "./konuHaritasiKilitService.js";
 import { dersOnayiniTamamla } from "./dersOnayService.js";
@@ -17,16 +17,35 @@ const sahiplik = (dersId, kullaniciId, token) => ({
     $expr: { $gt: ["$hazirlamaSonYenileme", { $subtract: ["$$NOW", LEASE_MS] }] },
 });
 
-export const hazirlamaHatasiniAcikla = (hata) => {
-    const status = Number(hata?.status ?? hata?.statusCode ?? hata?.code);
-    const mesaj = String(hata?.message || "");
-    if (status === 429 || /429|quota|rate limit/i.test(mesaj)) {
-        return { kod: "GEMINI_429", mesaj: "Gemini istek kotası dolu. Bir süre sonra yeniden deneyin; dosyalarınız ve hazır işlemler korundu." };
+export const hazirlamaHatasiniAcikla = hata => {
+    const sinif = geminiHazirlamaHatasiniSiniflandir(hata);
+    return { kod: sinif.hazirlamaKodu || sinif.kod,
+        mesaj: sinif.message + " Dosyalarınız ve hazır işlemler korundu.", tanilama: sinif.tanilama };
+};
+
+const hazirlamaPlaniniDogrula = async (dersId, kullaniciId) => {
+    const materyaller = await Materyal.find({ dersId, kullaniciId }).select("-cikarilanMetin").lean();
+    if (!materyaller.length || materyaller.some(m => m.durum !== "hazir" || !m.aktifIslemeId)) {
+        throw Object.assign(sorun("Tüm materyallerin metinleri hazır olmalıdır."), { hazirlamaAsamasi: "metinler" });
     }
-    if (status === 503 || /503|unavailable/i.test(mesaj)) {
-        return { kod: "GEMINI_503", mesaj: "Gemini geçici olarak kullanılamıyor. Yeniden deneyebilirsiniz; dosyalarınız ve hazır işlemler korundu." };
+    const kayitlar = [];
+    for (const materyal of materyaller) {
+        const embedding = await materyalEmbeddingHazirliginiKontrolEt(materyal, materyal.aktifIslemeId);
+        if (!embedding.toplam) throw Object.assign(sorun("Materyalin metin parçaları bulunamadı."), { hazirlamaAsamasi: "metinler" });
+        kayitlar.push({ materyal, embedding });
     }
-    return { kod: "HAZIRLAMA_HATASI", mesaj: "Ders hazırlanamadı. Materyalleri kontrol edip yeniden deneyin; dosyalarınız ve hazır işlemler korundu." };
+    return { kayitlar, asama: kayitlar.some(k => !k.embedding.hazirMi) ? "embedding" : "harita" };
+};
+
+const hazirlamaHatasiniKaydet = async (dersId, kullaniciId, token, hata) => {
+    const aciklama = hazirlamaHatasiniAcikla(hata);
+    console.warn("[DersHazirlama]", { kod: aciklama.kod, ...aciklama.tanilama });
+    await Ders.updateOne({ _id: dersId, kullaniciId, hazirlamaToken: token, hazirlamaDurumu: "isleniyor" }, { $set: {
+        hazirlamaDurumu: "hata", hazirlamaToken: null,
+        hazirlamaHatasi: aciklama.mesaj, hazirlamaHataKodu: aciklama.kod,
+        hazirlamaTanilama: aciklama.tanilama,
+        ...(hata.hazirlamaAsamasi === "metinler" ? { hazirlamaAsamasi: "metinler" } : {}),
+    } });
 };
 
 // Süresi dolan iş otomatik üretilmez. Eski token aynı transaction içinde
@@ -64,10 +83,22 @@ export const hazirlamayiBaslat = async (dersId, kullaniciId) => {
         temizleniyor: { $ne: true }, aktifMateryalIslemSayisi: 0,
         hazirlamaDurumu: { $ne: "isleniyor" },
     }, { $set: {
-        hazirlamaDurumu: "isleniyor", hazirlamaAsamasi: "metinler",
+        hazirlamaDurumu: "isleniyor",
         hazirlamaToken: token, hazirlamaHatasi: "", hazirlamaHataKodu: "",
     }, $currentDate: { hazirlamaSonYenileme: true } }, { new: true });
-    if (ders) return { ders, token, yeni: true };
+    if (ders) {
+        try {
+            const plan = await hazirlamaPlaniniDogrula(dersId, kullaniciId);
+            const guncel = await Ders.findOneAndUpdate(sahiplik(dersId, kullaniciId, token), {
+                $set: { hazirlamaAsamasi: plan.asama }, $currentDate: { hazirlamaSonYenileme: true },
+            }, { new: true });
+            if (!guncel) throw sorun("Hazırlama işlem sahipliği kaybedildi.");
+            return { ders: guncel, token, plan, yeni: true };
+        } catch (hata) {
+            await hazirlamaHatasiniKaydet(dersId, kullaniciId, token, hata);
+            return { ders: await Ders.findOne({ _id: dersId, kullaniciId }), yeni: false };
+        }
+    }
     const mevcut = await Ders.findOne({ _id: dersId, kullaniciId });
     if (!mevcut) throw sorun("Ders bulunamadı veya yetkiniz yok.", 404);
     if (mevcut.temizleniyor) throw sorun("Ders siliniyor.");
@@ -98,7 +129,7 @@ const haritayiHazirla = async (ders, kullaniciId, token) => {
     }
 };
 
-export const dersiHazirla = async (ders, kullaniciId, token) => sureOlc("toplam_hazirlama", async () => {
+export const dersiHazirla = async (ders, kullaniciId, token, dogrulanmisPlan = null) => sureOlc("toplam_hazirlama", async () => {
     const filtre = sahiplik(ders._id, kullaniciId, token);
     let heartbeatHatasi = null;
     let yenileme = null;
@@ -116,28 +147,23 @@ export const dersiHazirla = async (ders, kullaniciId, token) => sureOlc("toplam_
     }, 30_000);
     timer.unref?.();
     try {
-        await dogrula("metinler");
-        const materyaller = await Materyal.find({ dersId: ders._id, kullaniciId }).select("-cikarilanMetin").lean();
-        if (!materyaller.length || materyaller.some(m => m.durum !== "hazir" || !m.aktifIslemeId)) {
-            throw sorun("Tüm materyallerin metinleri hazır olmalıdır.");
-        }
-        for (const materyal of materyaller) {
-            const adet = await MetinParcasi.countDocuments({
-                dersId: ders._id, kullaniciId, materyalId: materyal._id, islemeId: materyal.aktifIslemeId,
-            });
-            if (!adet) throw sorun("Materyalin metin parçaları bulunamadı.");
-        }
-        // Sıralı üretim kota patlamasını ve embedding hatasında boşa harita çağrısını önler.
-        await dogrula("embedding");
+        await dogrula();
+        const plan = dogrulanmisPlan || await hazirlamaPlaniniDogrula(ders._id, kullaniciId);
+        await dogrula(plan.asama);
+        // Sadece güncel aktif sürümde eksik/geçersiz embedding'i bulunan materyaller.
         await sureOlc("embedding", async () => {
-            for (const materyal of materyaller) {
+            for (const { materyal, embedding } of plan.kayitlar) {
                 await dogrula();
-                const sonuc = await materyalEmbeddingleriniOlustur(materyal, materyal.aktifIslemeId, { sahipligiDogrula: dogrula });
+                const sonuc = embedding.hazirMi ? embedding : await materyalEmbeddingleriniOlustur(
+                    materyal, materyal.aktifIslemeId, { sahipligiDogrula: dogrula });
                 await dogrula();
                 if (!sonuc.toplam) throw sorun("Embedding parçaları bulunamadı.");
-                await Materyal.updateOne({ _id: materyal._id, aktifIslemeId: materyal.aktifIslemeId }, { $set: {
-                    embeddingDurumu: "hazir", embeddingHatasi: "", embeddingModel: sonuc.model, embeddingBoyutu: sonuc.boyut,
-                } });
+                if (!embedding.hazirMi || materyal.embeddingDurumu !== "hazir" ||
+                    materyal.embeddingModel !== sonuc.model || materyal.embeddingBoyutu !== sonuc.boyut) {
+                    await Materyal.updateOne({ _id: materyal._id, aktifIslemeId: materyal.aktifIslemeId }, { $set: {
+                        embeddingDurumu: "hazir", embeddingHatasi: "", embeddingModel: sonuc.model, embeddingBoyutu: sonuc.boyut,
+                    } });
+                }
             }
         });
         await dogrula("harita");
@@ -145,13 +171,7 @@ export const dersiHazirla = async (ders, kullaniciId, token) => sureOlc("toplam_
         await dogrula();
         await sureOlc("onay_veritabani_kaydi", () => dersOnayiniTamamla(ders._id, kullaniciId, token));
     } catch (hata) {
-        const aciklama = hazirlamaHatasiniAcikla(hata);
-        console.warn("[DersHazirlama]", { kod: aciklama.kod });
-        // Token koşulu, eski bir işin yeni işin durumunu bozmasını önler.
-        await Ders.updateOne({ _id: ders._id, kullaniciId, hazirlamaToken: token, hazirlamaDurumu: "isleniyor" }, { $set: {
-            hazirlamaDurumu: "hata", hazirlamaToken: null,
-            hazirlamaHatasi: aciklama.mesaj, hazirlamaHataKodu: aciklama.kod,
-        } });
+        await hazirlamaHatasiniKaydet(ders._id, kullaniciId, token, hata);
     } finally {
         clearInterval(timer);
         if (yenileme) await yenileme;

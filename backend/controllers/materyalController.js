@@ -31,7 +31,7 @@ const materyalIslemiBaslat = async (dersId, kullaniciId) => {
             hazirlamaDurumu: { $ne: "isleniyor" },
             temizleniyor: { $ne: true }
         },
-        { $inc: { aktifMateryalIslemSayisi: 1 } },
+        { $inc: { aktifMateryalIslemSayisi: 1 }, $set: { hazirlamaAsamasi: "metinler" } },
         { new: true }
     );
 };

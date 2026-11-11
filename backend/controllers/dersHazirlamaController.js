@@ -7,7 +7,7 @@ export const dersHazirlamayiBaslat = async (req, res) => {
     try {
         const sonuc = await hazirlamayiBaslat(req.params.id, req.user._id);
         if (sonuc.yeni) {
-            void dersiHazirla(sonuc.ders, req.user._id, sonuc.token).catch(() => {
+            void dersiHazirla(sonuc.ders, req.user._id, sonuc.token, sonuc.plan).catch(() => {
                 console.error("[DersHazirlama] Durum kaydı başarısız; süreli kilit üzerinden kurtarılacak.");
             });
         }

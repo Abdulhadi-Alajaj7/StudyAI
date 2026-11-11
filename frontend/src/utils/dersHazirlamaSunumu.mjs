@@ -28,13 +28,13 @@ export const HAZIRLAMA_ASAMALARI = [
 // önceki aşamanın tamamlandığına dair sunucu bilgisidir.
 export const hazirlamaAdimlariniGetir = (ders, baslatiliyor = false) => {
     const onaylandi = !baslatiliyor && ders?.materyallerOnaylandi === true;
-    const asamaIndex = !baslatiliyor && ["isleniyor", "hata"].includes(ders?.hazirlamaDurumu)
+    const asamaIndex = ["isleniyor", "hata"].includes(ders?.hazirlamaDurumu)
         ? HAZIRLAMA_ASAMALARI.findIndex(a => a.kod === ders?.hazirlamaAsamasi && a.kod !== "tamamlandi")
         : -1;
 
     return HAZIRLAMA_ASAMALARI.map((asama, index) => {
         const durum = onaylandi || (asamaIndex >= 0 && index < asamaIndex) ? "tamamlandi"
-            : index === asamaIndex ? ders.hazirlamaDurumu : "bekliyor";
+            : index === asamaIndex && !baslatiliyor ? ders.hazirlamaDurumu : "bekliyor";
         return {
             kod: asama.kod,
             baslik: asama.baslik,

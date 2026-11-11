@@ -4,11 +4,12 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createServer } from "vite";
 
-let vite, Ekran, Rozet;
+let vite, Ekran, Rozet, Silme;
 before(async () => {
     vite = await createServer({ server: { middlewareMode: true }, appType: "custom" });
     Ekran = (await vite.ssrLoadModule("/src/components/DersHazirlamaEkrani.jsx")).default;
     Rozet = (await vite.ssrLoadModule("/src/components/DersDurumRozeti.jsx")).default;
+    Silme = (await vite.ssrLoadModule("/src/components/SilmeGostergesi.jsx")).default;
 });
 after(async () => { await vite?.close(); });
 
@@ -18,6 +19,16 @@ const ekran = props => renderToStaticMarkup(React.createElement(Ekran, {
 }));
 
 for (const isDark of [false, true]) {
+    test(`${isDark ? "koyu" : "açık"} tema: ders ve materyal silme göstergesi canlı durum ve sade ikon içerir`, () => {
+        for (const materyal of [false, true]) {
+            const html = renderToStaticMarkup(React.createElement(Silme, { isDark, materyal }));
+            assert.match(html, /role="dialog" aria-modal="true"/);
+            assert.match(html, /role="status"/);
+            assert.match(html, /motion-safe:animate-spin/);
+            assert.ok(html.includes(materyal ? "Materyal Siliniyor..." : "Ders Siliniyor..."));
+            assert.doesNotMatch(html, /<button|<progress|Başarıyla silindi/);
+        }
+    });
     test(`${isDark ? "koyu" : "açık"} tema: hazırlama adımları yeşil tik, aktif işlem ve nötr beklemeyle çizilir`, () => {
         const html = ekran({ isDark });
         assert.match(html, /Dersiniz Hazırlanıyor/);
@@ -28,7 +39,7 @@ for (const isDark of [false, true]) {
         assert.equal((html.match(/aria-current="step"/g) || []).length, 1);
         assert.match(html, /bg-emerald-500 text-white/);
         assert.match(html, /motion-safe:animate-spin/);
-        assert.match(html, /sm:p-6/);
+        assert.match(html, /sm:p-5/);
         assert.doesNotMatch(html, /Yeniden Dene|aria-label="Kapat"|<progress/);
         assert.doesNotMatch(html.replace(/<[^>]*>/g, ""), /\d+%/);
     });
@@ -62,8 +73,9 @@ for (const isDark of [false, true]) {
 test("istek beklerken eski hata ekranı yerine başlatılıyor görünümü çizilir", () => {
     const html = ekran({ baslatiliyor: true, ders: { hazirlamaDurumu: "hata", hazirlamaAsamasi: "harita" } });
     assert.match(html, /Hazırlama başlatılıyor/);
-    assert.equal((html.match(/data-durum="bekliyor"/g) || []).length, 4);
-    assert.doesNotMatch(html, /data-durum="tamamlandi"|data-durum="hata"|Yeniden Dene/);
+    assert.equal((html.match(/data-durum="bekliyor"/g) || []).length, 2);
+    assert.equal((html.match(/data-durum="tamamlandi"/g) || []).length, 2);
+    assert.doesNotMatch(html, /data-durum="hata"|Yeniden Dene/);
 });
 
 test("hazırlama görünümü merkezlenmiş, kendi içinde kaydırılan ve kapatma eylemi olmayan bir modaldır", () => {

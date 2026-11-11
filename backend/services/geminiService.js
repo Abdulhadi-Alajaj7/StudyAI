@@ -1,3 +1,5 @@
+import { geminiHazirlamaHatasiniSiniflandir, geminiRetryBeklemesiniGetir, geminiTanilamasiniLogla } from "../utils/geminiHazirlamaHatasi.js";
+import { haritaIstekAyarlari, haritaSinirlayiciOlustur } from "../utils/geminiHaritaSiniri.js";
 import { sureOlc } from "../utils/islemSuresi.js";
 import { GoogleGenAI } from "@google/genai";
 import { koklerEslesiyorMu } from "./konuKimlikEslemeService.js";
@@ -2361,62 +2363,48 @@ export const geminiBaglantisiniDogrula = async (modelAdi = VARSAYILAN_GEMINI_MOD
 /**
  * Ortak API çağrısı ve yeniden deneme mekanizması.
  */
-async function callGeminiStructuredJson(ai, modelAdi, prompt, systemInstruction) {
-    let gecikme = 1000;
-    const maxDeneme = 2;
-    let sonHata = null;
-
-    for (let deneme = 1; deneme <= maxDeneme; deneme++) {
+const haritaSiniri = haritaSinirlayiciOlustur();
+export async function callGeminiStructuredJson(ai, modelAdi, prompt, systemInstruction, bagimliliklar = {}) {
+    const ayarlar = bagimliliklar.ayarlar || haritaIstekAyarlari();
+    const beklet = bagimliliklar.beklet || (ms => new Promise(r => setTimeout(r, ms)));
+    const simdi = bagimliliklar.simdi || Date.now;
+    const sinir = bagimliliklar.sinir || haritaSiniri;
+    const logger = bagimliliklar.logger || console;
+    const asama = bagimliliklar.asama || "konu_haritasi";
+    const tahminiToken = Math.ceil((prompt.length + systemInstruction.length) / 3);
+    let sonHata;
+    let istemci = ai;
+    for (let deneme = 1; deneme <= ayarlar.maksDeneme; deneme++) {
+        const baslangic = performance.now();
+        let yanit;
         try {
-            const response = await sureOlc("gemini_konu_haritasi_istegi", () => ai.models.generateContent({
-                model: modelAdi,
-                contents: prompt,
-                config: {
-                    systemInstruction,
-                    temperature: 0.2,
-                    responseMimeType: "application/json"
-                }
-            }));
-
-            const rawText = response?.text?.trim() || "";
-            if (!rawText) {
-                throw new Error("Gemini API boş yanıt döndürdü.");
-            }
-
-            // JSON Temizleme
-            let jsonMetni = rawText;
-            if (jsonMetni.startsWith("```json")) {
-                jsonMetni = jsonMetni.replace(/^```json\s*/i, "").replace(/```$/, "").trim();
-            } else if (jsonMetni.startsWith("```")) {
-                jsonMetni = jsonMetni.replace(/^```\s*/, "").replace(/```$/, "").trim();
-            }
-
+            istemci ||= getGeminiClient({ timeout: ayarlar.timeoutMs });
+            sinir.kontrolEt(modelAdi, tahminiToken, ayarlar, simdi());
+            yanit = await sureOlc("gemini_konu_haritasi_istegi", () => zamanAsimliCalistir(abortSignal => istemci.models.generateContent({
+                model: modelAdi, contents: prompt,
+                config: { systemInstruction, temperature: 0.2, responseMimeType: "application/json", abortSignal,
+                    ...(ayarlar.maxOutputTokens ? { maxOutputTokens: ayarlar.maxOutputTokens } : {}),
+                },
+            }), ayarlar.timeoutMs));
+            const finishReason = yanit?.candidates?.[0]?.finishReason;
+            if (finishReason === "MAX_TOKENS") throw Object.assign(new Error("Çıktı sınırı"), { kod: "GEMINI_CIKTI_SINIRI", status: 502 });
+            if (!yanit?.text?.trim()) throw Object.assign(new Error("Boş yanıt"), { kod: "GEMINI_BOS_YANIT", status: 502 });
             let parsed;
-            try {
-                parsed = JSON.parse(jsonMetni);
-            } catch {
-                throw new Error("Gemini geçerli bir JSON döndürmedi.");
-            }
-
-            const dogrulanmis = semaDogrulaVeNormalizeEt(parsed);
-            if (dogrulanmis.length === 0) {
-                throw new Error("Gemini çıktısında geçerli konu tespit edilemedi.");
-            }
-
-            return dogrulanmis;
-        } catch (err) {
-            sonHata = err;
-            const status = Number(err.status ?? err.statusCode ?? err.code);
-            const isRetryable = [429, 503].includes(status) || /429|503|timeout/i.test(err.message || "");
-            if (deneme < maxDeneme && isRetryable) {
-                await new Promise((r) => setTimeout(r, gecikme));
-                gecikme *= 2;
-            } else {
-                break;
-            }
+            try { parsed = jsonMetniniAyikla(yanit.text); }
+            catch { throw Object.assign(new Error("Geçersiz JSON"), { kod: "GEMINI_GECERSIZ_JSON", status: 502 }); }
+            const konular = semaDogrulaVeNormalizeEt(parsed);
+            if (!konular.length) throw Object.assign(new Error("Geçersiz şema"), { kod: "GEMINI_GECERSIZ_SEMA", status: 502 });
+            geminiTanilamasiniLogla({ asama, model: modelAdi, deneme, sureMs: performance.now() - baslangic, yanit, logger });
+            return konular;
+        } catch (hata) {
+            sonHata = geminiHazirlamaHatasiniSiniflandir(hata, simdi());
+            sinir.hataKaydet(modelAdi, sonHata, simdi());
+            geminiTanilamasiniLogla({ asama, model: modelAdi, deneme, sureMs: performance.now() - baslangic, hata: sonHata, yanit, logger });
+            const bekleme = geminiRetryBeklemesiniGetir(sonHata, deneme, ayarlar.maksBeklemeMs);
+            if (deneme === ayarlar.maksDeneme || bekleme == null) break;
+            await beklet(bekleme);
         }
     }
-
     throw sonHata;
 }
 
@@ -2424,7 +2412,6 @@ async function callGeminiStructuredJson(ai, modelAdi, prompt, systemInstruction)
  * Tek bir metin bloğundan Gemini ile yapılandırılmış JSON konu haritası üretir.
  */
 export const geminiIleKonuHaritasiUret = async (metinIcerik, dersBilgisi, modelAdi = VARSAYILAN_GEMINI_MODELI) => {
-    const ai = getGeminiClient({ timeout: 60_000 });
 
     const systemInstruction = `Sen üniversite düzeyinde uzman bir müfredat ve konu taksonomisi analizcisisin.
 Görevin: Verilen ders materyali içeriğini hiyerarşik bir Konu Haritasına (Ana Konular ve Alt Konular) dönüştürmektir.
@@ -2463,14 +2450,13 @@ ${metinIcerik}
 
 Lütfen yukarıdaki materyal metnine dayanarak müfredat Konu Haritasını yukarıda belirtilen JSON şemasına tam uyumlu olarak üret.`;
 
-    return await callGeminiStructuredJson(ai, modelAdi, prompt, systemInstruction);
+    return await callGeminiStructuredJson(null, modelAdi, prompt, systemInstruction);
 };
 
 /**
  * Birden fazla batch'ten çıkarılan ara konu listelerini tek bir tutarlı, tekrar etmeyen hiyerarşik haritada birleştirir.
  */
 export const geminiIleKonulariBirlestir = async (araKonuListeleri, dersBilgisi, modelAdi = VARSAYILAN_GEMINI_MODELI) => {
-    const ai = getGeminiClient({ timeout: 60_000 });
 
     const systemInstruction = `Sen üniversite düzeyinde uzman bir müfredat ve konu taksonomisi sentezleyicisisin.
 Sana bir dersin farklı materyal bölümlerinden çıkarılmış ham konu listeleri verilmektedir.
@@ -2508,7 +2494,7 @@ ${JSON.stringify(araKonuListeleri, null, 2)}
 
 Lütfen bu ham konuları sentezleyip birleştirerek tek bir hiyerarşik JSON Konu Haritası üret.`;
 
-    return await callGeminiStructuredJson(ai, modelAdi, prompt, systemInstruction);
+    return await callGeminiStructuredJson(null, modelAdi, prompt, systemInstruction, { asama: "konu_haritasi_birlestirme" });
 };
 
 /**

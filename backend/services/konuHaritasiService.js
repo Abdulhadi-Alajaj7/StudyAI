@@ -250,7 +250,7 @@ export const konuHaritasiUretVeKaydet = async (
     ders,
     kullaniciId,
     islemToken,
-    modelAdi = VARSAYILAN_GEMINI_MODELI,
+    modelAdi = process.env.GEMINI_KONU_HARITASI_MODELI?.trim() || VARSAYILAN_GEMINI_MODELI,
     heartbeatSecenekleri = {}
 ) => {
     let heartbeat = null;

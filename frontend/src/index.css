@@ -72,3 +72,15 @@ select {
 .sohbet-mesaj-scrollbar::-webkit-scrollbar-thumb:hover {
   --sohbet-scroll-thumb: rgb(129 140 248 / 72%);
 }
+
+/* Hazırlama modalında kaydırma korunur; yalnız kaydırma çubuğu gizlenir. */
+.hazirlama-modal-scroll {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  touch-action: pan-y;
+}
+.hazirlama-modal-scroll::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}

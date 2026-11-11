@@ -21,7 +21,10 @@ const zincir = (deger) => ({
 mock.module("../models/MetinParcasi.js", {
     defaultExport: {
         find(filtre) {
-            return zincir(filtre.materyalId ? parcalar : [...onbellek, ...parcalar.filter(p => p.embeddingDurumu === "hazir")]);
+            return zincir(filtre.materyalId ? parcalar.filter(p => !p.islemeId || String(p.islemeId) === String(filtre.islemeId)) : [
+                ...onbellek, ...parcalar.filter(p => p.embeddingDurumu === "hazir" && p.embeddingModel === filtre.embeddingModel &&
+                    p.embeddingBoyutu === filtre.embeddingBoyutu && filtre.embeddingGirdiHash.$in.includes(p.embeddingGirdiHash)),
+            ]);
         },
         async bulkWrite(islemler) {
             yazmaIslemleri = islemler;
@@ -34,7 +37,7 @@ mock.module("../models/MetinParcasi.js", {
     }
 });
 
-const { materyalEmbeddingleriniOlustur } = await import("../services/embeddingService.js");
+const { materyalEmbeddingleriniOlustur, materyalEmbeddingHazirliginiKontrolEt } = await import("../services/embeddingService.js");
 
 const ayarlar = {
     model: "gemini-embedding-001",
@@ -135,4 +138,43 @@ test("sonraki embedding partisi hata verse de önceki parti saklanır ve retry o
     assert.equal(cagrilar, 3);
     assert.equal(sonuc.onbellektenKullanilan, 1);
     assert.equal(sonuc.apiIleOlusturulan, 1);
+});
+
+test("eksiksiz güncel embedding doğrulanır; tekrar çağrıda API ve veritabanı yazısı yapılmaz", async () => {
+    const istemci = { models: { async embedContent() { return { embeddings: [{ values: [1, 0, 0] }] }; } } };
+    await materyalEmbeddingleriniOlustur(materyal, islemeId, { ayarlar, istemci, limitUygula: false });
+    const kontrol = await materyalEmbeddingHazirliginiKontrolEt(materyal, islemeId, ayarlar);
+    assert.equal(kontrol.hazirMi, true);
+    yazmaIslemleri = [];
+    await materyalEmbeddingleriniOlustur(materyal, islemeId, { ayarlar, istemci: { models: { embedContent() { assert.fail("API çağrılmamalı"); } } } });
+    assert.deepEqual(yazmaIslemleri, []);
+});
+
+for (const bozulma of ["model", "boyut", "icerik", "vektor"]) {
+    test(`${bozulma} geçersizse yalnız etkilenen embedding yeniden hazırlanır`, async () => {
+        parcalar[1].icerik = "farklı bölüm";
+        const istemci = { models: { async embedContent(istek) {
+            const adet = Array.isArray(istek.contents) ? istek.contents.length : 1;
+            return { embeddings: Array.from({ length: adet }, () => ({ values: [1, 0, 0] })) };
+        } } };
+        await materyalEmbeddingleriniOlustur(materyal, islemeId, { ayarlar, istemci, limitUygula: false });
+        if (bozulma === "model") parcalar[1].embeddingModel = "eski-model";
+        if (bozulma === "boyut") parcalar[1].embeddingBoyutu = 99;
+        if (bozulma === "icerik") parcalar[1].icerik = "güncellenen içerik";
+        if (bozulma === "vektor") parcalar[1].embedding = [NaN, 0, 0];
+        const kontrol = await materyalEmbeddingHazirliginiKontrolEt(materyal, islemeId, ayarlar);
+        assert.equal(kontrol.hazirMi, false);
+        assert.equal(kontrol.eksikParcaSayisi, 1);
+        const sonuc = await materyalEmbeddingleriniOlustur(materyal, islemeId, { ayarlar, istemci, limitUygula: false });
+        assert.equal(sonuc.apiIleOlusturulan, 1);
+        assert.equal(yazmaIslemleri.length, 1);
+        assert.equal(String(yazmaIslemleri[0].updateOne.filter._id), String(parcalar[1]._id));
+    });
+}
+
+test("başka aktif sürümün embedding'i hazır kabul edilmez", async () => {
+    parcalar.forEach(p => { p.islemeId = new mongoose.Types.ObjectId(); });
+    const kontrol = await materyalEmbeddingHazirliginiKontrolEt(materyal, islemeId, ayarlar);
+    assert.equal(kontrol.hazirMi, false);
+    assert.equal(kontrol.toplam, 0);
 });

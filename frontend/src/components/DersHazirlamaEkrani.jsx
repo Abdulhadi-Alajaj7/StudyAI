@@ -75,10 +75,10 @@ export default function DersHazirlamaEkrani({ ders, isDark, baslatiliyor, hata, 
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
             <section ref={modalRef} role="dialog" aria-modal="true" aria-labelledby="ders-hazirlama-baslik"
                 aria-describedby="ders-hazirlama-aciklama" tabIndex={-1}
-                className={`max-h-[calc(100dvh-2rem)] w-full min-w-0 max-w-xl overflow-y-auto overscroll-contain rounded-2xl border shadow-2xl outline-none ${isDark ? "border-[#26334A] bg-[#162137]" : "border-[#E7E5EF] bg-white"}`}>
+                className={`hazirlama-modal-scroll max-h-[calc(100dvh-2rem)] w-full min-w-0 max-w-xl overflow-y-auto overscroll-contain rounded-2xl border shadow-2xl outline-none ${isDark ? "border-[#26334A] bg-[#162137]" : "border-[#E7E5EF] bg-white"}`}>
                 <div className={`h-1 ${basarisiz ? "bg-red-500" : "bg-[#4F46E5]"}`} />
-                <div className="p-4 sm:p-6">
-                    <header className="mb-5 text-center">
+                <div className="p-4 sm:p-5">
+                    <header className="mb-4 text-center">
                         <div className={`relative mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl border ${basarisiz
                             ? isDark ? "border-red-400/25 bg-red-400/10 text-red-300" : "border-red-100 bg-red-50 text-red-600"
                             : isDark ? "border-indigo-400/25 bg-indigo-400/10 text-indigo-300" : "border-indigo-100 bg-indigo-50 text-[#4F46E5]"}`}>
