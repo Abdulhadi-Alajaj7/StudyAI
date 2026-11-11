@@ -37,7 +37,7 @@ const hataYaniti = (res, hata) => {
         return res.status(hata.status).json({ hata: hata.message, kod: hata.kod });
     }
 
-    console.error("Sohbet işlemi hatası:", hata);
+    console.error("Sohbet işlemi hatası:", { kod: "BEKLENMEYEN_SUNUCU_HATASI" });
     return res.status(500).json({
         hata: "Sohbet işlemi sırasında bir sunucu hatası oluştu.",
         kod: "SOHBET_SUNUCU_HATASI",

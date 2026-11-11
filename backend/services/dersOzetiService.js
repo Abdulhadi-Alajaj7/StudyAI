@@ -59,6 +59,7 @@ const bagimliliklariGetir = (bagimliliklar = {}) => ({
     semanticArama: bagimliliklar.semanticArama || semanticAramaYap,
     geminiOzetUret: bagimliliklar.geminiOzetUret || geminiIleDersOzetiUret,
     simdi: bagimliliklar.simdi || (() => new Date()),
+    heartbeatAraligiMs: bagimliliklar.heartbeatAraligiMs || 30_000,
     kaynakButcesi: bagimliliklar.kaynakButcesi || kaynakButcesiGetir(),
     batchButcesi: bagimliliklar.batchButcesi || batchButcesiGetir(),
 });
@@ -787,8 +788,32 @@ export const dersOzetiOlustur = async ({
         );
     }
 
-    const heartbeat = () => kilidiYenile(kilitliOzet._id, islemToken, deps);
+    let yenileme = Promise.resolve();
+    let kilitHatasi = null;
+    let yenileniyor = false;
+    const heartbeat = () => {
+        if (kilitHatasi) return Promise.reject(kilitHatasi);
+        if (yenileniyor) return yenileme;
+        yenileniyor = true;
+        yenileme = kilidiYenile(kilitliOzet._id, islemToken, deps)
+            .catch(hata => { kilitHatasi = hata; throw hata; })
+            .finally(() => { yenileniyor = false; });
+        return yenileme;
+    };
+    const zamanlayici = setInterval(() => {
+        heartbeat().catch(() => { clearInterval(zamanlayici); });
+    }, deps.heartbeatAraligiMs);
+    zamanlayici.unref?.();
     try {
+        if (!yenidenOlustur && kilitliOzet.basarili && await kayitliOzetGuncelMi({
+            kullaniciId, dersId, tur, hedef, ozet: belgeyiNesneyeCevir(kilitliOzet),
+        }, deps)) {
+            await deps.DersOzetiModel.updateOne(
+                { _id: kilitliOzet._id, aktifIslemToken: islemToken },
+                { $set: { aktifIslemToken: null, kilitSonYenilemeTarihi: null } }
+            );
+            return { ozet: { ...belgeyiNesneyeCevir(kilitliOzet), aktifIslemToken: null, kilitSonYenilemeTarihi: null }, onbellekten: true };
+        }
         const kaynakVerisi = await kaynaklariHazirla({
             kullaniciId,
             dersId,
@@ -824,6 +849,8 @@ export const dersOzetiOlustur = async ({
             materyalIds: ozetKapsamiMateryalIds(tur, guncelHedef),
         }, deps);
 
+        clearInterval(zamanlayici);
+        await yenileme;
         const kaydedilen = await deps.DersOzetiModel.findOneAndUpdate(
             { _id: kilitliOzet._id, aktifIslemToken: islemToken },
             {
@@ -860,5 +887,8 @@ export const dersOzetiOlustur = async ({
             }
         ).catch(() => {});
         throw hata;
+    } finally {
+        clearInterval(zamanlayici);
+        await yenileme.catch(() => {});
     }
 };

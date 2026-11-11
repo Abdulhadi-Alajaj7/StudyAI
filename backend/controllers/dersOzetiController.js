@@ -107,9 +107,8 @@ const hataYaniti = (res, hata) => {
         });
     }
 
-    // Hata mesajı dışında nesneyi loglamayarak sağlayıcı yanıtı veya hassas
-    // yapılandırmanın loglara taşınmasını engelle.
-    console.error("Ders özeti işlemi hatası:", hata?.message || "Bilinmeyen hata");
+    // Ham hata mesajları da hassas içerik taşıyabilir; yalnızca sabit kod logla.
+    console.error("Ders özeti işlemi hatası:", { kod: "BEKLENMEYEN_SUNUCU_HATASI" });
     return res.status(500).json({
         hata: "Ders özeti işlemi sırasında bir sunucu hatası oluştu.",
         kod: "DERS_OZETI_SUNUCU_HATASI",

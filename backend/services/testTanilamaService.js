@@ -21,6 +21,7 @@ const guvenliHataKaynagi = (deger) => [
     "uygulama_timeout",
     "yanit_isleme",
     "bilinmiyor",
+    "yerel_sinir",
 ].includes(deger) ? deger : null;
 const guvenliKonuTuru = (deger) => ["ana", "alt", "bilinmiyor"].includes(deger)
     ? deger
@@ -66,6 +67,9 @@ export const testTanilamaKaydiOlustur = (girdi = {}, simdi = () => new Date()) =
     retryEdildiMi: guvenliBoolean(girdi.retryEdildiMi),
     gercekDenemeSayisi: guvenliSayi(girdi.gercekDenemeSayisi),
     maksimumDenemeSayisi: guvenliSayi(girdi.maksimumDenemeSayisi),
+    kotaTuru: ["gunluk", "rpm", "tpm", "bilinmiyor"].includes(girdi.kotaTuru) ? girdi.kotaTuru : null,
+    retryAfterMs: guvenliSayi(girdi.retryAfterMs),
+    toplamIslemSureMs: guvenliSayi(girdi.toplamIslemSureMs),
     partiSayisi: guvenliSayi(girdi.partiSayisi),
     partiIndeksi: guvenliSayi(girdi.partiIndeksi),
     partiBoyutu: guvenliSayi(girdi.partiBoyutu),

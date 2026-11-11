@@ -610,3 +610,110 @@ test("konu özetinde kapsama dahil kaynak değişirse eski cache yerine yeni öz
         [String(materyalId), String(ikinciMateryalId)]
     );
 });
+
+test("denetim: ilk okuma ile kilit arasında tamamlanan özet yeniden üretilmez", async () => {
+    let cagrilar = 0;
+    const { bagimliliklar, ozetGetir } = bagimliliklariOlustur({ geminiOzetUret: async () => {
+        cagrilar++; return { icerik: ozetIcerigi("Gereksiz yeni özet") };
+    } });
+    const model = bagimliliklar.DersOzetiModel;
+    const oncekiUpsert = model.updateOne;
+    model.updateOne = async (filtre, guncelleme) => {
+        const sonuc = await oncekiUpsert(filtre, guncelleme);
+        if (guncelleme.$setOnInsert) await oncekiUpsert({}, { $set: {
+            basarili: true, icerik: ozetIcerigi("Diğer istekte tamamlandı"),
+            kaynakSurumleri: [{ materyalId, aktifIslemeId: islemeId }],
+        } });
+        return sonuc;
+    };
+    const sonuc = await dersOzetiOlustur({ kullaniciId, dersId, tur: "tum_ders", uzunluk: "orta" }, bagimliliklar);
+    assert.equal(cagrilar, 0);
+    assert.equal(sonuc.onbellekten, true);
+    assert.equal(ozetGetir().aktifIslemToken, null);
+});
+
+test("denetim: uzun Gemini çağrısı boyunca özet kilidi periyodik yenilenir", async () => {
+    let baslat, bitir, yenilemeler = 0;
+    const basladi = new Promise(r => { baslat = r; });
+    const bekleme = new Promise(r => { bitir = r; });
+    const { bagimliliklar } = bagimliliklariOlustur({ geminiOzetUret: async () => {
+        baslat(); await bekleme; return { icerik: ozetIcerigi("Özet") };
+    } });
+    bagimliliklar.heartbeatAraligiMs = 5;
+    const onceki = bagimliliklar.DersOzetiModel.updateOne;
+    bagimliliklar.DersOzetiModel.updateOne = async (f, g) => {
+        if (g.$currentDate) yenilemeler++;
+        return onceki(f, g);
+    };
+    const islem = dersOzetiOlustur({ kullaniciId, dersId, tur: "tum_ders", uzunluk: "orta" }, bagimliliklar);
+    await basladi;
+    await new Promise(r => setTimeout(r, 35));
+    const devamEderken = yenilemeler;
+    bitir(); await islem;
+    assert.ok(devamEderken >= 2);
+});
+
+
+test("denetim: uzun özet ara partileri sırayla üretir ve bir defa birleştirir", async () => {
+    const girdiler = [];
+    const { bagimliliklar, ozetGetir } = bagimliliklariOlustur({
+        metinParcalari: Array.from({ length: 3 }, (_, i) => ({
+            _id: new mongoose.Types.ObjectId(), materyalId, islemeId, parcaIndex: i,
+            icerik: `Bölüm${i + 1} ` + "Sentetik ders içeriği. ".repeat(40),
+        })),
+        geminiOzetUret: async girdi => {
+            girdiler.push(girdi);
+            return { icerik: ozetIcerigi(girdi.araOzet ? `Ara${girdiler.length}` : "Birleşik özet") };
+        },
+    });
+    bagimliliklar.batchButcesi = 1100;
+    await dersOzetiOlustur({ kullaniciId, dersId, tur: "tum_ders", uzunluk: "uzun" }, bagimliliklar);
+    assert.equal(girdiler.length, 4);
+    assert.deepEqual(girdiler.slice(0, 3).map(g => g.araOzet), [true, true, true]);
+    for (let i = 0; i < 3; i++) assert.ok(girdiler[i].kaynakMetni.includes(`Bölüm${i + 1}`));
+    const final = girdiler[3].kaynakMetni;
+    assert.ok(final.indexOf("Ara1") < final.indexOf("Ara2"));
+    assert.ok(final.indexOf("Ara2") < final.indexOf("Ara3"));
+    assert.equal(ozetGetir().icerik.genelBakis, "Birleşik özet");
+    assert.equal(ozetGetir().aktifIslemToken, null);
+});
+
+test("denetim: periyodik yenilemede sahiplik kaybolursa eski özet ve yeni sahibin kilidi korunur", async () => {
+    const eskiIcerik = ozetIcerigi("Önceki başarılı özet");
+    let bitir, baslat, kaybet;
+    const basladi = new Promise(r => { baslat = r; });
+    const bitti = new Promise(r => { bitir = r; });
+    const kayboldu = new Promise(r => { kaybet = r; });
+    const { bagimliliklar, ozetGetir } = bagimliliklariOlustur({
+        ilkOzet: { _id: new mongoose.Types.ObjectId(), basarili: true, icerik: eskiIcerik, aktifIslemToken: null },
+        geminiOzetUret: async () => { baslat(); await bitti; return { icerik: ozetIcerigi("Kaydedilmemeli") }; },
+    });
+    bagimliliklar.heartbeatAraligiMs = 5;
+    const onceki = bagimliliklar.DersOzetiModel.updateOne;
+    let sayi = 0;
+    const yeniToken = new mongoose.Types.ObjectId();
+    bagimliliklar.DersOzetiModel.updateOne = async (filtre, guncelleme) => {
+        if (guncelleme.$currentDate && ++sayi === 2) {
+            await onceki({}, { $set: { aktifIslemToken: yeniToken } });
+            kaybet();
+            return { matchedCount: 0 };
+        }
+        return onceki(filtre, guncelleme);
+    };
+    const islem = dersOzetiOlustur({ kullaniciId, dersId, tur: "tum_ders", uzunluk: "orta", yenidenOlustur: true }, bagimliliklar);
+    let zamanlayici;
+    try {
+        await basladi;
+        await Promise.race([
+            kayboldu,
+            new Promise((_, reject) => { zamanlayici = setTimeout(() => reject(new Error("Kilit yenilenmedi")), 1000); }),
+        ]);
+        bitir();
+        await assert.rejects(islem, hata => hata.kod === "OZET_ISLEM_SAHIPLIGI_KAYBEDILDI");
+    } finally {
+        clearTimeout(zamanlayici);
+        bitir();
+    }
+    assert.deepEqual(ozetGetir().icerik, eskiIcerik);
+    assert.equal(String(ozetGetir().aktifIslemToken), String(yeniToken));
+});

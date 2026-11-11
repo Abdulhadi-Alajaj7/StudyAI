@@ -178,7 +178,7 @@ const hataYaniti = (res, hata) => {
             kod: "GECERSIZ_TEST_VERISI",
         });
     }
-    console.error("Test sistemi işlemi hatası:", hata?.message || "Bilinmeyen hata");
+    console.error("Test sistemi işlemi hatası:", { kod: "BEKLENMEYEN_SUNUCU_HATASI" });
     return res.status(500).json({
         hata: "Test sistemi işlemi sırasında bir sunucu hatası oluştu.",
         kod: "TEST_SISTEMI_SUNUCU_HATASI",

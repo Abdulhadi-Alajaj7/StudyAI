@@ -5,6 +5,25 @@ const teknikMesajCevirileri = [
     [/unauthorized|invalid token|jwt expired/i, "Oturumunuz sona ermiş olabilir. Lütfen tekrar giriş yapın."]
 ];
 
+// Yalnızca sabit mesajlar: sağlayıcının teknik hata gövdesini ekrana taşıma.
+const guvenliKodMesajlari = new Map([
+    ["GEMINI_GECICI_HATA", "Yapay zekâ hizmeti geçici olarak yoğun. Biraz sonra yeniden deneyin."],
+    ["GEMINI_ISTEK_YOGUNLUGU", "Yapay zekâ işlemleri şu anda yoğun. Biraz sonra yeniden deneyin."],
+    ["GEMINI_KOTA_ASIMI", "Yapay zekâ kullanım sınırına ulaşıldı. Bir süre bekleyip yeniden deneyin."],
+    ["GEMINI_GUNLUK_KOTA", "Yapay zekâ günlük kotası doldu. Kota yenilendikten sonra yeniden deneyin."],
+    ["GEMINI_ZAMAN_ASIMI", "Yapay zekâ yanıtı zamanında alınamadı. Yeniden deneyebilirsiniz."],
+    ["GEMINI_AG_HATASI", "Yapay zekâ hizmetine bağlanılamadı. Biraz sonra yeniden deneyin."],
+    ["GEMINI_GECERSIZ_TEST_YANITI", "Üretilen sorular doğrulanamadı. Yeniden deneyebilirsiniz."],
+    ["YETERSIZ_TEST_ICERIGI", "Yeterli kaynak içeriği bulunamadı. Daha geniş bir kapsam seçin."],
+    ["GEMINI_GECERSIZ_YANIT", "Üretilen içerik doğrulanamadı. Yeniden deneyebilirsiniz."],
+    ["GEMINI_YAPILANDIRMA", "Yapay zekâ erişim ayarları kontrol edilmeli. Lütfen yöneticiye bildirin."],
+    ["GEMINI_MODEL_BULUNAMADI", "Yapay zekâ modeli kullanılamıyor. Lütfen yöneticiye bildirin."],
+    ["GEMINI_GECERSIZ_ISTEK", "Yapay zekâ isteği kabul edilmedi. Lütfen yöneticiye bildirin."],
+    ["GEMINI_ISTEK_BOYUTU", "İçerik yapay zekâ isteği için çok büyük. Daha dar bir kapsam seçin."],
+    ["GEMINI_CAGRI_BUTCESI_ASILDI", "İçerik güvenle tamamlanamadı. Daha dar bir kapsamla yeniden deneyin."],
+    ["UYGUN_ICERIK_BULUNAMADI", "Uygun kaynak içeriği bulunamadı. Materyallerinizi kontrol edin."],
+]);
+
 export const kullaniciHataMesaji = (
     hata,
     varsayilanMesaj = "İşlem sırasında bir sorun oluştu. Lütfen tekrar deneyin."
@@ -16,6 +35,8 @@ export const kullaniciHataMesaji = (
     }
 
     const durum = hata.response.status;
+    const guvenliMesaj = guvenliKodMesajlari.get(hata.response.data?.kod);
+    if (guvenliMesaj) return guvenliMesaj;
     if (durum === 401) {
         return "Oturumunuz sona ermiş olabilir. Lütfen tekrar giriş yapın.";
     }

@@ -611,7 +611,7 @@ const kaynakSurumleriniDogrula = async ({
     }
 };
 
-export const testOlustur = async ({
+const testOlusturTekIslem = async ({
     kullaniciId,
     dersId,
     kapsamTuru,
@@ -981,4 +981,23 @@ export const testSonucunuGetir = async (girdi, bagimliliklar = {}) => {
         );
     }
     return testBelgesi;
+};
+
+
+// Yalnızca devam eden eş istekleri birleştirir; tamamlanmış testi önbelleklemez.
+const devamEdenTestler = new Map();
+export const testOlustur = async (girdi, bagimliliklar = {}) => {
+    const anahtar = JSON.stringify([
+        String(girdi.kullaniciId), String(girdi.dersId), girdi.kapsamTuru,
+        String(girdi.materyalId || ""), String(girdi.konuId || ""),
+        girdi.soruSayisi ?? 10, girdi.zorluk ?? "karisik",
+    ]);
+    if (devamEdenTestler.has(anahtar)) return devamEdenTestler.get(anahtar);
+    const islem = testOlusturTekIslem(girdi, bagimliliklar);
+    devamEdenTestler.set(anahtar, islem);
+    try {
+        return await islem;
+    } finally {
+        if (devamEdenTestler.get(anahtar) === islem) devamEdenTestler.delete(anahtar);
+    }
 };

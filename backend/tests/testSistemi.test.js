@@ -1038,3 +1038,37 @@ test("tamamlanmamış test sunumu cevap anahtarını, açıklamayı ve sonucu s�
     assert.equal(inceleme.sorular[0].aciklama, "Açıklama 1");
     assert.equal(inceleme.sonuc.basariOrani, 50);
 });
+
+test("denetim: eşzamanlı aynı test oluşturma tek üretim ve kayıt yapar", async () => {
+    let cagrilar = 0, baslat, bitir;
+    const basladi = new Promise(r => { baslat = r; });
+    const bekleme = new Promise(r => { bitir = r; });
+    const { bagimliliklar } = uretimBagimliliklari({ geminiTestUret: async () => {
+        cagrilar++; baslat(); await bekleme;
+        return { sorular: ornekSorular(5), model: "test-model" };
+    } });
+    const girdi = { kullaniciId, dersId, kapsamTuru: "tum_ders", soruSayisi: 5, zorluk: "orta" };
+    const ilk = testOlustur(girdi, bagimliliklar);
+    await basladi;
+    const ikinci = testOlustur(girdi, bagimliliklar);
+    await new Promise(r => setTimeout(r, 0));
+    bitir();
+    const [a, b] = await Promise.all([ilk, ikinci]);
+    assert.equal(cagrilar, 1);
+    assert.equal(String(a._id), String(b._id));
+});
+
+
+test("denetim: test üretimi hatasında single-flight kaydı temizlenir ve sonraki istek çalışır", async () => {
+    let sayi = 0;
+    const { bagimliliklar, kaydiGetir } = uretimBagimliliklari({ geminiTestUret: async () => {
+        if (++sayi === 1) throw Object.assign(new Error("Geçici servis hatası"), { status: 503, kod: "GEMINI_GECICI_HATA" });
+        return { sorular: ornekSorular(5, "orta") };
+    } });
+    const girdi = { kullaniciId, dersId, kapsamTuru: "tum_ders", soruSayisi: 5, zorluk: "orta" };
+    await assert.rejects(testOlustur(girdi, bagimliliklar), h => h.status === 503);
+    assert.equal(kaydiGetir(), undefined);
+    await testOlustur(girdi, bagimliliklar);
+    assert.equal(sayi, 2);
+    assert.equal(kaydiGetir().sorular.length, 5);
+});

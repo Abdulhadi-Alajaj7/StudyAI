@@ -9,6 +9,20 @@ import {
 
 const istemci = (islem) => ({ models: { generateContent: islem } });
 
+test("denetim: sağlayıcının 400/403/404 kodları genel 503'e çevrilmez", async () => {
+    for (const status of [400, 403, 404]) {
+        await assert.rejects(geminiIleSohbetYanitiUret({ soru: "Soru" }, {
+            istemci: istemci(async () => { throw Object.assign(new Error("sağlayıcı"), { status }); }), maxDeneme: 1,
+        }), hata => hata.status === status);
+    }
+});
+
+test("denetim: geçerli JSON olsa da MAX_TOKENS ile kesilmiş özet başarı sayılmaz", async () => {
+    await assert.rejects(geminiIleDersOzetiUret({ kaynakMetni: "Kaynak", tur: "tum_ders" }, {
+        istemci: istemci(async () => ({ text: JSON.stringify({ genelBakis: "Kesilmiş içerik" }), candidates: [{ finishReason: "MAX_TOKENS" }] })), maxDeneme: 1,
+    }), hata => hata.kod === "GEMINI_GECERSIZ_YANIT" && hata.tanilama?.dogrulamaAltKodu === "CIKTI_TOKEN_SINIRI");
+});
+
 test("Gemini sohbet yanıtını yapılandırılmış JSON ve token kullanımıyla normalize eder", async () => {
     let istek;
     const sonuc = await geminiIleSohbetYanitiUret({
@@ -48,7 +62,11 @@ test("Gemini kota aşımını agresif yeniden denemeden güvenli 429 hatasına �
         (hata) => {
             assert.equal(hata.status, 429);
             assert.equal(hata.kod, "GEMINI_KOTA_ASIMI");
-            assert.deepEqual(hata.tanilama, {
+            const { kotaTuru, retryAfterMs, toplamIslemSureMs, ...temelTanilama } = hata.tanilama;
+            assert.equal(kotaTuru, "bilinmiyor");
+            assert.equal(retryAfterMs, null);
+            assert.ok(toplamIslemSureMs >= 0);
+            assert.deepEqual(temelTanilama, {
                 orijinalSdkHataSinifi: "ApiError",
                 orijinalHttpDurumu: 429,
                 saglayiciHataKodu: "RESOURCE_EXHAUSTED",
@@ -149,8 +167,8 @@ test("Gemini ağ bağlantı hatasını sağlayıcı HTTP hatasından ayrı tanı
             maxDeneme: 1,
         }),
         (hata) => {
-            assert.equal(hata.status, 503);
-            assert.equal(hata.kod, "GEMINI_GECICI_HATA");
+            assert.equal(hata.status, 502);
+            assert.equal(hata.kod, "GEMINI_AG_HATASI");
             assert.equal(hata.tanilama?.orijinalSdkHataSinifi, "TypeError");
             assert.equal(hata.tanilama?.orijinalHttpDurumu, null);
             assert.equal(hata.tanilama?.agHataKodu, "ECONNRESET");

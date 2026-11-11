@@ -182,6 +182,32 @@ test("5/10/15/20 soruluk testler güvenilir en fazla beş soruluk partilerde ür
     }
 });
 
+test("denetim: kapsam, soru sayısı ve dört zorluk kombinasyonunda kesin sayı ve kaynaklar korunur", async () => {
+    for (const kapsamTuru of ["tum_ders", "materyal", "konu"]) {
+        for (const soruSayisi of [5, 10, 15, 20]) {
+            for (const zorluk of ["kolay", "orta", "zor", "karisik"]) {
+                const uretici = mockUretici();
+                const dagilim = zorlukDagiliminiOlustur(zorluk, soruSayisi);
+                const sonuc = await uret(soruSayisi, uretici, {
+                    kapsamTuru, zorlukDagilimi: dagilim,
+                    ...(kapsamTuru === "tum_ders" ? {} : {
+                        kaynaklar: [kaynaklar[0]], izinliKonuIds: [izinliKonuIds[0]],
+                    }),
+                });
+                assert.equal(sonuc.sorular.length, soruSayisi, `${kapsamTuru}/${soruSayisi}/${zorluk}`);
+                for (const seviye of ["kolay", "orta", "zor"]) {
+                    assert.equal(sonuc.sorular.filter(s => s.zorluk === seviye).length, dagilim[seviye] || 0);
+                }
+                assert.ok(sonuc.sorular.every(s => s.kaynaklar.length > 0));
+                if (kapsamTuru !== "tum_ders") {
+                    assert.ok(sonuc.sorular.every(s => s.kaynaklar.every(k => k.materyalId === "materyal-1")));
+                }
+                assert.equal(uretici.istekler.length, Math.ceil(soruSayisi / 5));
+            }
+        }
+    }
+});
+
 test("20 soruda güvenilir varsayılan parti boyutu dört kontrollü çağrı kullanır", async () => {
     const uretici = mockUretici();
     const sonuc = await uret(20, uretici);
@@ -1260,7 +1286,7 @@ test("503 geçici hatası exponential backoff ile bir kez yeniden denenir", asyn
     });
     assert.equal(sonuc.sorular.length, 5);
     assert.equal(cagrilar, 2);
-    assert.deepEqual(beklemeler, [400]);
+    assert.deepEqual(beklemeler, [1000]);
 });
 
 test("terminal izleme gerçek SDK retry çağrısını toplamdan ve ilk üretimden ayrı sayar", async () => {
@@ -1360,4 +1386,42 @@ test("test üretimi zaman aşımını 504 olarak sınırlar ve parti küçültme
         }
     );
     assert.equal(cagrilar, 1);
+});
+
+
+test("denetim: son partide iki 503 sonrası ilk iki parti korunarak 15 soruya tamamlanır", async () => {
+    const yanitla = siraliGecerliYanitOlustur();
+    const istekler = [];
+    const uretici = { istemci: { models: { async generateContent(istek) {
+        istekler.push(istek);
+        if ([3, 4].includes(istekler.length)) {
+            throw Object.assign(new Error(JSON.stringify({ error: { status: "UNAVAILABLE" } })), { status: 503 });
+        }
+        return yanitla(istek);
+    } } } };
+    const sonuc = await uret(15, uretici, { maxDeneme: 3 });
+    assert.equal(sonuc.sorular.length, 15);
+    assert.equal(istekler.length, 5);
+    assert.equal(istekler.filter(i => i.contents === istekler[0].contents).length, 1);
+    assert.equal(istekler.filter(i => i.contents === istekler[1].contents).length, 1);
+    assert.equal(istekler[2].contents, istekler[3].contents);
+    assert.equal(istekler[3].contents, istekler[4].contents);
+    assert.equal(new Set(sonuc.sorular.map(s => s.metin)).size, 15);
+});
+
+test("denetim: son partide uydurma kanıt veya yanlış cevap varsa önceki partiler başarı sayılmaz", async () => {
+    for (const bozuk of [
+        soru => ({ ...soru, kaynakKanitlari: [{ kaynakReferansi: "K1", alinti: "Kaynakta bulunmayan uydurma alıntı" }] }),
+        soru => ({ ...soru, dogruCevap: "B" }),
+    ]) {
+        const yanitla = siraliGecerliYanitOlustur();
+        let sayi = 0;
+        await assert.rejects(uret(15, { istemci: { models: { async generateContent(istek) {
+            sayi++;
+            return yanitla(istek, soru => sayi === 3 ? bozuk(soru) : soru);
+        } } } }, { maksimumOnarimDenemesi: 0, maksimumKucultmeDerinligi: 0 }), hata => (
+            hata.kod === "GEMINI_GECERSIZ_TEST_YANITI" && hata.tanilama?.dogrulamaAltKodu === "KAYNAK_KANITI"
+        ));
+        assert.equal(sayi, 3);
+    }
 });

@@ -588,3 +588,18 @@ test("tanılama varsayılan olarak yalnızca geliştirmede, ayarla açıkça yö
     assert.equal(testTanilamaEtkinMi({ NODE_ENV: "production", TEST_TANILAMA_LOGU: "true" }), true);
     assert.equal(testTanilamaEtkinMi({ NODE_ENV: "development", TEST_TANILAMA_LOGU: "false" }), false);
 });
+
+
+test("kota türü, retry süresi ve gerçek işlem süresi yalnızca güvenli metadata olarak loglanır", () => {
+    const satirlar = [];
+    testTanilamaKaydiYaz({
+        kotaTuru: "rpm", retryAfterMs: 3000, toplamIslemSureMs: 5416, hataKaynagi: "yerel_sinir",
+        message: "sentetik-ham-materyal", apiKey: "sentetik-gizli-anahtar",
+    }, { etkin: true, logger: s => satirlar.push(s) });
+    const kayit = JSON.parse(satirlar[0].slice(TANILAMA_ETIKETI.length + 1));
+    assert.equal(kayit.kotaTuru, "rpm");
+    assert.equal(kayit.retryAfterMs, 3000);
+    assert.equal(kayit.toplamIslemSureMs, 5416);
+    assert.equal(kayit.hataKaynagi, "yerel_sinir");
+    assert.doesNotMatch(satirlar[0], /sentetik-/);
+});
