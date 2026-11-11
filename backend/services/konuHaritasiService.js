@@ -402,9 +402,9 @@ export const konuHaritasiUretVeKaydet = async (
             );
 
             // Yeni kaynak durumunun işlem sonunda mutlaka değerlendirilmesini sağla:
-            arkaPlandaKonuHaritasiGuncelle(ders._id, kullaniciId).catch((err) => {
-                console.error("Yeni kaynak değerlendirme hatası:", err.message);
-            });
+            if (ders.hazirlamaDurumu !== "isleniyor") {
+                arkaPlandaKonuHaritasiGuncelle(ders._id, kullaniciId).catch(() => {});
+            }
 
             return null;
         }
@@ -717,7 +717,7 @@ export const konuHaritasiUretVeKaydet = async (
             );
 
         // İşlem tamamlandıktan sonra yeni kaynak durumunu güvence altına al
-        if (guncellenenHarita) {
+        if (guncellenenHarita && ders.hazirlamaDurumu !== "isleniyor") {
             konuHaritasiGuncellikKontrolu(guncellenenHarita, ders._id, kullaniciId).then((guncelMi) => {
                 if (!guncelMi) {
                     arkaPlandaKonuHaritasiGuncelle(ders._id, kullaniciId).catch(() => { });
@@ -729,7 +729,7 @@ export const konuHaritasiUretVeKaydet = async (
     } catch (hata) {
         console.error(
             `Konu Haritası oluşturma hatası (Ders ID: ${ders._id}):`,
-            hata.message
+            { kod: hata.kod || "KONU_HARITASI_HATASI", status: hata.status || 500 }
         );
 
         const mevcut = await KonuHaritasi.findOne({
@@ -752,7 +752,7 @@ export const konuHaritasiUretVeKaydet = async (
                     durum: oncekiBasariliMi
                         ? "hazir"
                         : "hata",
-                    olusturmaHatasi: hata.message,
+                    olusturmaHatasi: "Konu haritası hazırlanamadı. Yeniden deneyebilirsiniz.",
                     aktifIslemToken: null,
                     kilitSonYenilemeTarihi: null
                 }

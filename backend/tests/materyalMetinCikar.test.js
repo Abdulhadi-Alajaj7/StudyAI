@@ -13,6 +13,8 @@ let metinCikarmaHatasi;
 let parcalamaHatasi;
 let incrementalHata;
 let embeddingHatasi;
+let geminiCagrilari = 0;
+let dersHazirlaniyor = false;
 let metinCikarmaHook;
 let eskiParcaTemizlemeHook;
 let dersIslemSayisi;
@@ -34,6 +36,7 @@ const materyalFiltreyeUyuyor = (filtre) => {
 mock.module("../models/Ders.js", {
     defaultExport: {
         async findOneAndUpdate(filtre) {
+            if (filtre.hazirlamaDurumu?.$ne === "isleniyor" && dersHazirlaniyor) return null;
             if (
                 filtre.materyallerOnaylandi?.$ne === true &&
                 dersOnaylandi
@@ -123,6 +126,7 @@ mock.module("../services/metinParcalamaService.js", {
 mock.module("../services/konuHaritasiService.js", {
     namedExports: {
         async materyalEklendigindeIncrementalGuncelle() {
+            geminiCagrilari++;
             if (incrementalHata) throw incrementalHata;
         },
         async materyalSilindigindeGuncelle() {}
@@ -138,6 +142,7 @@ mock.module("../services/embeddingService.js", {
             return "Semantik arama dizini geçici olarak oluşturulamadı.";
         },
         async materyalEmbeddingleriniOlustur() {
+            geminiCagrilari++;
             if (embeddingHatasi) throw embeddingHatasi;
             return {
                 toplam: 1,
@@ -206,9 +211,11 @@ beforeEach(() => {
     eskiParcaTemizlemeHook = null;
     dersIslemSayisi = 0;
     dersOnaylandi = false;
+    dersHazirlaniyor = false;
+    geminiCagrilari = 0;
 });
 
-test("embedding hatası metin sürümünün hazırlanmasını ve konu haritası akışını bozmaz", async () => {
+test("son onaydan önce metin hazırlanır; embedding ve harita için Gemini çağrılmaz", async () => {
     embeddingHatasi = new Error("429 quota");
     const res = responseMock();
 
@@ -216,13 +223,14 @@ test("embedding hatası metin sürümünün hazırlanmasını ve konu haritası 
 
     assert.equal(res.statusCode, 200);
     assert.equal(materyal.durum, "hazir");
-    assert.equal(materyal.embeddingDurumu, "hata");
-    assert.match(materyal.embeddingHatasi, /geçici olarak/);
+    assert.equal(materyal.embeddingDurumu, "bekliyor");
+    assert.equal(materyal.embeddingHatasi, "");
+    assert.equal(geminiCagrilari, 0);
     assert.ok(materyal.aktifIslemeId);
     assert.equal(parcalar.length, 1);
 });
 
-test("metin çıkarma başarılı ve konu haritası güncellemesi başarısızsa aktif parçalar korunur", async () => {
+test("metin hazırlama harita servisini çağırmadan aktif parçaları saklar", async () => {
     incrementalHata = new Error("Gemini geçici hatası");
     const res = responseMock();
 
@@ -355,4 +363,17 @@ test("onaylanmış dersin materyal metni yeniden işlenemez", async () => {
     assert.deepEqual(materyal, onceki);
     assert.equal(parcalar.length, 1);
     assert.equal(dersIslemSayisi, 0);
+});
+
+test("hazırlama sürerken ekleme, silme ve yeniden metin çıkarma reddedilir", async () => {
+    dersHazirlaniyor = true;
+    for (const fn of [materyalSil, materyalMetinCikar]) {
+        const res = responseMock();
+        await fn(istek(), res);
+        assert.equal(res.statusCode, 409);
+    }
+    const res = responseMock();
+    await materyalYukle({ params: { dersId: String(dersId) }, user: { _id: kullaniciId }, files: [{ path: "mock.pdf" }] }, res);
+    assert.equal(res.statusCode, 409);
+    assert.equal(geminiCagrilari, 0);
 });

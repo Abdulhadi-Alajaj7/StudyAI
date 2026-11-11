@@ -1,6 +1,7 @@
 
 import MetinParcasi from "../models/MetinParcasi.js";
 import crypto from "node:crypto";
+import { sureOlc } from "../utils/islemSuresi.js";
 
 /**
  * Metni anlamlı sınırları koruyarak parçalara ayırır.
@@ -163,11 +164,11 @@ export const metinParcalaVeKaydet = async (
         );
     }
 
-    const parcalar = metniParcalaraAyir(
+    const parcalar = await sureOlc("metin_parcalama", async () => metniParcalaraAyir(
         metin,
         parcaUzunlugu,
         overlap
-    );
+    ));
 
     if (parcalar.length === 0) {
         return [];
@@ -186,7 +187,7 @@ export const metinParcalaVeKaydet = async (
     }));
 
     try {
-        await MetinParcasi.insertMany(belgeler);
+        await sureOlc("metin_veritabani_kaydi", () => MetinParcasi.insertMany(belgeler));
     } catch (error) {
         // Yalnızca başarısız yeni işlem parçalarını temizle.
         // Eski aktif materyal parçalarına dokunma.

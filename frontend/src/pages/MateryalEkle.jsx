@@ -4,6 +4,7 @@ import api from "../api";
 import { kullaniciHataMesaji } from "../utils/kullaniciHatasi.mjs";
 import { materyalDosyalariniDogrula } from "../utils/materyalDosyalari.mjs";
 import DersOlusturmaAdimlari from "../components/DersOlusturmaAdimlari";
+import DersHazirlamaEkrani from "../components/DersHazirlamaEkrani";
 import { CloudArrowUpIcon, ArrowRightIcon, CpuChipIcon, DocumentIcon, TrashIcon, ArrowPathIcon } from "@heroicons/react/24/outline";
 
 function MateryalEkle() {
@@ -30,25 +31,15 @@ function MateryalEkle() {
     const [metinModalAcik, setMetinModalAcik] = useState(false);
     const [seciliMetin, setSeciliMetin] = useState("");
     const [metinYukleniyor, setMetinYukleniyor] = useState(false);
-    const [haritaDurumu, setHaritaDurumu] = useState(null);
+    const [durumYuklendi, setDurumYuklendi] = useState(false);
+    const [materyalKontrol, setMateryalKontrol] = useState(false);
+    const onayIstekRef = useRef(false);
     const [onayModalAcik, setOnayModalAcik] = useState(false);
     const [onaylaniyor, setOnaylaniyor] = useState(false);
-    const [devamKontrolEdiliyor, setDevamKontrolEdiliyor] = useState(false);
-    const devamKontrolRef = useRef(false);
-    const tumMateryallerHazir =
-        materyaller.length > 0 &&
-        materyaller.every((materyal) => materyal.durum === "hazir");
-
-    const konuHaritasiHazir =
-        haritaDurumu?.devamEdilebilirMi === true &&
-        haritaDurumu?.guncelMi === true &&
-        haritaDurumu?.durum === "hazir";
-
-    const devamButonuAktif =
-        !yukleniyor &&
-        !devamKontrolEdiliyor &&
-        tumMateryallerHazir &&
-        konuHaritasiHazir;
+    const hazirlaniyor = onaylaniyor || ders?.hazirlamaDurumu === "isleniyor";
+    const tumMateryallerHazir = materyaller.length > 0 &&
+        materyaller.every(m => m.durum === "hazir" && m.aktifIslemeId);
+    const devamButonuAktif = durumYuklendi && !hazirlaniyor && !yukleniyor && tumMateryallerHazir;
 
     const cardBg = isDark ? "bg-[#162137] border-[#26334A]" : "bg-white border-[#E7E5EF]";
     const textPrimary = isDark ? "text-[#F8FAFC]" : "text-[#0F172A]";
@@ -58,7 +49,7 @@ function MateryalEkle() {
     const dersGetir = useCallback(async () => {
         try {
             const res = await api.get(
-                `/dersler/${dersId}`,
+                `/dersler/${dersId}/hazirlama`,
                 { withCredentials: true }
             );
 
@@ -78,6 +69,7 @@ function MateryalEkle() {
             }
 
             setDers(guncelDers);
+            setDurumYuklendi(true);
         } catch (err) {
             console.error("Ders bilgisi getirilemedi:", err);
             setHata(kullaniciHataMesaji(err, "Ders bilgileri alınamadı."));
@@ -95,67 +87,24 @@ function MateryalEkle() {
 
 
     useEffect(() => {
-        // Sayfa her açıldığında dersin güncel onay durumunu kontrol et.
-        dersGetir();
-        materyalleriGetir();
+        let aktif = true;
+        let timer;
+        const yenile = async () => {
+            await Promise.all([dersGetir(), materyalleriGetir()]);
+            if (aktif) timer = setTimeout(yenile, 3000);
+        };
+        void yenile();
+        return () => { aktif = false; clearTimeout(timer); };
     }, [dersGetir, materyalleriGetir]);
 
-
-    // Polling for processing status
-    useEffect(() => {
-        let interval;
-        const hasProcessing = materyaller.some(m => m.durum === "isleniyor" || m.durum === "yuklendi");
-        if (hasProcessing) {
-            interval = setInterval(() => {
-                materyalleriGetir();
-            }, 3000);
-        }
-        return () => clearInterval(interval);
-    }, [materyaller, materyalleriGetir]);
-
-
-    useEffect(() => {
-        let aktif = true;
-
-        const durumuGetir = async () => {
-            try {
-                const res = await api.get(
-                    `/dersler/${dersId}/konu-haritasi`,
-                    { withCredentials: true }
-                );
-
-                if (aktif) {
-                    setHaritaDurumu(res.data);
-                }
-            } catch (err) {
-                console.error("Konu haritası durumu alınamadı:", err);
-                if (aktif) {
-                    setHaritaDurumu(null);
-                }
-            }
-        };
-
-        durumuGetir();
-
-        const interval = setInterval(() => {
-            durumuGetir();
-            materyalleriGetir();
-        }, 3000);
-
-        return () => {
-            aktif = false;
-            clearInterval(interval);
-        };
-    }, [dersId, materyalleriGetir]);
-
     const handleDosyaSec = () => {
-        if (!yuklemeDevamEdiyorRef.current) {
+        if (durumYuklendi && !hazirlaniyor && !yuklemeDevamEdiyorRef.current) {
             fileInputRef.current?.click();
         }
     };
 
     const dosyalariYukle = async (dosyaListesi) => {
-        if (yuklemeDevamEdiyorRef.current) return;
+        if (!durumYuklendi || hazirlaniyor || yuklemeDevamEdiyorRef.current) return;
 
         const { gecerliDosyalar, hatalar: dogrulamaHatalari } =
             materyalDosyalariniDogrula(dosyaListesi);
@@ -245,6 +194,7 @@ function MateryalEkle() {
     };
 
     const materyalSil = async (id) => {
+        if (!durumYuklendi || hazirlaniyor) return;
         if (!window.confirm("Bu materyali silmek istediğinize emin misiniz?")) return;
 
         try {
@@ -256,6 +206,7 @@ function MateryalEkle() {
     };
 
     const handleMetinCikarYenidenDene = async (id) => {
+        if (!durumYuklendi || hazirlaniyor) return;
         try {
             await api.post(`/materyaller/${id}/metin-cikar`, {}, { withCredentials: true });
             materyalleriGetir();
@@ -288,127 +239,36 @@ function MateryalEkle() {
     };
 
 
-    const handleNext = async () => {
-        if (devamKontrolRef.current || !devamButonuAktif) return;
-
-        devamKontrolRef.current = true;
-        setDevamKontrolEdiliyor(true);
-        setHata("");
-
-        try {
-            const [materyalRes, haritaRes] = await Promise.all([
-                api.get(
-                    `/materyaller/ders/${dersId}`,
-                    { withCredentials: true }
-                ),
-                api.get(
-                    `/dersler/${dersId}/konu-haritasi`,
-                    { withCredentials: true }
-                )
-            ]);
-
-            const guncelMateryaller = materyalRes.data.materyaller || [];
-            const durum = haritaRes.data;
-
-            setMateryaller(guncelMateryaller);
-            setHaritaDurumu(durum);
-
-            const materyalYok =
-                guncelMateryaller.length === 0 &&
-                durum.dahaSonraEklenebilirMi === true;
-
-            const tumMateryallerHazir =
-                guncelMateryaller.length > 0 &&
-                guncelMateryaller.every(m => m.durum === "hazir");
-
-            const devamHazir =
-                tumMateryallerHazir &&
-                durum.devamEdilebilirMi === true &&
-                durum.guncelMi === true;
-
-            if (!materyalYok && !devamHazir) {
-                const hataliMateryalVar =
-                    guncelMateryaller.some(m => m.durum === "hata") ||
-                    durum.hataliMateryalSayisi > 0;
-
-                if (hataliMateryalVar) {
-                    setHata(
-                        "Bazı materyaller işlenemedi. Hatalı materyalleri yeniden deneyin veya silin."
-                    );
-                } else if (durum.durum === "hata") {
-                    setHata(
-                        durum.olusturmaHatasi ||
-                        "Konu haritası oluşturulamadı. Lütfen tekrar deneyin."
-                    );
-                } else {
-                    setHata(
-                        "Materyallerin işlenmesi ve konu haritasının güncellenmesi henüz tamamlanmadı. Lütfen bekleyin."
-                    );
-                }
-
-                return;
-            }
-
-
-
-            setOnayModalAcik(true);
-        } catch (err) {
-            setHata(kullaniciHataMesaji(
-                err,
-                "İşlem durumu kontrol edilemedi. Lütfen tekrar deneyin."
-            ));
-        } finally {
-            devamKontrolRef.current = false;
-            setDevamKontrolEdiliyor(false);
-        }
+    const handleNext = () => {
+        if (devamButonuAktif) setOnayModalAcik(true);
     };
     const handleOnayla = async () => {
-        if (onaylaniyor || !onayModalAcik) return;
-
+        if (onayIstekRef.current || hazirlaniyor) return;
+        onayIstekRef.current = true;
         setOnaylaniyor(true);
+        setMateryalKontrol(false);
+        setOnayModalAcik(false);
         setHata("");
-
         try {
-            const res = await api.post(
-                `/dersler/${dersId}/materyaller/onayla`,
-                {},
-                { withCredentials: true }
-            );
-
-            const onaylananDers = res.data.ders;
-
-            if (
-                res.data.basarili !== true ||
-                onaylananDers?.materyallerOnaylandi !== true
-            ) {
-                throw new Error("Ders onayı doğrulanamadı.");
-            }
-
-            setDers(onaylananDers);
-            setOnayModalAcik(false);
-
-            navigate(`/panel/dersler/${dersId}/hazir`, {
-                replace: true,
-                state: {
-                    ders: onaylananDers,
-                    uiPrefs
-                }
-            });
+            const res = await api.post(`/dersler/${dersId}/materyaller/onayla`, {}, { withCredentials: true });
+            setDers(res.data.ders);
+            await dersGetir();
         } catch (err) {
-            setHata(kullaniciHataMesaji(
-                err,
-                "Materyaller onaylanamadı. Lütfen tekrar deneyin."
-            ));
-
-            setOnayModalAcik(false);
+            setHata(kullaniciHataMesaji(err, "Hazırlama başlatılamadı. Durumu kontrol edip yeniden deneyin."));
+            // Yanıt kaybında sunucu işlemi sürüyor olabilir: yeniden üretim isteme.
+            await dersGetir();
         } finally {
+            onayIstekRef.current = false;
             setOnaylaniyor(false);
         }
     };
 
+    const hazirlamaModalAcik = hazirlaniyor || (ders?.hazirlamaDurumu === "hata" && !materyalKontrol);
+
 
     return (
-        <div className="max-w-[1200px] mx-auto pb-10">
+        <>
+        <div className="max-w-[1200px] mx-auto pb-10" inert={hazirlamaModalAcik || undefined} aria-hidden={hazirlamaModalAcik || undefined}>
             <div className="mb-8">
                 <h1 className={`text-[32px] md:text-[38px] font-bold tracking-tight ${textPrimary}`}>Ders Materyallerini Ekle</h1>
                 {ders && (
@@ -440,7 +300,7 @@ function MateryalEkle() {
                             onDragOver={handleDragOver}
                             onDragLeave={handleDragLeave}
                             onDrop={handleDrop}
-                            aria-disabled={yukleniyor}
+                            aria-disabled={yukleniyor || !durumYuklendi}
                             className={`border-2 border-dashed rounded-2xl p-10 md:p-16 flex flex-col items-center justify-center text-center transition-all ${surukleniyor && !yukleniyor
                                 ? 'border-[#4F46E5] bg-[#4F46E5]/10 scale-[1.01]'
                                 : isDark
@@ -460,7 +320,7 @@ function MateryalEkle() {
                                 multiple
                                 ref={fileInputRef}
                                 onChange={handleDosyaYukle}
-                                disabled={yukleniyor}
+                                disabled={yukleniyor || !durumYuklendi}
                                 className="hidden"
                                 accept=".pdf,.docx,.pptx,.txt"
                             />
@@ -468,7 +328,7 @@ function MateryalEkle() {
                             <button
                                 type="button"
                                 onClick={handleDosyaSec}
-                                disabled={yukleniyor}
+                                disabled={yukleniyor || !durumYuklendi}
                                 className={`px-8 py-3 rounded-xl font-medium border-2 border-[#4F46E5] text-[#4F46E5] hover:bg-[#4F46E5]/10 transition-colors mb-6 ${yukleniyor ? 'opacity-50 cursor-not-allowed' : ''}`}
                             >
                                 {yukleniyor ? 'Yükleniyor...' : 'Dosya Seç'}
@@ -513,7 +373,7 @@ function MateryalEkle() {
                         <div className="mb-6">
                             <div className="flex items-center justify-between text-[12px] font-bold mb-2">
                                 <span className={textSecondary}>Analiz Durumu</span>
-                                <span className={textPrimary}>- / - materyal hazır (--%)</span>
+                                <span className={textPrimary}>{materyaller.filter(m => m.durum === "hazir").length} / {materyaller.length} materyalin metni hazır</span>
                             </div>
                             <div className={`w-full h-1.5 rounded-full ${isDark ? 'bg-[#1B2942]' : 'bg-[#E2E8F0]'}`}>
                                 {/* Empty progress bar */}
@@ -542,7 +402,7 @@ function MateryalEkle() {
                         <div className={`mt-6 pt-4 border-t flex items-center justify-between text-[11px] font-medium ${isDark ? 'border-[#26334A] text-[#7F8AA3]' : 'border-[#E7E5EF] text-[#94A3B8]'}`}>
                             <div className="flex items-center gap-1.5">
                                 <span className={`w-1.5 h-1.5 rounded-full ${materyaller.some(m => m.durum === 'isleniyor' || m.durum === 'yuklendi') ? 'bg-[#4F46E5] animate-pulse' : 'bg-green-500'}`}></span>
-                                {materyaller.some(m => m.durum === 'isleniyor' || m.durum === 'yuklendi') ? 'İşlemler devam ediyor...' : 'Tüm işlemler tamamlandı.'}
+                                {materyaller.some(m => m.durum === 'isleniyor' || m.durum === 'yuklendi') ? 'İşlemler devam ediyor...' : 'Metin hazırlama durumu güncel.'}
                             </div>
                             <span>{materyaller.some(m => m.durum === 'isleniyor' || m.durum === 'yuklendi') ? 'Aktif' : 'Beklemede'}</span>
                         </div>
@@ -645,17 +505,8 @@ function MateryalEkle() {
                             : "bg-gray-400 text-white opacity-60 cursor-not-allowed"
                             }`}
                     >
-                        {devamKontrolEdiliyor
-                            ? "Kontrol Ediliyor..."
-                            : yukleniyor
-                                ? "Materyaller Yükleniyor..."
-                                : materyaller.length === 0
-                                    ? "Materyal Yükleyin"
-                                    : !tumMateryallerHazir
-                                        ? "Materyaller İşleniyor..."
-                                        : !konuHaritasiHazir
-                                            ? "Konu Haritası Hazırlanıyor..."
-                                            : "Devam Et"}
+                        {!durumYuklendi ? "Durum Kontrol Ediliyor..." : yukleniyor ? "Materyaller Yükleniyor..." :
+                            materyaller.length === 0 ? "Materyal Yükleyin" : !tumMateryallerHazir ? "Materyalleri Kontrol Edin" : "Devam"}
 
                         {devamButonuAktif && (
                             <ArrowRightIcon className="w-5 h-5" />
@@ -666,13 +517,13 @@ function MateryalEkle() {
 
             {/* Metin Görüntüleme Modalı */}
             {/* Materyal Onay Modalı */}
-            {onayModalAcik && (
+            {onayModalAcik && !hazirlamaModalAcik && (
                 <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
                     <div
                         role="dialog"
                         aria-modal="true"
                         aria-labelledby="materyal-onay-baslik"
-                        className={`w-full max-w-lg rounded-2xl border shadow-2xl overflow-hidden ${cardBg}`}
+                        className={`w-full max-w-lg max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-2xl border shadow-2xl ${cardBg}`}
                     >
                         {/* Başlık */}
                         <div className={`px-6 py-5 border-b ${isDark ? "border-[#26334A]" : "border-[#E7E5EF]"
@@ -693,8 +544,7 @@ function MateryalEkle() {
                                     </h3>
 
                                     <p className={`text-[13px] mt-2 leading-relaxed ${textSecondary}`}>
-                                        Yüklediğiniz materyaller analiz edildi ve
-                                        dersinizin konu haritası oluşturuldu.
+                                        Yüklediğiniz materyallerden yapay zekâ destekli bir konu haritası oluşturulacaktır.
                                     </p>
                                 </div>
 
@@ -722,11 +572,11 @@ function MateryalEkle() {
 
                                     <div>
                                         <p className={`text-[14px] font-bold ${textPrimary}`}>
-                                            Konu haritanız hazır
+                                            Materyallerinizi kontrol edin
                                         </p>
 
                                         <p className={`text-[13px] mt-1 ${textSecondary}`}>
-                                            Materyalleriniz başarıyla analiz edildi.
+                                            Hazırlama işlemi sırasında dosyalarınız değiştirilemeyecektir.
                                         </p>
                                     </div>
                                 </div>
@@ -745,9 +595,7 @@ function MateryalEkle() {
                                         </p>
 
                                         <p className={`text-[13px] mt-1 leading-relaxed ${textSecondary}`}>
-                                            Onayladıktan sonra yeni materyal ekleyemez,
-                                            mevcut materyalleri silemez veya
-                                            değiştiremezsiniz.
+                                            Devam etmeden önce tüm dosyalarınızı kontrol edin. Ders oluşturma işlemi tamamlandıktan sonra materyal ekleyemez, silemez veya değiştiremezsiniz.
                                         </p>
                                     </div>
                                 </div>
@@ -772,7 +620,7 @@ function MateryalEkle() {
                                     : "border-[#E7E5EF] text-[#0F172A] hover:bg-black/5"
                                     }`}
                             >
-                                İptal
+                                Geri Dön ve Kontrol Et
                             </button>
 
                             <button
@@ -782,7 +630,7 @@ function MateryalEkle() {
                                 className={`px-5 py-3 rounded-xl font-medium transition-colors ${buttonPrimary} ${onaylaniyor ? "opacity-60 cursor-not-allowed" : ""
                                     }`}
                             >
-                                {onaylaniyor ? "Onaylanıyor..." : "Onayla ve Devam Et"}
+                                {onaylaniyor ? "Hazırlama Başlatılıyor..." : "Onayla ve Dersi Hazırla"}
                             </button>
                         </div>
                     </div>
@@ -812,6 +660,15 @@ function MateryalEkle() {
                 </div>
             )}
         </div>
+        {hazirlamaModalAcik && <DersHazirlamaEkrani
+            ders={ders}
+            isDark={isDark}
+            baslatiliyor={onaylaniyor && ders?.hazirlamaDurumu !== "isleniyor"}
+            hata={hata}
+            yenidenDene={handleOnayla}
+            materyalleriKontrolEt={() => setMateryalKontrol(true)}
+        />}
+        </>
     );
 }
 

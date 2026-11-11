@@ -118,6 +118,7 @@ const temizlikAdayiKosulu = () => ({
     $or: [
         {
             materyallerOnaylandi: { $ne: true },
+            hazirlamaDurumu: { $nin: ["isleniyor", "hata"] },
             silmeNiyeti: { $ne: KULLANICI_SILME_NIYETI },
             $or: [
                 {

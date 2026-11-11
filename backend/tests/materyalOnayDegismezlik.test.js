@@ -27,6 +27,10 @@ const filtreEslesiyor = (belge, filtre) => {
   if (!belge) return false;
 
   for (const [alan, beklenen] of Object.entries(filtre)) {
+    if (alan === "$expr") {
+      if (!(belge.hazirlamaSonYenileme > new Date(Date.now() - 300000))) return false;
+      continue;
+    }
     const gercek = belge[alan];
     if (beklenen && typeof beklenen === "object" && !(beklenen instanceof Date)) {
       if (Object.hasOwn(beklenen, "$ne")) {
@@ -45,10 +49,12 @@ const filtreEslesiyor = (belge, filtre) => {
 };
 
 const oturumlu = (uret) => ({
+  select() { return this; },
   session() { return Promise.resolve(uret()); }
 });
 
 const sayacSorgusu = (uret) => ({
+  select() { return this; },
   session() { return Promise.resolve(uret()); }
 });
 
@@ -118,7 +124,10 @@ const KonuHaritasiMock = {
 
 mock.module("../models/Ders.js", { defaultExport: DersMock });
 mock.module("../models/Materyal.js", { defaultExport: MateryalMock });
-mock.module("../models/MetinParcasi.js", { defaultExport: {} });
+let parcalarHazir = true;
+mock.module("../models/MetinParcasi.js", { defaultExport: {
+  countDocuments(filtre) { return sayacSorgusu(() => filtre.embeddingDurumu && !parcalarHazir ? 0 : 1); }
+} });
 mock.module("../models/KonuHaritasi.js", { defaultExport: KonuHaritasiMock });
 mock.module("../models/Sohbet.js", { defaultExport: {} });
 mock.module("../models/Mesaj.js", { defaultExport: {} });
@@ -128,7 +137,14 @@ mock.module("../utils/dosyaIslemleri.js", {
   namedExports: { guvenliDosyaSil() {} }
 });
 
-const { materyalleriOnayla } = await import("../controllers/dersController.js");
+const { dersOnayiniTamamla } = await import("../services/dersOnayService.js");
+const token = new mongoose.Types.ObjectId();
+const materyalleriOnayla = async (req, res) => {
+  try {
+    const sonuc = await dersOnayiniTamamla(req.params.id, req.user._id, token);
+    res.json({ ...sonuc, mesaj: sonuc.zatenOnaylandi ? "zaten onaylanmış" : "onaylandı" });
+  } catch (hata) { res.status(hata.status || 500).json({ hata: hata.message }); }
+};
 
 const yanit = () => ({
   statusCode: 200,
@@ -149,18 +165,21 @@ const istek = () => ({
 });
 
 beforeEach(() => {
+  parcalarHazir = true;
   ders = {
     _id: dersId,
     kullaniciId,
     materyallerOnaylandi: false,
     temizleniyor: false,
-    aktifMateryalIslemSayisi: 0
+    aktifMateryalIslemSayisi: 0,
+    hazirlamaDurumu: "isleniyor", hazirlamaToken: token, hazirlamaSonYenileme: new Date(),
   };
   materyaller = [{
     _id: materyalId,
     dersId,
     kullaniciId,
     durum: "hazir",
+    embeddingDurumu: "hazir",
     aktifIslemeId: islemeId
   }];
   harita = {
@@ -240,4 +259,33 @@ test("tekrarlanan onay isteği onaylanmış verileri yeniden değiştirmez", asy
   assert.match(ikinciRes.body.mesaj, /zaten onaylanmış/);
   assert.deepEqual(harita, onayliHarita);
   assert.equal(haritaYazmaSayisi, 1);
+});
+
+test("embedding tamamlanmadan kalıcı onay verilmez", async () => {
+  materyaller[0].embeddingDurumu = "hata";
+  await assert.rejects(dersOnayiniTamamla(dersId, kullaniciId, token), /Anlamsal arama/);
+  assert.equal(ders.materyallerOnaylandi, false);
+  assert.equal(harita.degisikliklereKilitli, false);
+});
+
+test("eski hazırlama tokenı ve süresi dolmuş lease onay veremez", async () => {
+  await assert.rejects(dersOnayiniTamamla(dersId, kullaniciId, new mongoose.Types.ObjectId()), /sahipliği/);
+  ders.hazirlamaSonYenileme = new Date(0);
+  await assert.rejects(dersOnayiniTamamla(dersId, kullaniciId, token), /Materyal durumu/);
+  assert.equal(harita.degisikliklereKilitli, false);
+  assert.equal(ders.materyallerOnaylandi, false);
+});
+
+test("kaynak sürümü değişmiş veya eksik harita onaylanmaz", async () => {
+  harita.kaynakMateryaller[0].aktifIslemeId = new mongoose.Types.ObjectId();
+  await assert.rejects(dersOnayiniTamamla(dersId, kullaniciId, token), /güncel değil/);
+  harita.kaynakMateryaller = [];
+  await assert.rejects(dersOnayiniTamamla(dersId, kullaniciId, token), /güncel değil/);
+  assert.equal(ders.materyallerOnaylandi, false);
+});
+
+test("materyal hazır görünse de eksik embedding parçaları onayı engeller", async () => {
+  parcalarHazir = false;
+  await assert.rejects(dersOnayiniTamamla(dersId, kullaniciId, token), /parçaları henüz hazır değil/);
+  assert.equal(ders.materyallerOnaylandi, false);
 });

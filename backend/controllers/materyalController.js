@@ -7,54 +7,16 @@ import { metinCikar } from "../services/metinCikarmaService.js";
 import { metinParcalaVeKaydet } from "../services/metinParcalamaService.js";
 import MetinParcasi from "../models/MetinParcasi.js";
 import DersOzeti from "../models/DersOzeti.js";
-import {
-    materyalEklendigindeIncrementalGuncelle,
-    materyalSilindigindeGuncelle
-} from "../services/konuHaritasiService.js";
-
 import mongoose from "mongoose";
 
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import { dosyaIceriginiDogrula } from "../services/dosyaTuruDogrulamaService.js";
-import {
-    embeddingAyarlariGetir,
-    embeddingKullaniciHatasi,
-    materyalEmbeddingleriniOlustur,
-} from "../services/embeddingService.js";
+import { sureOlc } from "../utils/islemSuresi.js";
 
 const metinCikarmaKullaniciMesaji = () => (
     "Dosya içeriğinden metin çıkarılamadı. Dosyanın bozuk olmadığını kontrol edip tekrar deneyin."
 );
-
-const embeddingleriGuvenleHazirla = async (materyal, islemeId) => {
-    const ayarlar = embeddingAyarlariGetir();
-    try {
-        const sonuc = await materyalEmbeddingleriniOlustur(materyal, islemeId);
-        console.info(
-            `[Embedding] Materyal ${materyal._id}: ${sonuc.toplam} parça hazır ` +
-            `(${sonuc.apiIleOlusturulan} yeni, ${sonuc.onbellektenKullanilan} yeniden kullanıldı; ` +
-            `${sonuc.model}/${sonuc.boyut}).`
-        );
-        return {
-            embeddingDurumu: "hazir",
-            embeddingHatasi: "",
-            embeddingModel: sonuc.model,
-            embeddingBoyutu: sonuc.boyut,
-        };
-    } catch (hata) {
-        console.error(
-            `[Embedding] Materyal ${materyal._id} hazırlanamadı:`,
-            { kod: hata.kod || "EMBEDDING_SERVIS_HATASI", status: hata.status || 503 }
-        );
-        return {
-            embeddingDurumu: "hata",
-            embeddingHatasi: embeddingKullaniciHatasi(hata),
-            embeddingModel: ayarlar.model,
-            embeddingBoyutu: ayarlar.boyut,
-        };
-    }
-};
 
 /**
  * Ders onayıyla yarışmayan atomik materyal işlem kaydı.
@@ -66,6 +28,7 @@ const materyalIslemiBaslat = async (dersId, kullaniciId) => {
             _id: dersId,
             kullaniciId,
             materyallerOnaylandi: { $ne: true },
+            hazirlamaDurumu: { $ne: "isleniyor" },
             temizleniyor: { $ne: true }
         },
         { $inc: { aktifMateryalIslemSayisi: 1 } },
@@ -84,8 +47,7 @@ const materyalIslemiBitir = async (dersId, kullaniciId) => {
  * Arka planda metin çıkarma ve parçalama işlemini güvenli staging mantığıyla yürütür.
  * Eşzamanlı çağrılar veya silme işlemleriyle yarış durumlarına karşı dayanıklıdır.
  */
-const arkaPlandaMetinCikar = async (materyalIds, dersId, kullaniciId) => {
-    const basariliMateryalIds = [];
+const arkaPlandaMetinCikar = async (materyalIds) => {
 
     for (const id of materyalIds) {
         const yeniIslemeId = new mongoose.Types.ObjectId();
@@ -98,7 +60,7 @@ const arkaPlandaMetinCikar = async (materyalIds, dersId, kullaniciId) => {
                         durum: "isleniyor",
                         islemeId: yeniIslemeId,
                         islemeHatasi: "",
-                        embeddingDurumu: "isleniyor",
+                        embeddingDurumu: "bekliyor",
                         embeddingHatasi: ""
                     }
                 },
@@ -111,7 +73,7 @@ const arkaPlandaMetinCikar = async (materyalIds, dersId, kullaniciId) => {
             }
 
             // 2. Metin çıkarma
-            const cikarilanText = await metinCikar(materyal.dosyaYolu, materyal.mimeTuru);
+            const cikarilanText = await sureOlc("metin_cikarma", () => metinCikar(materyal.dosyaYolu, materyal.mimeTuru));
 
             // 3. Kontrol noktası: Metin çıkarılırken materyal silinmiş veya silinme aşamasına alınmış mı?
             const aktifMateryal = await Materyal.findOne({ _id: id, islemeId: yeniIslemeId, durum: "isleniyor" });
@@ -121,8 +83,7 @@ const arkaPlandaMetinCikar = async (materyalIds, dersId, kullaniciId) => {
             }
 
             // 4. Staging olarak metin parçalarını kaydet (eski parçalara dokunulmaz)
-            await metinParcalaVeKaydet(cikarilanText, aktifMateryal, yeniIslemeId);
-            const embeddingDurumu = await embeddingleriGuvenleHazirla(aktifMateryal, yeniIslemeId);
+            await sureOlc("metin_parcalama_ve_kayit", () => metinParcalaVeKaydet(cikarilanText, aktifMateryal, yeniIslemeId));
 
             // 5. Atomik Taahhüt (Commit): Materyal hâlâ bu işleme mi ait ve "isleniyor" durumunda mı?
             const guncellenen = await Materyal.findOneAndUpdate(
@@ -133,7 +94,8 @@ const arkaPlandaMetinCikar = async (materyalIds, dersId, kullaniciId) => {
                         aktifIslemeId: yeniIslemeId,
                         cikarilanMetin: cikarilanText,
                         islemeHatasi: "",
-                        ...embeddingDurumu
+                        embeddingDurumu: "bekliyor",
+                        embeddingHatasi: ""
                     }
                 },
                 { new: true }
@@ -158,7 +120,6 @@ const arkaPlandaMetinCikar = async (materyalIds, dersId, kullaniciId) => {
                 // Taahhüt edilmiş aktif versiyonu BOZMA; catch bloğuna düşüp aktif versiyonu silmesini engelle!
             }
 
-            basariliMateryalIds.push(id);
 
         } catch (error) {
             console.error(`Metin çıkarma hatası (Materyal ID: ${id}):`, error);
@@ -181,17 +142,7 @@ const arkaPlandaMetinCikar = async (materyalIds, dersId, kullaniciId) => {
         }
     }
 
-    // Başarıyla hazır duruma gelen yeni materyalleri sırayla ve güvenle incremental olarak konu haritasına ekle
-    // Yalnızca yeni yüklenen materyal analiz edilir; eski tüm materyaller Gemini'ye yeniden gönderilmez
-    if (dersId && kullaniciId && basariliMateryalIds.length > 0) {
-        for (const matId of basariliMateryalIds) {
-            try {
-                await materyalEklendigindeIncrementalGuncelle(matId, dersId, kullaniciId);
-            } catch (incHata) {
-                console.error(`Incremental konu haritası güncelleme hatası (Materyal ID: ${matId}):`, incHata.message);
-            }
-        }
-    }
+
 };
 
 export const materyalYukle = async (req, res) => {
@@ -215,7 +166,7 @@ export const materyalYukle = async (req, res) => {
             const mevcut = await Ders.findOne({ _id: dersId, kullaniciId });
             return res.status(mevcut ? 409 : 404).json({
                 hata: mevcut
-                    ? "Bu dersin materyalleri onaylandı. Yeni materyal eklenemez."
+                    ? "Bu ders hazırlanıyor veya materyalleri onaylandı. Yeni materyal eklenemez."
                     : "Ders bulunamadı veya yetkiniz yok."
             });
         }
@@ -283,7 +234,7 @@ export const materyalYukle = async (req, res) => {
             });
         }
 
-        // Kilit, metin çıkarma ve incremental Gemini güncellemesi bitene kadar korunur.
+        // Kilit yalnızca yerel metin hazırlama bitene kadar korunur.
         const arkaPlan = arkaPlandaMetinCikar(basariliIds, dersId, kullaniciId);
         arkaPlanaDevredildi = true;
         void arkaPlan
@@ -382,7 +333,7 @@ export const materyalSil = async (req, res) => {
 
         const ders = await materyalIslemiBaslat(mevcutMateryal.dersId, kullaniciId);
         if (!ders) {
-            return res.status(409).json({ hata: "Bu dersin materyalleri onaylandı veya ders artık mevcut değil." });
+            return res.status(409).json({ hata: "Bu ders hazırlanıyor, onaylandı veya artık mevcut değil." });
         }
         kilitliDersId = mevcutMateryal.dersId;
 
@@ -404,8 +355,7 @@ export const materyalSil = async (req, res) => {
         // artık güncel kabul edilemez.
         await DersOzeti.deleteMany({ dersId: materyal.dersId, kullaniciId });
 
-        // Harita güncellemesini de kilidin içinde tamamla.
-        await materyalSilindigindeGuncelle(materyalId, materyal.dersId, kullaniciId);
+        // Sonraki onayda kaynak listesi ve harita güncelliği yeniden doğrulanır.
         return res.status(200).json({ mesaj: "Materyal başarıyla silindi." });
     } catch (error) {
         console.error("Materyal silme hatası:", error);
@@ -438,7 +388,7 @@ export const materyalMetinCikar = async (req, res) => {
         }
         const ders = await materyalIslemiBaslat(mevcutMateryal.dersId, kullaniciId);
         if (!ders) {
-            return res.status(409).json({ hata: "Bu dersin materyalleri onaylandı veya ders artık mevcut değil." });
+            return res.status(409).json({ hata: "Bu ders hazırlanıyor, onaylandı veya artık mevcut değil." });
         }
         kilitliDersId = mevcutMateryal.dersId;
 
@@ -450,7 +400,7 @@ export const materyalMetinCikar = async (req, res) => {
                     durum: "isleniyor",
                     islemeId: yeniIslemeId,
                     islemeHatasi: "",
-                    embeddingDurumu: "isleniyor",
+                    embeddingDurumu: "bekliyor",
                     embeddingHatasi: ""
                 }
             },
@@ -474,7 +424,7 @@ export const materyalMetinCikar = async (req, res) => {
 
         try {
             // 2. Metin çıkarma
-            const cikarilanText = await metinCikar(materyal.dosyaYolu, materyal.mimeTuru);
+            const cikarilanText = await sureOlc("metin_cikarma", () => metinCikar(materyal.dosyaYolu, materyal.mimeTuru));
 
             // 3. Kontrol noktası: Metin çıkarılırken materyal silinmiş veya siliniyor yapılmış mı?
             const aktifMateryal = await Materyal.findOne({ _id: materyalId, islemeId: yeniIslemeId, durum: "isleniyor" });
@@ -484,8 +434,7 @@ export const materyalMetinCikar = async (req, res) => {
             }
 
             // 4. Staging olarak metin parçalarını kaydet
-            await metinParcalaVeKaydet(cikarilanText, aktifMateryal, yeniIslemeId);
-            const embeddingDurumu = await embeddingleriGuvenleHazirla(aktifMateryal, yeniIslemeId);
+            await sureOlc("metin_parcalama_ve_kayit", () => metinParcalaVeKaydet(cikarilanText, aktifMateryal, yeniIslemeId));
 
             // 5. Atomik Taahhüt (Commit)
             const guncellenen = await Materyal.findOneAndUpdate(
@@ -496,7 +445,8 @@ export const materyalMetinCikar = async (req, res) => {
                         aktifIslemeId: yeniIslemeId,
                         cikarilanMetin: cikarilanText,
                         islemeHatasi: "",
-                        ...embeddingDurumu
+                        embeddingDurumu: "bekliyor",
+                        embeddingHatasi: ""
                     }
                 },
                 { new: true }
@@ -517,16 +467,6 @@ export const materyalMetinCikar = async (req, res) => {
             } catch (eskiSilmeHatasi) {
                 console.error(`Eski parçaları temizleme uyarısı (Materyal ID: ${materyalId}):`, eskiSilmeHatasi.message);
                 // Taahhüt edilmiş aktif versiyonu BOZMA; catch bloğuna düşüp aktif parçaları silmesini engelle!
-            }
-
-            // Başarılı taahhüt sonrası konu haritası hatası aktif metin sürümünü bozmamalı.
-            try {
-                await materyalEklendigindeIncrementalGuncelle(materyalId, materyal.dersId, kullaniciId);
-            } catch (konuHaritasiHatasi) {
-                console.error(
-                    `Incremental konu haritası güncelleme hatası (Materyal ID: ${materyalId}):`,
-                    konuHaritasiHatasi.message
-                );
             }
 
             return res.status(200).json({ mesaj: "Metin başarıyla çıkarıldı.", materyal: guncellenen });

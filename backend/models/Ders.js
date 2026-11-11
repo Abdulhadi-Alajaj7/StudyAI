@@ -53,6 +53,12 @@ const dersSchema = new mongoose.Schema(
             default: 0,
             min: 0,
         },
+        hazirlamaDurumu: { type: String, enum: ["bekliyor", "isleniyor", "hata", "tamamlandi"], default: "bekliyor" },
+        hazirlamaAsamasi: { type: String, default: "metinler" },
+        hazirlamaHatasi: { type: String, default: "" },
+        hazirlamaHataKodu: { type: String, default: "" },
+        hazirlamaToken: { type: mongoose.Schema.Types.ObjectId, default: null, select: false },
+        hazirlamaSonYenileme: { type: Date, default: null },
         sohbetSurumu: {
             type: Number,
             default: 0,

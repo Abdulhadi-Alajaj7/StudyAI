@@ -61,6 +61,10 @@ const kosulEslesiyor = (belge, kosul) => {
             !(beklenen instanceof mongoose.Types.ObjectId);
 
         if (operatorMu) {
+            if (Object.hasOwn(beklenen, "$nin")) {
+                if (beklenen.$nin.some(v => ayni(v, gercek))) return false;
+                continue;
+            }
             if (Object.hasOwn(beklenen, "$ne")) {
                 if (ayni(gercek, beklenen.$ne)) return false;
                 continue;
@@ -508,3 +512,13 @@ test("lease'i kaybeden eski çalışan veritabanı kayıtlarını silemez", asyn
     assert.equal(mesajlar.length, 1);
     assert.equal(dersOzetleri.length, 1);
 });
+
+for (const durum of ["isleniyor", "hata"]) {
+    test(`${durum} durumundaki hazırlamanın dosyaları otomatik silinmez`, async () => {
+        const ders = dersEkle();
+        ders.hazirlamaDurumu = durum;
+        await geciciDersTemizlemeTuruCalistir();
+        assert.equal(dersler.length, 1);
+        assert.equal(dosyaSilmeCagrilari.length, 0);
+    });
+}

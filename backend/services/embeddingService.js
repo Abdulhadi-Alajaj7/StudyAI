@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import MetinParcasi from "../models/MetinParcasi.js";
 import { getGeminiClient } from "./geminiService.js";
+import { sureOlc } from "../utils/islemSuresi.js";
 
 export const VARSAYILAN_EMBEDDING_MODELI = "gemini-embedding-001";
 export const VARSAYILAN_EMBEDDING_BOYUTU = 768;
@@ -151,7 +152,7 @@ const embeddingHatasiniSiniflandir = (hata) => {
     const sonuc = new Error(mesaj);
     sonuc.cause = hata;
 
-    if (mesaj.includes("429") || kucuk.includes("quota") || kucuk.includes("rate limit")) {
+    if (Number(hata?.status ?? hata?.statusCode ?? hata?.code) === 429 || mesaj.includes("429") || kucuk.includes("quota") || kucuk.includes("rate limit")) {
         sonuc.kod = "EMBEDDING_KOTA_ASIMI";
         sonuc.status = 429;
     } else if (mesaj.includes("401") || mesaj.includes("403") || kucuk.includes("api key")) {
@@ -175,15 +176,18 @@ const embeddingIstegiYap = async ({
     ayarlar,
     beklet,
     limitUygula,
+    sahipligiDogrula,
 }) => {
     let sonHata;
     const metinler = Array.isArray(contents) ? contents : [contents];
 
     for (let deneme = 1; deneme <= ayarlar.maksDeneme; deneme++) {
         try {
+            await sahipligiDogrula?.();
             if (limitUygula) {
                 await kotaSirasinaGir(tahminiTokenSayisi(metinler), ayarlar, beklet);
             }
+            await sahipligiDogrula?.();
             return await istemci.models.embedContent({ model, contents, config });
         } catch (hata) {
             sonHata = hata;
@@ -220,11 +224,12 @@ export const embeddingleriUret = async (metinler, {
     ayarlar = embeddingAyarlariGetir(),
     beklet = bekle,
     limitUygula = true,
+    sahipligiDogrula,
+    partiKaydet,
 } = {}) => {
     if (!Array.isArray(metinler) || metinler.length === 0) return [];
-    // SDK'nin kendi retry katmanını kapatıp toplam deneme sayısını burada tek
-    // ve ölçülebilir bir noktadan yönetiyoruz.
-    const ai = istemci || getGeminiClient({ maxRetries: 0 });
+    // Kurulu SDK'nin models çağrıları tek HTTP isteği yapar; sınırlı retry yukarıdadır.
+    const ai = istemci || getGeminiClient({ timeout: 60_000 });
     const embedding2 = ayarlar.model === "gemini-embedding-2";
     const sonuclar = [];
 
@@ -241,8 +246,11 @@ export const embeddingleriUret = async (metinler, {
                 ayarlar,
                 beklet,
                 limitUygula,
+                sahipligiDogrula,
             });
-            sonuclar.push(...yanitVektorleriniDogrula(yanit, 1, ayarlar.boyut));
+            const vektorler = yanitVektorleriniDogrula(yanit, 1, ayarlar.boyut);
+            await partiKaydet?.(sonuclar.length, vektorler);
+            sonuclar.push(...vektorler);
         }
         return sonuclar;
     }
@@ -263,8 +271,11 @@ export const embeddingleriUret = async (metinler, {
             ayarlar,
             beklet,
             limitUygula,
+            sahipligiDogrula,
         });
-        sonuclar.push(...yanitVektorleriniDogrula(yanit, grup.length, ayarlar.boyut));
+        const vektorler = yanitVektorleriniDogrula(yanit, grup.length, ayarlar.boyut);
+        await partiKaydet?.(index, vektorler);
+        sonuclar.push(...vektorler);
     }
 
     return sonuclar;
@@ -328,11 +339,30 @@ export const materyalEmbeddingleriniOlustur = async (materyal, islemeId, secenek
             istemci: secenekler.istemci,
             beklet: secenekler.beklet,
             limitUygula: secenekler.limitUygula,
+            sahipligiDogrula: secenekler.sahipligiDogrula,
+            // Sonraki parti hata verse de başarılı API sonuçları korunur.
+            partiKaydet: async (baslangic, vektorler) => {
+                await secenekler.sahipligiDogrula?.();
+                const parti = new Map(vektorler.map((vektor, i) => [eksikHashler[baslangic + i], vektor]));
+                await sureOlc("embedding_veritabani_kaydi", () => MetinParcasi.bulkWrite(parcalar.flatMap((parca, i) => parti.has(hashler[i]) ? [{
+                    updateOne: {
+                        filter: { _id: parca._id, islemeId },
+                        update: { $set: {
+                            embedding: parti.get(hashler[i]), embeddingModel: ayarlar.model,
+                            embeddingBoyutu: ayarlar.boyut, embeddingGirdiHash: hashler[i],
+                            embeddingDurumu: "hazir", embeddingHatasi: "", embeddingOlusturulmaTarihi: new Date(),
+                        } },
+                    },
+                }] : [])));
+            },
         });
         eksikHashler.forEach((hash, index) => vektorHaritasi.set(hash, yeniVektorler[index]));
 
+        await secenekler.sahipligiDogrula?.();
         const simdi = new Date();
-        await MetinParcasi.bulkWrite(parcalar.map((parca, index) => ({
+        const yeniHashler = new Set(eksikHashler);
+        // Yeni partiler zaten kaydedildi; yalnız önbellekten alınanları bu sürüme yaz.
+        const onbellekYazmalari = parcalar.flatMap((parca, index) => yeniHashler.has(hashler[index]) ? [] : [{
             updateOne: {
                 filter: { _id: parca._id, islemeId },
                 update: {
@@ -347,7 +377,10 @@ export const materyalEmbeddingleriniOlustur = async (materyal, islemeId, secenek
                     }
                 }
             }
-        })));
+        }]);
+        if (onbellekYazmalari.length) {
+            await sureOlc("embedding_veritabani_kaydi", () => MetinParcasi.bulkWrite(onbellekYazmalari));
+        }
 
         return {
             toplam: parcalar.length,
@@ -359,7 +392,7 @@ export const materyalEmbeddingleriniOlustur = async (materyal, islemeId, secenek
     } catch (hata) {
         const siniflandirilmis = embeddingHatasiniSiniflandir(hata);
         await MetinParcasi.updateMany(
-            { materyalId: materyal._id, islemeId },
+            { materyalId: materyal._id, islemeId, embeddingDurumu: { $ne: "hazir" } },
             {
                 $set: {
                     embeddingDurumu: "hata",

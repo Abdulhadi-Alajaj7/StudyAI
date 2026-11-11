@@ -16,6 +16,9 @@ const guncelle = (belgeler, filtre, set) => {
     for (const belge of belgeler) {
         let eslesiyor = true;
 
+        if (filtre.hazirlamaDurumu && belge.hazirlamaDurumu !== filtre.hazirlamaDurumu) eslesiyor = false;
+        if (filtre.materyallerOnaylandi?.$ne === true && belge.materyallerOnaylandi === true) eslesiyor = false;
+
         if (filtre.durum !== undefined && belge.durum !== filtre.durum) {
             eslesiyor = false;
         }
@@ -225,4 +228,17 @@ test("tek-instance kurtarması tekrar çalıştırıldığında idempotent kalı
         dersSayisi: 0
     });
     assert.deepEqual(durumOzeti(), ilkSonrasi);
+});
+
+test("tek-instance başlangıcı hazırlamayı hemen hata durumuna alır; onaylı derse dokunmaz", async () => {
+    dersler[0].hazirlamaDurumu = "isleniyor";
+    dersler[0].hazirlamaToken = "eski-token";
+    dersler[1].hazirlamaDurumu = "tamamlandi";
+    dersler[1].materyallerOnaylandi = true;
+    await baslangicIslemleriniKurtar({ mod: TEK_INSTANCE_KURTARMA_MODU, logger: sessizLogger });
+    assert.equal(dersler[0].hazirlamaDurumu, "hata");
+    assert.equal(dersler[0].hazirlamaToken, null);
+    assert.equal(dersler[0].hazirlamaHataKodu, "HAZIRLAMA_KESILDI");
+    assert.equal(dersler[1].hazirlamaDurumu, "tamamlandi");
+    assert.equal(dersler[1].materyallerOnaylandi, true);
 });

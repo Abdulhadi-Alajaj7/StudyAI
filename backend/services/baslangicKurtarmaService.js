@@ -98,6 +98,17 @@ export const baslangicIslemleriniKurtar = async ({
         { timestamps: false }
     );
 
+    // Yalnız açık single-instance modunda önceki sürecin artık çalışmadığı bilinir.
+    // Çoklu instance modunda hazırlama durum endpoint'i süreli lease'i doğrular.
+    await Ders.updateMany(
+        { hazirlamaDurumu: "isleniyor", materyallerOnaylandi: { $ne: true } },
+        { $set: {
+            hazirlamaDurumu: "hata", hazirlamaToken: null,
+            hazirlamaHataKodu: "HAZIRLAMA_KESILDI",
+            hazirlamaHatasi: "Sunucu yeniden başlatıldığı için hazırlama kesildi. Dosyalarınız korundu; yeniden deneyebilirsiniz.",
+        } }
+    );
+
     const materyalSayisi =
         yenidenIslenenMateryaller.modifiedCount +
         ilkKezIslenenMateryaller.modifiedCount;

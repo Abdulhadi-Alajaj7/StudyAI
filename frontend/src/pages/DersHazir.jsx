@@ -4,6 +4,8 @@ import api from "../api";
 import DersOlusturmaAdimlari from "../components/DersOlusturmaAdimlari";
 import KonuHaritasiBolumu from "../components/KonuHaritasiBolumu";
 import DersGorunumSimgesi from "../components/DersGorunumSimgesi";
+import DersDurumRozeti from "../components/DersDurumRozeti";
+import { dersDurumunuGetir } from "../utils/dersHazirlamaSunumu.mjs";
 import { dersDetayYolu } from "../utils/dersDetayYollari.mjs";
 import { CheckBadgeIcon, ArrowRightIcon, BookOpenIcon, DocumentTextIcon, CheckIcon, CpuChipIcon, ListBulletIcon, ChatBubbleBottomCenterTextIcon, PuzzlePieceIcon, SparklesIcon } from "@heroicons/react/24/outline";
 
@@ -15,6 +17,8 @@ function DersHazir() {
 
     const [materyalSayisi, setMateryalSayisi] = useState(0);
     const [ders, setDers] = useState(location.state?.ders || null);
+    const [onaylananDersId, setOnaylananDersId] = useState(null);
+    const [onayHatasi, setOnayHatasi] = useState("");
 
     // Konu Haritası Durumları
     const [konuHaritasi, setKonuHaritasi] = useState(null);
@@ -39,10 +43,16 @@ function DersHazir() {
             try {
                 const res = await api.get(`/dersler/${dersId}`, { withCredentials: true });
                 if (res.data.ders) {
+                    if (res.data.ders.materyallerOnaylandi !== true) {
+                        navigate(`/panel/dersler/${dersId}/materyal`, { replace: true });
+                        return;
+                    }
                     setDers(res.data.ders);
+                    setOnaylananDersId(dersId);
                 }
             } catch (err) {
                 console.error("Ders bilgisi alınamadı", err);
+                setOnayHatasi("Ders onayı kontrol edilemedi. Materyal ekranından yeniden deneyebilirsiniz.");
             }
         };
         const konuHaritasiniGetir = async () => {
@@ -64,7 +74,7 @@ function DersHazir() {
             konuHaritasiniGetir();
             dersGetir();
         }
-    }, [dersId]);
+    }, [dersId, navigate]);
 
     // Sayfa açıldıktan sonra otomatik oluşturma başlasa bile algılayan kontrollü polling.
     // Hata durumunda (max 3 hata) ve maksimum 40 yoklama (~120 sn) sonrasında durur;
@@ -125,6 +135,15 @@ function DersHazir() {
     const cardBg = isDark ? "bg-[#162137] border-[#26334A]" : "bg-white border-[#E7E5EF]";
     const textPrimary = isDark ? "text-[#F8FAFC]" : "text-[#0F172A]";
     const textSecondary = isDark ? "text-[#A7B0C2]" : "text-[#64748B]";
+    const dersDurumu = dersDurumunuGetir(ders, konuHaritasi);
+
+    if (onaylananDersId !== dersId) {
+        return <div className={`min-h-[50vh] flex flex-col items-center justify-center gap-4 ${textPrimary}`}>
+            <p role={onayHatasi ? "alert" : "status"}>{onayHatasi || "Ders durumu kontrol ediliyor..."}</p>
+            {onayHatasi && <button className="px-5 py-3 rounded-xl bg-[#4F46E5] text-white"
+                onClick={() => navigate(`/panel/dersler/${dersId}/materyal`)}>Materyalleri Kontrol Et</button>}
+        </div>;
+    }
 
     return (
         <div className="max-w-[1200px] mx-auto pb-10">
@@ -160,7 +179,7 @@ function DersHazir() {
                     </div>
 
                     {/* Ders Kartı Banner */}
-                    <div className={`p-6 rounded-2xl border ${isDark ? 'bg-[#10192C] border-[#26334A]' : 'bg-indigo-50 border-indigo-100'} flex items-center justify-between`}>
+                    <div className={`p-6 rounded-2xl border ${isDark ? 'bg-[#10192C] border-[#26334A]' : 'bg-indigo-50 border-indigo-100'} flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center`}>
                         <div className="flex items-center gap-4">
                             <DersGorunumSimgesi renk={ders?.renk} simge={ders?.simge} isDark={isDark} />
                             <div>
@@ -171,10 +190,7 @@ function DersHazir() {
                                 <p className={`text-[13px] ${textSecondary}`}>Dönem: {ders?.donem || "Belirtilmedi"}</p>
                             </div>
                         </div>
-                        <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[12px] font-medium ${isDark ? 'bg-[#1B2942] text-[#A7B0C2]' : 'bg-indigo-100 text-indigo-700'}`}>
-                            <span className="w-1.5 h-1.5 rounded-full bg-gray-400"></span>
-                            Analiz bekleniyor
-                        </div>
+                        <DersDurumRozeti isDark={isDark} durum={dersDurumu.durum} baslik={dersDurumu.baslik} />
                     </div>
 
                     {/* DERS KURULUM ÖZETİ */}
@@ -416,7 +432,7 @@ function DersHazir() {
                                         type="button"
                                         onClick={() => navigate(dersDetayYolu(dersId), { state: ders ? { ders } : null })}
                                         disabled={!dersId}
-                                        className={`w-full py-2.5 rounded-xl text-[13px] font-medium border flex items-center justify-center gap-1.5 transition-colors ${isDark ? 'border-[#33415C] text-[#F8FAFC] hover:bg-[#162137]' : 'border-[#D8D5E2] text-[#4F46E5] hover:bg-[#F8F7FC]'} ${!dersId ? "opacity-50 cursor-not-allowed" : ""}`}
+                                        className={`w-full py-2.5 rounded-xl text-[13px] font-medium border flex items-center justify-center gap-1.5 transition-colors ${isDark ? 'border-[#6366F1] bg-[#4F46E5] text-white hover:border-[#818CF8] hover:bg-[#4338CA]' : 'border-[#4F46E5] bg-[#4F46E5] text-white hover:border-[#4338CA] hover:bg-[#4338CA]'} ${!dersId ? "opacity-50 cursor-not-allowed" : ""}`}
                                     >
                                         Derse Git <ArrowRightIcon className="w-3.5 h-3.5" />
                                     </button>

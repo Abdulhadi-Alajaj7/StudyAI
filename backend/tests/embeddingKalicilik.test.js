@@ -21,10 +21,14 @@ const zincir = (deger) => ({
 mock.module("../models/MetinParcasi.js", {
     defaultExport: {
         find(filtre) {
-            return zincir(filtre.materyalId ? parcalar : onbellek);
+            return zincir(filtre.materyalId ? parcalar : [...onbellek, ...parcalar.filter(p => p.embeddingDurumu === "hazir")]);
         },
         async bulkWrite(islemler) {
             yazmaIslemleri = islemler;
+            for (const islem of islemler) {
+                const parca = parcalar.find(p => String(p._id) === String(islem.updateOne.filter._id));
+                if (parca) Object.assign(parca, islem.updateOne.update.$set);
+            }
         },
         async updateMany() {}
     }
@@ -113,4 +117,22 @@ test("sunucu yeniden başlamış olsa da MongoDB'deki embedding'i API çağrıs�
     assert.equal(sonuc.apiIleOlusturulan, 0);
     assert.equal(sonuc.onbellektenKullanilan, 2);
     assert.equal(yazmaIslemleri.length, 2);
+});
+
+test("sonraki embedding partisi hata verse de önceki parti saklanır ve retry onu tekrar üretmez", async () => {
+    parcalar[1].icerik = "farklı bölüm";
+    let cagrilar = 0;
+    const istemci = { models: { async embedContent() {
+        cagrilar++;
+        if (cagrilar === 2) throw Object.assign(new Error("quota"), { status: 429 });
+        return { embeddings: [{ values: [1, 0, 0] }] };
+    } } };
+    const secenekler = { ayarlar: { ...ayarlar, batchBoyutu: 1 }, istemci, limitUygula: false };
+    await assert.rejects(materyalEmbeddingleriniOlustur(materyal, islemeId, secenekler), { status: 429 });
+    assert.deepEqual(parcalar[0].embedding, [1, 0, 0]);
+    assert.equal(parcalar[0].embeddingDurumu, "hazir");
+    const sonuc = await materyalEmbeddingleriniOlustur(materyal, islemeId, secenekler);
+    assert.equal(cagrilar, 3);
+    assert.equal(sonuc.onbellektenKullanilan, 1);
+    assert.equal(sonuc.apiIleOlusturulan, 1);
 });
