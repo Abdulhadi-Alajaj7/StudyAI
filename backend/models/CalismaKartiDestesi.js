@@ -1,12 +1,23 @@
 import mongoose from "mongoose";
 import { KART_HATA_ASAMALARI, KART_DOGRULAMA_ALT_KODLARI } from "../utils/calismaKartiTanilama.js";
 
+const taniSchema = new mongoose.Schema({
+    asama: { type: String, enum: KART_HATA_ASAMALARI },
+    konuId: { type: String, maxlength: 200 },
+    dogrulamaAltKodu: { type: String, enum: KART_DOGRULAMA_ALT_KODLARI },
+    kartIndex: Number, beklenenKartSayisi: Number, uretilenKartSayisi: Number,
+    gercekDenemeSayisi: Number, orijinalHttpDurumu: Number,
+    finishReason: { type: String, enum: ["STOP", "MAX_TOKENS", "MAX_OUTPUT_TOKENS", "SAFETY", "RECITATION", "OTHER"] },
+}, { _id: false });
+
 const kaynakSchema = new mongoose.Schema({
     materyalId: { type: mongoose.Schema.Types.ObjectId, ref: "Materyal", required: true },
     islemeId: { type: mongoose.Schema.Types.ObjectId, required: true },
     parcaIndex: { type: Number, required: true },
     dosyaAdi: { type: String, required: true, maxlength: 500 },
     alinti: { type: String, required: true, maxlength: 1600 },
+    // Eski kartlarda bulunması zorunlu değildir; yeni kartta gerçek parça aralıklarıdır.
+    kanitBaslangic: Number, kanitBitis: Number, cevapBaslangic: Number, cevapBitis: Number,
 }, { _id: false });
 
 const kartSchema = new mongoose.Schema({
@@ -23,6 +34,11 @@ const konuSchema = new mongoose.Schema({
     hedefKartSayisi: { type: Number, required: true, min: 1, max: 4 },
     tamamlandi: { type: Boolean, default: false },
     kartlar: { type: [kartSchema], default: [] },
+    denemeSayisi: { type: Number, default: 0, min: 0 },
+    sdkCagriSayisi: { type: Number, default: 0, min: 0 },
+    sonDenemeSdkCagrisi: { type: Number, default: 0, min: 0 },
+    hataKodu: { type: String, default: "", maxlength: 80 },
+    reddedilenKartlar: { type: [taniSchema], default: [] },
 }, { _id: false });
 
 const schema = new mongoose.Schema({
@@ -34,14 +50,13 @@ const schema = new mongoose.Schema({
     aktifIslemToken: { type: mongoose.Schema.Types.ObjectId, default: null },
     sonYenileme: { type: Date, default: null },
     hataKodu: { type: String, default: "", maxlength: 80 },
-    hataTanilama: { type: new mongoose.Schema({
-        asama: { type: String, enum: KART_HATA_ASAMALARI },
-        konuId: { type: String, maxlength: 200 },
-        dogrulamaAltKodu: { type: String, enum: KART_DOGRULAMA_ALT_KODLARI },
-        kartIndex: Number, beklenenKartSayisi: Number, uretilenKartSayisi: Number,
-        gercekDenemeSayisi: Number, orijinalHttpDurumu: Number,
-        finishReason: { type: String, enum: ["STOP", "MAX_TOKENS", "MAX_OUTPUT_TOKENS", "SAFETY", "RECITATION", "OTHER"] },
-    }, { _id: false }), default: undefined },
+    hataTanilama: { type: taniSchema, default: undefined },
+    cagriPenceresiBaslangici: { type: Date, default: null },
+    // Aktif işin ayrılan hakkı dahildir. Normal bitişte kullanılmayan hak geri verilir;
+    // süreç çökerse bilinmeyen çağrılar güvenlik için harcanmış sayılır.
+    ayrilanCagriSayisi: { type: Number, default: 0, min: 0 },
+    aktifCagriLimiti: { type: Number, default: 0, min: 0 },
+    sonIslemSdkCagrisi: { type: Number, default: 0, min: 0 },
     kullanilanModel: { type: String, default: "", maxlength: 120 },
 }, { timestamps: true });
 schema.index({ kullaniciId: 1, dersId: 1 }, { unique: true });

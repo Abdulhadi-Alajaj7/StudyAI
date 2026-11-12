@@ -43,7 +43,7 @@ test("API tüm isteklerde oturum, kodlanmış kimlik ve iptal sinyali taşır; G
     assert.ok(cagrilar.every(c => c.at(-1).withCredentials && c.at(-1).signal === signal));
 });
 test("kart hataları teknik gövdeden bağımsız sabit Türkçe mesaj gösterir", () => {
-    for (const kod of ["KART_GECERSIZ_YANIT", "KART_KAYIT_HATASI", "KART_URETIM_HATASI", "KART_ISLEM_KESILDI", "KART_KAYNAK_YETERSIZ", "KART_KAYNAK_DEGISTI", "KART_KILIT_KAYBI"]) {
+    for (const kod of ["KART_GECERSIZ_YANIT", "KART_KAYIT_HATASI", "KART_URETIM_HATASI", "KART_ISLEM_KESILDI", "KART_KAYNAK_YETERSIZ", "KART_KAYNAK_DEGISTI", "KART_KILIT_KAYBI", "KART_ISLEM_CAGRI_SINIRI", "KART_DERS_CAGRI_SINIRI", "KART_KANIT_YETERSIZ"]) {
         const mesaj = kullaniciHataMesaji({ response: { status: 502, data: { kod, hata: "sentetik-gizli-anahtar" } } });
         assert.doesNotMatch(mesaj, /sentetik-gizli/);
     }

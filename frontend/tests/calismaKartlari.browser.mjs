@@ -9,20 +9,23 @@ import { createServer } from "vite";
 
 const dersId = "111111111111111111111111";
 const kartlar = [
-    { _id: "222222222222222222222222", konuId: "yigin", soru: "Yığın hangi çalışma ilkesini kullanır?", cevap: "LIFO ilkesini kullanır.", goruldu: false, yildizli: false, kaynak: { dosyaAdi: "Veri Yapıları.pdf", parcaIndex: 0 } },
-    { _id: "333333333333333333333333", konuId: "kuyruk", soru: "Kuyruk hangi çalışma ilkesini kullanır?", cevap: "FIFO ilkesini kullanır.", goruldu: false, yildizli: false, kaynak: { dosyaAdi: "Veri Yapıları.pdf", parcaIndex: 1 } },
+    { _id: "222222222222222222222222", konuId: "yigin", soru: "Boşluğu tamamlayın: Yığın […] ilkesini kullanır.", cevap: "LIFO", goruldu: false, yildizli: false, kaynak: { dosyaAdi: "Veri Yapıları.pdf", parcaIndex: 0 } },
+    { _id: "333333333333333333333333", konuId: "kuyruk", soru: "Boşluğu tamamlayın: Kuyruk […] ilkesini kullanır.", cevap: "FIFO", goruldu: false, yildizli: false, kaynak: { dosyaAdi: "Veri Yapıları.pdf", parcaIndex: 1 } },
 ];
 let durum = "yok", getSayisi = 0, uretimSayisi = 0, degerlendirmeler = [];
 let ozetGetSayisi = 0;
 const kayitlar = new Map();
-const govde = () => ({
-    durum, olusturulabilir: true, hataKodu: "", kartlar: durum === "hazir" ? kartlar : [],
-    ilerleme: { tamamlananKonu: durum === "hazir" ? 2 : 0, toplamKonu: durum === "yok" ? 0 : 2 },
-    istatistikler: { toplam: durum === "hazir" ? 2 : 0, gorulen: kartlar.filter(k => k.goruldu).length,
-        gorulmeyen: durum === "hazir" ? kartlar.filter(k => !k.goruldu).length : 0, yildizli: kartlar.filter(k => k.yildizli).length },
-    konular: [{ konuId: "yigin", anaKonuId: "veri", baslik: "Yığın", anaBaslik: "Veri Yapıları", kartSayisi: 1 },
-        { konuId: "kuyruk", anaKonuId: "veri", baslik: "Kuyruk", anaBaslik: "Veri Yapıları", kartSayisi: 1 }],
-});
+const govde = () => {
+    const kayitli = durum === "hazir" ? kartlar : durum === "kismi" ? kartlar.slice(0, 1) : [];
+    return {
+        durum, olusturulabilir: true, hataKodu: durum === "kismi" ? "KART_ISLEM_CAGRI_SINIRI" : "", kartlar: kayitli,
+        ilerleme: { tamamlananKonu: kayitli.length, toplamKonu: durum === "yok" ? 0 : 2 },
+        istatistikler: { toplam: kayitli.length, gorulen: kayitli.filter(k => k.goruldu).length,
+            gorulmeyen: kayitli.filter(k => !k.goruldu).length, yildizli: kayitli.filter(k => k.yildizli).length },
+        konular: [{ konuId: "yigin", anaKonuId: "veri", baslik: "Yığın", anaBaslik: "Veri Yapıları", kartSayisi: kayitli.length ? 1 : 0 },
+            { konuId: "kuyruk", anaKonuId: "veri", baslik: "Kuyruk", anaBaslik: "Veri Yapıları", kartSayisi: kayitli.length === 2 ? 1 : 0 }],
+    };
+};
 const kok = resolve(process.cwd());
 const alan = await mkdtemp(join(kok, ".kart-browser-"));
 let browser, vite, ws, kapaniyor = false;
@@ -191,6 +194,18 @@ createRoot(document.getElementById('root')).render(React.createElement(MemoryRou
     await gecik(500);
     assert.equal(ozetGetSayisi, 1, "Kart sayfasına dönüşte özet isteği sürmemeli");
     assert.equal(uretimSayisi, 1, "Sekme değişimi kart üretimini tekrarlamamalı");
+    durum = "kismi"; getSayisi = 0;
+    await ac(false); await bekle("document.body.innerText.includes('Eksik Konuları Tamamla')");
+    assert.equal(uretimSayisi, 1, "Kısmi durum kendiliğinden üretim başlatmamalı");
+    assert.ok(await evaluate("document.body.innerText.includes('güvenli çağrı sınırına')"));
+    await tikla("Kartları Görüntüle"); await bekle("document.querySelector('[aria-label^=\"Cevabı göster\"]')");
+    assert.equal(await evaluate("document.body.innerText.includes('Kart 1 / 1')"), true);
+    assert.ok(await evaluate("Boolean(document.querySelector('[aria-label=\"Yıldızı kaldır\"]'))"), "Kısmi yenilemede yıldız korunmalı");
+    await tikla("Eksik Konuları Tamamla"); await bekle("document.body.innerText.includes('Kart 1 / 2')");
+    assert.equal(uretimSayisi, 2, "Eksik konular için yalnızca bir ek POST olmalı");
+    assert.equal(kartlar[0]._id, "222222222222222222222222");
+    assert.equal(kartlar[0].goruldu, true); assert.equal(kartlar[0].yildizli, true);
+    assert.equal(degerlendirmeler.length, 1, "Devam eski değerlendirmeyi değiştirmemeli");
     assert.deepEqual(hatalar, []);
     console.log(JSON.stringify({ sonuc: "başarılı", uretimSayisi, ozetGetSayisi, degerlendirmeSayisi: degerlendirmeler.length, masaustu, mobil }));
 } finally {

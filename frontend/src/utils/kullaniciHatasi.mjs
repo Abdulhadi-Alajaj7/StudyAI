@@ -8,6 +8,9 @@ const teknikMesajCevirileri = [
 // Yalnızca sabit mesajlar: sağlayıcının teknik hata gövdesini ekrana taşıma.
 const guvenliKodMesajlari = new Map([
     ["KART_GECERSIZ_YANIT", "Üretilen kartlar kaynaklarıyla doğrulanamadı. Eksik konuları yeniden deneyebilirsiniz."],
+    ["KART_ISLEM_CAGRI_SINIRI", "Bu işlemin güvenli çağrı sınırına ulaşıldı. Kaydedilen kartlar korundu; eksik konulara devam edebilirsiniz."],
+    ["KART_DERS_CAGRI_SINIRI", "Bu dersin günlük kart üretim sınırına ulaşıldı. Kaydedilen kartlar korunuyor; daha sonra devam edebilirsiniz."],
+    ["KART_KANIT_YETERSIZ", "Seçilen kaynaklarda doğrulanabilir kısa kanıt bulunamadı. Kaydedilen kartlar korundu; materyal içeriğini kontrol edin."],
     ["KART_KAYIT_HATASI", "Kartlar kaydedilirken bir sorun oluştu. Kaydedilmiş kartlar korunuyor; eksik konuları yeniden deneyebilirsiniz."],
     ["KART_URETIM_HATASI", "Kart üretimi tamamlanamadı. Eksik konuları yeniden deneyebilirsiniz."],
     ["KART_ISLEM_KESILDI", "Önceki üretim kesildi. Tamamlanan kartları koruyarak devam edebilirsiniz."],

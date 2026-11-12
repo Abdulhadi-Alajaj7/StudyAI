@@ -7,6 +7,7 @@ import { createHash } from "node:crypto";
 import { kartKonulariniGetir, konuKartKaynaklariniSec } from "../services/calismaKartlariService.js";
 import { geminiIleCalismaKartlariUret, getGeminiClient } from "../services/geminiService.js";
 import { kartHataTanilamasiniOlustur } from "../utils/calismaKartiTanilama.js";
+import { kartKanitlariniOlustur, kartKanitiKonuyaUygunMu } from "../utils/calismaKartiKanit.js";
 
 const args = process.argv.slice(2);
 const dersArg = args.find(a => a.startsWith("--ders-id="));
@@ -44,12 +45,16 @@ if (!dersArg || !/^[a-f\d]{24}$/i.test(dersArg.slice(10)) || args.some(a => a !=
         const eksik = deste?.konular.find(k => !k.tamamlandi);
         const secim = secimler.find(s => s.konu.konuId === (eksik?.konuId || konular[0].konuId));
         konuId = secim.konu.konuId;
-        const kartSayisi = eksik?.hedefKartSayisi || Math.min(4, Math.max(1,
+        const kartSayisi = eksik ? eksik.hedefKartSayisi - eksik.kartlar.length : Math.min(4, Math.max(1,
             Math.ceil(secim.kaynaklar.reduce((t, k) => t + k.icerik.split(/\s+/u).length, 0) / 180)));
+        const uygunKanitlar = secimler.map(s => kartKanitlariniOlustur(s.kaynaklar).filter(k => kartKanitiKonuyaUygunMu(k, s.konu)));
         console.log(JSON.stringify({ saltOkunur: true,
             dersHazirlamaDurumu: ["bekliyor", "isleniyor", "hata", "tamamlandi"].includes(ders.hazirlamaDurumu) ? ders.hazirlamaDurumu : "bilinmiyor",
             hazirMateryal: materyaller.length, aktifParca: parcalar.length,
             konu: konular.length, kaynakBulunanKonu: secimler.filter(s => s.kaynaklar.length).length,
+            kanitBulunanKonu: uygunKanitlar.filter(k => k.length).length,
+            ilkKonununKanitSayisi: uygunKanitlar[secimler.indexOf(secim)].length,
+            ilkKonununCevapAraligiSayisi: uygunKanitlar[secimler.indexOf(secim)].reduce((t, k) => t + k.secenekler.length, 0),
             enBuyukKaynakKarakteri: Math.max(...secimler.map(s => s.kaynaklar.reduce((t, k) => t + k.icerik.length, 0))),
             desteDurumu: deste?.durum || "yok", hataKodu: deste?.hataKodu || "", hataTanilamaVar: Boolean(deste?.hataTanilama),
             kaynakImzasiGuncel: !deste || deste.kaynakImzasi === imza, konuId, kartSayisi, sdkCagrisi }));
@@ -59,17 +64,19 @@ if (!dersArg || !/^[a-f\d]{24}$/i.test(dersArg.slice(10)) || args.some(a => a !=
             }
             asama = "GEMINI_ISTEGI";
             const istemci = getGeminiClient();
-            const sonuc = await geminiIleCalismaKartlariUret({ konu: eksik || secim.konu, kartSayisi,
+            const sonuc = await geminiIleCalismaKartlariUret({ konu: { ...secim.konu, ...eksik }, kartSayisi,
                 kaynaklar: secim.kaynaklar, oncekiKartlar: (deste?.konular || []).flatMap(k => k.kartlar || []) },
             { maxDeneme: 1, istemci: { models: { generateContent: g => {
                 if (sdkCagrisi >= 1) throw Object.assign(new Error(), { kod: "CANLI_TANI_CAGRI_SINIRI" });
                 sdkCagrisi++; return istemci.models.generateContent(g);
             } } } });
-            console.log(JSON.stringify({ sonuc: "dogrulandi", kartSayisi: sonuc.length, sdkCagrisi, veritabaninaYazildi: false }));
+            console.log(JSON.stringify({ sonuc: !sonuc.kartlar.length ? "dogrulanamadi" : sonuc.kartlar.length < kartSayisi ? "kismi_dogrulandi" : "dogrulandi",
+                kartSayisi: sonuc.kartlar.length, reddedilenler: sonuc.reddedilenler, sdkCagrisi, veritabaninaYazildi: false }));
+            if (!sonuc.kartlar.length) process.exitCode = 1;
         }
     } catch (hata) {
         // Ham SDK/Mongo hata metinleri URI, anahtar veya materyal içerebilir.
-        const kod = ["DERS_HAZIR_DEGIL", "KART_KAYNAK_YETERSIZ", "KART_KONU_HATASI", "KART_KAYNAK_BAGLANTISI_EKSIK",
+        const kod = ["DERS_HAZIR_DEGIL", "KART_KAYNAK_YETERSIZ", "KART_KANIT_YETERSIZ", "KART_ISLEM_CAGRI_SINIRI", "KART_KONU_HATASI", "KART_KAYNAK_BAGLANTISI_EKSIK",
             "CANLI_TANI_UYGUN_DEGIL", "CANLI_TANI_CAGRI_SINIRI", "KART_GECERSIZ_YANIT", "GEMINI_GECERSIZ_YANIT",
             "GEMINI_ZAMAN_ASIMI", "GEMINI_AG_HATASI", "GEMINI_GECICI_HATA", "GEMINI_GUNLUK_KOTA", "GEMINI_KOTA_ASIMI",
             "GEMINI_YAPILANDIRMA", "GEMINI_MODEL_BULUNAMADI", "GEMINI_GECERSIZ_ISTEK"].includes(hata?.kod) ? hata.kod : "TANI_TAMAMLANAMADI";

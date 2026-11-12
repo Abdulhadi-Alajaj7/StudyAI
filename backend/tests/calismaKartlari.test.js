@@ -97,10 +97,10 @@ const duzenek = () => {
         kartUret: async g => {
             cagrilar.push(g);
             return geminiIleCalismaKartlariUret(g, {
-                istemci: { models: { async generateContent() {
-                    const kaynak = g.kaynaklar[0];
-                    return { text: JSON.stringify({ kartlar: [{ konuId: g.konu.konuId, soru: `${g.konu.baslik} hangi ilkeyle çalışır?`,
-                        cevap: kaynak.icerik, kaynakReferansi: kaynak.anahtar, alinti: kaynak.icerik }] }), candidates: [{ finishReason: "STOP" }] };
+                istemci: { models: { async generateContent(istek) {
+                    const kanit = JSON.parse(istek.contents).kanitlar[0];
+                    return { text: JSON.stringify({ kartlar: [{ konuId: g.konu.konuId,
+                        kanitReferansi: kanit.kimlik, cevapIndex: kanit.cevaplar.indexOf(g.konu.konuId === "yigin" ? "LIFO" : "FIFO") }] }), candidates: [{ finishReason: "STOP" }] };
                 } } }, maxDeneme: 1,
             });
         },
@@ -109,6 +109,124 @@ const duzenek = () => {
         async tamamla() { while (isler.length) await isler.shift()(); } };
 };
 const hazirDuzenek = async () => { const d = duzenek(); await calismaKartlariniOlustur(d.girdi, d.deps); await d.tamamla(); return d; };
+
+const sdkYanitiniAyarla = (d, yanitla, maxDeneme = 1) => {
+    const cagrilar = [];
+    d.deps.kartUret = g => geminiIleCalismaKartlariUret(g, { maxDeneme, bekle: async () => {}, rastgele: () => 0,
+        istemci: { models: { async generateContent(istek) {
+            const prompt = JSON.parse(istek.contents); cagrilar.push({ g, prompt });
+            return { text: JSON.stringify({ kartlar: await yanitla(g, prompt) }) };
+        } } },
+    });
+    return cagrilar;
+};
+
+test("üç geçerli kart atomik korunur; yalnızca dördüncü tamamlanır ve çalışma geçmişi değişmez", async () => {
+    const d = duzenek(); d.db.harita[0].anaKonular[0].altKonular.length = 1;
+    d.db.parca[0].icerik = "Yığın ekleme işlemi push olarak adlandırılır. Yığın çıkarma işlemi pop olarak adlandırılır. Yığın taşması kapasite doluyken oluşur. Yığın boşluğu hiç eleman kalmadığında oluşur. " + "Açıklayıcı kaynak içeriği ".repeat(200);
+    let tur = 0;
+    const cagrilar = sdkYanitiniAyarla(d, (g, p) => {
+        tur++;
+        return tur === 1 ? ["push", "pop", "kapasite", "sahte"].map((m, i) => ({ konuId: g.konu.konuId,
+            kanitReferansi: i === 3 ? "sahte" : p.kanitlar[i].kimlik, cevapIndex: i === 3 ? 99 : p.kanitlar[i].cevaplar.indexOf(m) }))
+            : [{ konuId: g.konu.konuId, kanitReferansi: p.kanitlar[3].kimlik, cevapIndex: p.kanitlar[3].cevaplar.indexOf("eleman") }];
+    });
+    await calismaKartlariniOlustur(d.girdi, d.deps); await d.tamamla();
+    let sonuc = await calismaKartlariniGetir(d.girdi, d.deps);
+    assert.equal(sonuc.durum, "kismi"); assert.equal(sonuc.kartlar.length, 3);
+    assert.equal(sonuc.konular[0].eksikKartSayisi, 1); assert.equal(sonuc.ilerleme.tamamlananKonu, 0);
+    const kimlikler = sonuc.kartlar.map(k => k._id), kartId = kimlikler[0];
+    await kartDurumunuGuncelle({ ...d.girdi, kartId, goruldu: true, yildizli: true }, d.deps);
+    await kartiDegerlendir({ ...d.girdi, kartId, degerlendirme: "zor", istemciIstekId: "kismi-v1-istek-01" }, d.deps);
+    // Eksik kartın DB checkpoint'i başarısız olduğunda eski üç kart ezilmez.
+    const kaydet = d.deps.DesteModel.findOneAndUpdate;
+    d.deps.DesteModel.findOneAndUpdate = async (f, u) => {
+        if (u.$set?.["konular.$.kartlar"]) throw new Error("sentetik-kayit-hatasi");
+        return kaydet(f, u);
+    };
+    await calismaKartlariniOlustur(d.girdi, d.deps); await d.tamamla();
+    assert.deepEqual((await calismaKartlariniGetir(d.girdi, d.deps)).kartlar.map(k => k._id), kimlikler);
+    d.deps.DesteModel.findOneAndUpdate = kaydet;
+    await calismaKartlariniOlustur(d.girdi, d.deps); await d.tamamla();
+    sonuc = await calismaKartlariniGetir(d.girdi, d.deps);
+    assert.equal(sonuc.durum, "hazir"); assert.equal(sonuc.kartlar.length, 4);
+    assert.deepEqual(sonuc.kartlar.slice(0, 3).map(k => k._id), kimlikler);
+    assert.deepEqual(cagrilar.map(c => c.prompt.kartSayisi), [4, 1, 1]);
+    assert.equal(sonuc.kartlar[0].goruldu, true); assert.equal(sonuc.kartlar[0].yildizli, true);
+    assert.equal(d.db.degerlendirme.length, 1);
+});
+
+test("ilk konunun doğrulama hatası ikinci konuya engel olmaz; yalnızca başarısız konu yeniden denenir", async () => {
+    const d = duzenek();
+    const cagrilar = sdkYanitiniAyarla(d, (g, p) => [{ konuId: g.konu.konuId, kanitReferansi: p.kanitlar[0].kimlik,
+        cevapIndex: g.konu.konuId === "yigin" ? 99 : p.kanitlar[0].cevaplar.indexOf("FIFO") }]);
+    await calismaKartlariniOlustur(d.girdi, d.deps); await d.tamamla();
+    assert.equal(d.db.deste[0].durum, "kismi");
+    assert.equal(d.db.deste[0].konular[0].tamamlandi, false);
+    assert.equal(d.db.deste[0].konular[1].tamamlandi, true);
+    const eskiId = d.db.deste[0].konular[1].kartlar[0]._id;
+    await calismaKartlariniOlustur(d.girdi, d.deps); await d.tamamla();
+    assert.deepEqual(cagrilar.map(c => c.g.konu.konuId), ["yigin", "kuyruk", "yigin"]);
+    assert.equal(d.db.deste[0].konular[1].kartlar[0]._id, eskiId);
+});
+
+test("503 retry sınırı sonrası diğer konular çağrılmaz; ret ve SDK sayısı güvenli kaydedilir", async () => {
+    const d = duzenek();
+    const cagrilar = sdkYanitiniAyarla(d, () => { throw Object.assign(new Error("sentetik-503"), { status: 503 }); }, 2);
+    await calismaKartlariniOlustur(d.girdi, d.deps); await d.tamamla();
+    assert.equal(cagrilar.length, 2); assert.ok(cagrilar.every(c => c.g.konu.konuId === "yigin"));
+    assert.equal(d.db.deste[0].hataKodu, "GEMINI_GECICI_HATA");
+    assert.equal(d.db.deste[0].sonIslemSdkCagrisi, 2); assert.equal(d.db.deste[0].ayrilanCagriSayisi, 2);
+    assert.equal(d.db.deste[0].konular[0].sdkCagriSayisi, 2); assert.equal(d.db.deste[0].konular[0].sonDenemeSdkCagrisi, 2);
+    assert.equal(d.db.deste[0].konular[0].reddedilenKartlar[0].orijinalHttpDurumu, 503);
+    assert.equal(d.db.deste[0].konular[1].denemeSayisi, 0);
+});
+
+const cokKonuluDuzenek = () => {
+    const d = duzenek(), m = d.db.materyal[0];
+    d.db.harita[0].anaKonular[0].altKonular = Array.from({ length: 4 }, (_, i) => ({ konuId: `konu${i}`, baslik: `Konu${i}`, kaynakMateryalIds: [m._id] }));
+    d.db.parca = d.db.harita[0].anaKonular[0].altKonular.map((k, i) => ({ ...d.girdi, materyalId: m._id, islemeId: m.aktifIslemeId,
+        parcaIndex: i, icerik: `${k.baslik} öğrenilirken Terim${i} kavramı kullanılır.` }));
+    return d;
+};
+const cokKonuYanitla = (g, p) => [{ konuId: g.konu.konuId, kanitReferansi: p.kanitlar[0].kimlik, cevapIndex: p.kanitlar[0].cevaplar.indexOf(`Terim${g.konu.konuId.slice(4)}`) }];
+
+test("işlem ve ders çağrı bütçesi kalıcıdır; eşzamanlı POST çift hak ayırmaz, pencere dolunca devam eder", async () => {
+    const d = cokKonuluDuzenek(); d.deps.cagriSinirlari = { islem: 2, ders: 3 };
+    const cagrilar = sdkYanitiniAyarla(d, cokKonuYanitla);
+    await Promise.all([calismaKartlariniOlustur(d.girdi, d.deps), calismaKartlariniOlustur(d.girdi, d.deps)]);
+    assert.equal(d.isler.length, 1); assert.equal(d.db.deste[0].ayrilanCagriSayisi, 2);
+    await d.tamamla();
+    assert.equal(cagrilar.length, 2); assert.equal(d.db.deste[0].hataKodu, "KART_ISLEM_CAGRI_SINIRI");
+    const eskiId = d.db.deste[0].konular[0].kartlar[0]._id;
+    await calismaKartlariniOlustur(d.girdi, d.deps); await d.tamamla();
+    assert.equal(cagrilar.length, 3); assert.equal(d.db.deste[0].ayrilanCagriSayisi, 3);
+    await assert.rejects(calismaKartlariniOlustur(d.girdi, d.deps), h => h.kod === "KART_DERS_CAGRI_SINIRI" && h.status === 429);
+    assert.equal(d.isler.length, 0); assert.equal(cagrilar.length, 3);
+    d.zamaniIlerlet(24 * 60 * 60_000 + 1);
+    await calismaKartlariniOlustur(d.girdi, d.deps); await d.tamamla();
+    assert.equal(d.db.deste[0].durum, "hazir"); assert.equal(cagrilar.length, 4);
+    assert.equal(d.db.deste[0].ayrilanCagriSayisi, 1); assert.equal(d.db.deste[0].konular[0].kartlar[0]._id, eskiId);
+});
+
+test("doğrulamada sürekli başarısız ilk konu bütçe bitince hiç denenmemiş konuları aç bırakmaz", async () => {
+    const d = cokKonuluDuzenek(); d.deps.cagriSinirlari = { islem: 2, ders: 12 };
+    const cagrilar = sdkYanitiniAyarla(d, (g, p) => g.konu.konuId === "konu0" ? [] : cokKonuYanitla(g, p));
+    await calismaKartlariniOlustur(d.girdi, d.deps); await d.tamamla();
+    await calismaKartlariniOlustur(d.girdi, d.deps); await d.tamamla();
+    assert.deepEqual(cagrilar.map(c => c.g.konu.konuId), ["konu0", "konu1", "konu2", "konu3"]);
+    assert.equal(d.db.deste[0].konular.filter(k => k.tamamlandi).length, 3);
+});
+
+test("sunucu kesintisinde bilinmeyen ayrılmış hak geri verilmez; yeniden başlatmak ders bütçesini aşmaz", async () => {
+    const d = cokKonuluDuzenek(); d.deps.cagriSinirlari = { islem: 2, ders: 3 };
+    const cagrilar = sdkYanitiniAyarla(d, cokKonuYanitla);
+    await calismaKartlariniOlustur(d.girdi, d.deps); d.isler.length = 0;
+    d.zamaniIlerlet(181000);
+    await calismaKartlariniOlustur(d.girdi, d.deps); await d.tamamla();
+    assert.equal(cagrilar.length, 1); assert.equal(d.db.deste[0].ayrilanCagriSayisi, 3);
+    await assert.rejects(calismaKartlariniOlustur(d.girdi, d.deps), h => h.kod === "KART_DERS_CAGRI_SINIRI");
+});
 
 test("konu başlığının birebir geçmesi gerekmez; açıklama ve Türkçe ekler kaynak eşleştirmesini korur", () => {
     const d = duzenek(), m = d.db.materyal[0];
@@ -119,22 +237,31 @@ test("konu başlığının birebir geçmesi gerekmez; açıklama ve Türkçe ekl
     assert.equal(konuKartKaynaklariniSec({ ...konu, baslik: "Fotosentez Klorofil", aciklama: "" }, d.db.parca.slice(0, 2), [m]).length, 0);
 });
 
-test("gerçek hata şeklindeki ilk konu reddi alt koduyla kaydedilir; GET tekrar üretmez", async () => {
+test("başlığı kaynakta geçmeyen konu açıklaması kanıt seçimine kadar korunur", async () => {
+    const d = duzenek();
+    d.db.harita[0].anaKonular[0].altKonular.length = 1;
+    Object.assign(d.db.harita[0].anaKonular[0].altKonular[0], { baslik: "Son Giren İlk Çıkar", aciklama: "Yığın LIFO" });
+    await calismaKartlariniOlustur(d.girdi, d.deps); await d.tamamla();
+    assert.equal(d.db.deste[0].durum, "hazir"); assert.equal(d.db.deste[0].konular[0].kartlar[0].cevap, "LIFO");
+    assert.equal(d.cagrilar[0].konu.aciklama, "Yığın LIFO");
+});
+
+test("kart reddi konu bazında alt koduyla kaydedilir; GET tekrar üretmez", async () => {
     const d = duzenek(); let cagri = 0;
     d.deps.kartUret = g => geminiIleCalismaKartlariUret(g, { maxDeneme: 1,
         istemci: { models: { async generateContent() {
-            cagri++; return { text: JSON.stringify({ kartlar: [{ konuId: g.konu.konuId, soru: "Yığın nedir?", cevap: "sentetik-gizli-cevap",
-                alinti: g.kaynaklar[0].icerik, kaynakReferansi: g.kaynaklar[0].anahtar }] }) };
+            cagri++; return { text: JSON.stringify({ kartlar: [{ konuId: g.konu.konuId,
+                kanitReferansi: `${g.kaynaklar[0].anahtar}.E1`, cevapIndex: 99 }] }) };
         } } },
     });
     await calismaKartlariniOlustur(d.girdi, d.deps); await d.tamamla();
     assert.equal(d.db.deste[0].durum, "hata");
     assert.equal(d.db.deste[0].hataKodu, "KART_GECERSIZ_YANIT");
-    assert.equal(d.db.deste[0].hataTanilama.konuId, "yigin");
-    assert.equal(d.db.deste[0].hataTanilama.dogrulamaAltKodu, "CEVAP_ALINTIDA_YOK");
+    assert.equal(d.db.deste[0].konular[0].reddedilenKartlar[0].konuId, "yigin");
+    assert.equal(d.db.deste[0].konular[0].reddedilenKartlar[0].dogrulamaAltKodu, "CEVAP_ARALIGI_GECERSIZ");
     assert.equal(d.db.deste[0].konular.flatMap(k => k.kartlar).length, 0);
     await calismaKartlariniGetir(d.girdi, d.deps); await calismaKartlariniGetir(d.girdi, d.deps);
-    assert.equal(cagri, 1); assert.equal(d.isler.length, 0);
+    assert.equal(cagri, 2); assert.equal(d.isler.length, 0);
     assert.equal(d.tanilamalar[0].asama, "KART_DOGRULAMA");
     assert.doesNotMatch(JSON.stringify(d.tanilamalar), /sentetik-gizli|Yığın LIFO/);
     assert.ok(!("hataTanilama" in await calismaKartlariniGetir(d.girdi, d.deps)));

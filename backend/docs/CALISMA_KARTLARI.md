@@ -2,6 +2,9 @@
 
 12 Kasım 2026 — `feature/calisma-kartlari-sistemi`
 
+Güncel V1 güvenilirlik değişiklikleri ve canlı doğrulama sınırı:
+[V1 denetim raporu](CALISMA_KARTLARI_V1_GUVENILIRLIK.md).
+
 ## Kullanım
 
 Dersin **Çalışma Kartları** sekmesindeki **Kartları Oluştur** düğmesi üretimi başlatır.
@@ -38,11 +41,18 @@ FSRS, bildirim veya otomatik zamanlama uygulanmadı.
   en fazla 120 konu bulunur. Daha büyük harita sessizce kırpılmak yerine açıklamayla reddedilir.
 - Bir Gemini çağrısı bir konunun küçük kart grubunu üretir. Ortak hata ayrıştırma,
   exponential backoff/jitter, timeout iptali ve süreç içi eşzamanlı istek sınırı kullanılır.
-- Beklenen kart sayısı, konu kimliği, izinli kaynak, alıntının kaynakta bulunması,
-  kısa cevabın alıntıdan alınması ve soru/alıntı ilişkisi doğrulanır. Aynı ve çok
-  benzer sorular parti içinde ve tüm kayıtlı kartlara karşı denetlenir.
+- Yeni kartlar boşluk doldurma biçimindedir. Sunucu kısa kaynak cümlelerini
+  kimliklendirir; model yalnızca kanıt kimliği ve sunucunun cevap seçeneklerindeki sayısal indeksi seçer. Soru,
+  cevap ve alıntı aynı özgün cümleden oluşturulur; gerçek karakter aralıkları kaydedilir.
+  Serbest model cevabı/alıntısı kabul edilmez. Konu yönlendirmesi cevabın anlamsal
+  doğruluğunun kanıtı olarak kullanılmaz. Aynı soru ve aynı kanıt tekrarı reddedilir;
+  farklı cevaplı kavramlar ortak soru kalıbı nedeniyle birleştirilmez.
+- Her kart bağımsız doğrulanır. Dört karttan biri hatalıysa üç geçerli kart kalır;
+  eksik sayı veya hatalı kart grubun tamamını iptal etmez. Hedef büyütülmez,
+  doğrulanmamış kart yayımlanmaz. Her ret sabit alt kod ve kart indeksiyle kaydedilir.
 - Önceki kartlardan en fazla son 80'i prompt'a eklenir; doğrulama tüm önceki
-  kartlara karşı yapılır. Boş/geçersiz/eksik/kesilmiş JSON başarı sayılmaz.
+  kartlara karşı yapılır. Boş/geçersiz/kesilmiş JSON başarı sayılmaz; daha az
+  geçerli kart içeren doğru JSON açıkça kısmi sonuçtur.
 
 Bu deterministik kontroller desteksiz cevabı önemli ölçüde sınırlar; modelin her
 soru-cevap eşleştirmesinin anlamsal doğruluğuna ilişkin mutlak bir garanti değildir.
@@ -53,10 +63,12 @@ doğrulama gevşetilip uydurma kart kaydedilmez.
 
 `CalismaKartiDestesi` ders başına tek kayıt tutar; konu grupları ve kart içerikleri
 gömülüdür. Kaynak sürümleri ve konu haritasından üretilen SHA-256 imza saklanır.
-Her başarılı konu, işlem token'ı koşuluyla atomik checkpoint olarak kaydedilir.
-Başarısız grubun bozuk/eksik kartları yayımlanmaz. Önceki başarılı gruplar korunur.
-**Eksik Konuları Tamamla** yalnızca tamamlanmamış grupları üretir; mevcut kart
-kimlikleri ve bu kartlara ait çalışma/değerlendirme verileri korunur.
+Her konu denemesi, işlem token'ı koşuluyla atomik checkpoint olarak kaydedilir.
+Kısmi gruptaki geçerli kartlar yayımlanabilir; bozuk kartlar yayımlanmaz. Konu
+hedefe ulaşmadan tamamlanmış sayılmaz. **Eksik Konuları Tamamla** yalnızca eksik
+kart sayısını ister; mevcut kart kimlikleri ve çalışma/değerlendirme verileri korunur.
+Doğrulama hatasında bütçe içinde diğer konular denenir; 503/kota/ağ/JSON hatasında
+iş durur. Daha az denenmiş konulara öncelik verilir; tek başarısız konu diğerlerini aç bırakmaz.
 
 Üretim POST'u işlem durumunu hızlıca döndürür; iş Node.js sürecinde devam eder.
 GET hiçbir zaman Gemini üretimi başlatmaz. Arayüz aktif işte 2,5 saniyede bir
@@ -112,6 +124,15 @@ Ham SDK hatası/log gövdesi kullanıcıya aktarılmaz.
 
 `GEMINI_KART_MODELI` boşsa mevcut varsayılan Gemini modeli kullanılır.
 `GEMINI_KART_MAKS_DENEME` varsayılan 3; izin verilen aralık 1–5 toplam SDK denemesidir.
+`GEMINI_KART_ISLEM_CAGRI_BUTCESI` varsayılan 4 (1–12), retry dahil işlem toplamıdır.
+`GEMINI_KART_DERS_GUNLUK_CAGRI_BUTCESI` varsayılan 48 (1–200), kullanıcı+ders için
+ilk hak ayrımından başlayan 24 saatlik kalıcı sınırdır. İş başlangıcında hak atomik
+ayrılır; normal bitişte kullanılmayan hak iade edilir. Süreç çökerse bilinmeyen
+ayrılmış çağrılar güvenlik için tüketilmiş sayılır. Pencere bitince yeni işlemde
+yenilenir. Bütçe sınırında otomatik yeni POST yoktur; kullanıcı devam eder.
+Konu başına toplam/son SDK sayısı ve deste başına son işlem sayısı ayrıca saklanır.
+Bu sınırlar Google projesindeki diğer özelliklerin kotası değildir; salt okunur
+tanılamanın ayrıca kendi tek çağrılık koruması ve açık onay şartı vardır.
 Yeni bağımlılık yoktur. Yeni modellerin bileşik benzersiz indekslerinin oluşturulması
 ve mevcut sohbetin de gerektirdiği MongoDB transaction desteği dağıtımda doğrulanmalıdır.
 
@@ -126,11 +147,11 @@ Gerçek sağlayıcı kalitesi, gerçek MongoDB üzerinde çoklu instance/yük ve
 indeksleri bu mock testlerin yerine geçmez. Otomatik testler gerçek sağlayıcıya
 çağrı yapmaz. Ayrı, kullanıcı onaylı tek canlı tanılama sonucu aşağıdadır.
 
-Son doğrulama: backend **426/426**, frontend **106/106** test başarılı. Frontend lint
+Son doğrulama: backend **437/437**, frontend **106/106** test başarılı. Frontend lint
 ve build, backend JavaScript sözdizimi ve `git diff --check` başarılı. Masaüstü
 koyu tema ve 390 px mobil açık tema Chromium senaryosu başarılıdır.
 Backend paketinde ayrı lint/build script'i yoktur. Son build başarılıdır; JS parçası
-587,15 kB'dir. Önceki build'in 500 kB uyarısı bu çalıştırmada çıkmamıştır.
+587,59 kB'dir. Build 500 kB parça boyutu uyarısı verir; hata değildir.
 
 ## Değişen dosyalar
 
@@ -169,6 +190,9 @@ başarısız, sonrasında başarılıdır. Alt/ana kaynak önceliği, ObjectId/s
 eski/yabancı sürümün dışlanması ve kısa kaynağın eşik yüzünden elenmemesi de test edildi.
 
 ## Gerçek kullanım denetimi — 12 Kasım 2026
+
+Bu bölüm V1 commit'i öncesindeki denetimin tarihsel kaydıdır. Sonraki bağımsız
+kart doğrulaması, kanıt protokolü ve bütçe değişiklikleri üstteki güncel rapordadır.
 
 ### 1. 422 hatasının doğrulanmış kök nedeni
 

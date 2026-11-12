@@ -1,13 +1,16 @@
 export const kartMetniniNormalizeEt = metin => String(metin || "").normalize("NFKC")
     .toLocaleLowerCase("tr-TR").replace(/[^\p{L}\p{N}]+/gu, " ").trim();
 const kisaTerimler = new Set(["ip", "ai", "ml", "os", "db", "go", "js", "c", "r", "io"]);
-const duraklar = new Set("nedir neden nasil nasıl hangi hangisi bir bu şu için ile olan olarak ve veya ne hangi göre temel açıklayınız açıklayın".split(" "));
+const duraklar = new Set("nedir neden nasil nasıl hangi hangisi bir bu şu için ile olan olarak ve veya ne hangi göre temel açıklayınız açıklayın boşluğu tamamlayın".split(" "));
 export const kartKelimeleri = metin => new Set(kartMetniniNormalizeEt(metin).split(" ")
     .filter(k => (k.length > 2 || kisaTerimler.has(k)) && !duraklar.has(k)));
 const ortusme = (sol, sag) => [...sol].filter(k => [...sag].some(s => s === k || (Math.min(s.length, k.length) >= 5 && (s.startsWith(k) || k.startsWith(s))))).length;
 
 export const kartlarBenzerMi = (sol, sag) => {
     if (kartMetniniNormalizeEt(sol.soru) === kartMetniniNormalizeEt(sag.soru)) return true;
+    // Ortak soru kalıbı farklı kavramları tek başına tekrar yapmaz (LIFO/FIFO).
+    // Aynı soru yine reddedilir; yaklaşık soru eşleşmesi aynı cevabı da gerektirir.
+    if (kartMetniniNormalizeEt(sol.cevap) !== kartMetniniNormalizeEt(sag.cevap)) return false;
     const a = kartKelimeleri(sol.soru), b = kartKelimeleri(sag.soru);
     if (a.size && b.size && ortusme(a, b) / Math.max(a.size, b.size) >= 0.8) return true;
     const tumA = kartKelimeleri(`${sol.soru} ${sol.cevap}`), tumB = kartKelimeleri(`${sag.soru} ${sag.cevap}`);
