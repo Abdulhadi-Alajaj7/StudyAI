@@ -187,6 +187,11 @@ mock.module("../models/DersOzeti.js", {
         }
     }
 });
+for (const model of ["CalismaKartiDestesi", "KartCalismaDurumu", "KartDegerlendirmesi"]) {
+  mock.module(`../models/${model}.js`, { defaultExport: { async deleteMany(filtre) {
+    assert.ok(filtre.dersId, "Kart temizliği dersle sınırlı olmalı");
+  } } });
+}
 mock.module("../models/Test.js", {
     defaultExport: {
         async deleteMany() {}

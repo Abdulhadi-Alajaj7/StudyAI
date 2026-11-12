@@ -1,0 +1,9 @@
+.calisma-kartlari { min-width: 0; overflow-wrap: anywhere; }
+.calisma-karti-sahne { perspective: 1400px; }
+.calisma-karti-donen { display: grid; transform-style: preserve-3d; transition: transform 480ms cubic-bezier(.2,.7,.2,1); }
+.calisma-karti-donen.cevrili { transform: rotateY(180deg); }
+.calisma-karti-yuz { grid-area: 1 / 1; backface-visibility: hidden; -webkit-backface-visibility: hidden; min-height: 310px; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 64px 32px 36px; }
+.calisma-karti-arka { transform: rotateY(180deg); }
+.calisma-karti-metin { max-height: 44vh; overflow-y: auto; overflow-wrap: anywhere; white-space: pre-wrap; }
+@media (max-width: 640px) { .calisma-karti-yuz { min-height: 290px; padding: 64px 20px 28px; } }
+@media (prefers-reduced-motion: reduce) { .calisma-karti-donen { transition: none; } }

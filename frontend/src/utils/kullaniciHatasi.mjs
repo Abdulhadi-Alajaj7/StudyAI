@@ -7,6 +7,15 @@ const teknikMesajCevirileri = [
 
 // Yalnızca sabit mesajlar: sağlayıcının teknik hata gövdesini ekrana taşıma.
 const guvenliKodMesajlari = new Map([
+    ["KART_GECERSIZ_YANIT", "Üretilen kartlar kaynaklarıyla doğrulanamadı. Eksik konuları yeniden deneyebilirsiniz."],
+    ["KART_KAYIT_HATASI", "Kartlar kaydedilirken bir sorun oluştu. Kaydedilmiş kartlar korunuyor; eksik konuları yeniden deneyebilirsiniz."],
+    ["KART_URETIM_HATASI", "Kart üretimi tamamlanamadı. Eksik konuları yeniden deneyebilirsiniz."],
+    ["KART_ISLEM_KESILDI", "Önceki üretim kesildi. Tamamlanan kartları koruyarak devam edebilirsiniz."],
+    ["KART_KAYNAK_YETERSIZ", "Konuya uygun yeterli kaynak bulunamadı. Ders materyallerini kontrol edin."],
+    ["KART_KAYNAK_BAGLANTISI_EKSIK", "Konunun kaynak bağlantısı doğrulanamadı. Konu haritasının materyal ve sürüm bilgilerini kontrol edin."],
+    ["KART_KAYNAK_DEGISTI", "Ders kaynakları değişti. Kart destesinin kaynaklarını kontrol edin."],
+    ["KART_KILIT_KAYBI", "Kart işlemi başka bir oturumda devam ediyor. Sayfayı yenileyin."],
+    ["KART_SUNUCU_HATASI", "Çalışma kartları işlemi tamamlanamadı. Lütfen yeniden deneyin."],
     ["GEMINI_GECICI_HATA", "Yapay zekâ hizmeti geçici olarak yoğun. Biraz sonra yeniden deneyin."],
     ["GEMINI_ISTEK_YOGUNLUGU", "Yapay zekâ işlemleri şu anda yoğun. Biraz sonra yeniden deneyin."],
     ["GEMINI_KOTA_ASIMI", "Yapay zekâ kullanım sınırına ulaşıldı. Bir süre bekleyip yeniden deneyin."],

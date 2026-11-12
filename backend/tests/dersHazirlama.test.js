@@ -82,6 +82,9 @@ const model = liste => ({
 });
 
 let tx = Promise.resolve();
+for (const model of ["CalismaKartiDestesi", "KartCalismaDurumu", "KartDegerlendirmesi"]) {
+    mock.module(`../models/${model}.js`, { defaultExport: { async deleteMany() { return { deletedCount: 0 }; } } });
+}
 mock.module("mongoose", { defaultExport: {
     Types: mongoose.Types,
     startSession: async () => ({

@@ -7,6 +7,9 @@ import Sohbet from "../models/Sohbet.js";
 import Mesaj from "../models/Mesaj.js";
 import DersOzeti from "../models/DersOzeti.js";
 import Test from "../models/Test.js";
+import CalismaKartiDestesi from "../models/CalismaKartiDestesi.js";
+import KartCalismaDurumu from "../models/KartCalismaDurumu.js";
+import KartDegerlendirmesi from "../models/KartDegerlendirmesi.js";
 import { guvenliDosyaSil } from "../utils/dosyaIslemleri.js";
 
 const BIR_SAAT = 60 * 60 * 1000;
@@ -226,6 +229,18 @@ export const geciciDersTemizlemeTuruCalistir = async ({
                     kullaniciId: kilit.kullaniciId
                 }),
                 Test.deleteMany({
+                    dersId: kilit._id,
+                    kullaniciId: kilit.kullaniciId
+                }),
+                CalismaKartiDestesi.deleteMany({
+                    dersId: kilit._id,
+                    kullaniciId: kilit.kullaniciId
+                }),
+                KartCalismaDurumu.deleteMany({
+                    dersId: kilit._id,
+                    kullaniciId: kilit.kullaniciId
+                }),
+                KartDegerlendirmesi.deleteMany({
                     dersId: kilit._id,
                     kullaniciId: kilit.kullaniciId
                 }),

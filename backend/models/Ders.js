@@ -72,6 +72,7 @@ const dersSchema = new mongoose.Schema(
             default: 0,
             min: 0,
         },
+        kartSurumu: { type: Number, default: 0, min: 0 },
         temizleniyor: {
             type: Boolean,
             default: false,

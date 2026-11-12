@@ -345,12 +345,15 @@ function DersOzet() {
         })),
         [konuSecenekleri]
     );
+    // Başka kapsamın varsayılan seçimi yüklenirken aynı özet sorgusunu yineleme.
+    const hedefMateryalId = tur === "materyal" ? materyalId : "";
+    const hedefKonuId = tur === "konu" ? konuId : "";
     const secimGirdisi = useMemo(() => ozetGirdisiOlustur({
         tur,
         uzunluk,
-        materyalId,
-        konuId,
-    }), [konuId, materyalId, tur, uzunluk]);
+        materyalId: hedefMateryalId,
+        konuId: hedefKonuId,
+    }), [hedefKonuId, hedefMateryalId, tur, uzunluk]);
     const secimAnahtari = ozetSecimAnahtari(dersId, secimGirdisi);
     secimAnahtariRef.current = secimAnahtari;
 

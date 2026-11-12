@@ -18,6 +18,7 @@ let silinenSohbetler;
 let silinenMesajlar;
 let silinenDersOzetleri;
 let aktifSohbet;
+let silinenKartKoleksiyonlari = [];
 
 const ayniId = (sol, sag) => String(sol) === String(sag);
 
@@ -130,6 +131,13 @@ mock.module("../models/DersOzeti.js", {
     async deleteMany() { silinenDersOzetleri = true; }
   }
 });
+for (const model of ["CalismaKartiDestesi", "KartCalismaDurumu", "KartDegerlendirmesi"]) {
+  mock.module(`../models/${model}.js`, { defaultExport: { async deleteMany(filtre) {
+    assert.ok(filtre.dersId, "Kart temizliği dersle sınırlı olmalı");
+    assert.equal(String(filtre.kullaniciId), String(kullaniciId));
+    silinenKartKoleksiyonlari.push(model);
+  } } });
+}
 mock.module("../models/Test.js", {
   defaultExport: {
     async deleteMany() {}
@@ -182,6 +190,7 @@ beforeEach(() => {
   silinenSohbetler = false;
   silinenMesajlar = false;
   silinenDersOzetleri = false;
+  silinenKartKoleksiyonlari = [];
   aktifSohbet = null;
 });
 
@@ -211,6 +220,7 @@ test("kullanıcı tarafından silinmesi istenen onaylanmış ders ve ilişkili k
   assert.equal(silinenSohbetler, true);
   assert.equal(silinenMesajlar, true);
   assert.equal(silinenDersOzetleri, true);
+  assert.deepEqual(silinenKartKoleksiyonlari.sort(), ["CalismaKartiDestesi", "KartCalismaDurumu", "KartDegerlendirmesi"].sort());
 });
 
 test("aktif asistan yanıtı varken ders silme kilidi bırakılır ve veriler korunur", async () => {
