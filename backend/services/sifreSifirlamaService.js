@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import Kullanici from "../models/Kullanici.js";
 import { epostaServisi } from "./epostaService.js";
+import { sifreSifirlamaEpostasi } from "./epostaSablonlari.js";
 import { sifirlamaTokeniGecerliMi, tokenHashle, oturumSurumuFiltresi } from "../utils/authGuvenligi.js";
 
 export const sifreSifirlamaServisiOlustur = ({ Model = Kullanici, eposta = epostaServisi,
@@ -20,8 +21,7 @@ export const sifreSifirlamaServisiOlustur = ({ Model = Kullanici, eposta = epost
             { $unset: { sifirlamaTokenHash: 1, sifirlamaSonTarih: 1 } });
         const link = `${ayar.clientUrl}/reset-password/${token}`;
         const alindi = eposta.sirayaAl({ to: kullanici.email, subject: "StudyAI — Şifre Sıfırlama",
-            text: `Şifrenizi sıfırlamak için: ${link}\nBağlantı 15 dakika geçerlidir. İsteği siz yapmadıysanız dikkate almayın.`,
-            html: `<p>Şifrenizi sıfırlamak için bağlantıyı açın:</p><p><a href="${link}">Şifreyi Sıfırla</a></p><p>Bağlantı 15 dakika geçerlidir. İsteği siz yapmadıysanız dikkate almayın.</p>`,
+            ...sifreSifirlamaEpostasi(link),
         }, temizle);
         if (!alindi) await temizle();
     },
