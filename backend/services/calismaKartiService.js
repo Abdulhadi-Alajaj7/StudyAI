@@ -20,12 +20,12 @@ export const konuListesiOlustur=harita=>(harita?.anaKonular||[]).flatMap(ana=>{
 });
 export const makulKartSayisiniBelirle=({konuSayisi,karakterSayisi})=>{
  if(!konuSayisi||karakterSayisi<80)return 0;
- return Math.min(60,Math.max(1,Math.min(konuSayisi*4,Math.ceil(karakterSayisi/1100))));
+ return Math.max(1,Math.min(konuSayisi*8,Math.ceil(karakterSayisi/1100)));
 };
 export const konuKotalariniBelirle=(konular,hedef)=>{
  const secilen=konular.filter(k=>k.parcalar.length&&k.karakterSayisi>=80);
  const sayac=new Map(secilen.map(k=>[k.konuId,0]));
- for(let i=0;i<Math.min(60,hedef);i++){
+ for(let i=0;i<hedef;i++){
   const sirali=[...secilen].filter(k=>sayac.get(k.konuId)<8).sort((a,b)=>
     sayac.get(a.konuId)/a.karakterSayisi-sayac.get(b.konuId)/b.karakterSayisi||
     a.konuId.localeCompare(b.konuId));
@@ -95,7 +95,6 @@ export const calismaKartlariniOlustur=async({kullaniciId,dersId},d={})=>{
     sorular.add(anahtar);
     sonuc.push({kullaniciId,dersId,konuId:konu.konuId,konuBasligi:konu.baslik,soru,cevap,
      kaynaklar:atiflar.map(k=>({materyalId:k.materyalId,dosyaAdi:k.dosyaAdi,parcaIndex:k.parcaIndex}))});
-    if(sonuc.length>=60)break;
    }
   }
   if(!sonuc.length)throw new CalismaKartiHatasi("Güvenilir kart üretilemedi.");
@@ -108,10 +107,11 @@ export const calismaKartlariniOlustur=async({kullaniciId,dersId},d={})=>{
   return x.KartModel.find({kullaniciId,dersId}).sort({createdAt:1,_id:1}).lean();
  }finally{await kartKilidiniBirak(x.DersModel,kullaniciId,dersId,token);}
 };
-export const calismaKartiDurumuGuncelle=async({kullaniciId,dersId,kartId,goruldu,yildizli},d={})=>{
+export const calismaKartiDurumuGuncelle=async({kullaniciId,dersId,kartId,goruldu,yildizli,zorluk},d={})=>{
  const x=deps(d);await dersGetir(kullaniciId,dersId,x);
  const set={};if(typeof goruldu==="boolean")set.goruldu=goruldu;
  if(typeof yildizli==="boolean")set.yildizli=yildizli;
+ if(["zor","orta","kolay"].includes(zorluk))set.zorluk=zorluk;
  if(!Object.keys(set).length)throw new CalismaKartiHatasi("Geçersiz kart durumu.",400);
  const kart=await x.KartModel.findOneAndUpdate({_id:kartId,kullaniciId,dersId},{$set:set},{new:true,runValidators:true}).lean();
  if(!kart)throw new CalismaKartiHatasi("Kart bulunamadı.",404);
