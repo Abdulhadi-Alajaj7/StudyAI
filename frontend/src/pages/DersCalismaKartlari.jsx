@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useOutletContext, useParams } from "react-router-dom";
-import { ArchiveBoxIcon, ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon, ClockIcon, SparklesIcon, StarIcon } from "@heroicons/react/24/outline";
+import { RectangleStackIcon, ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon, ClockIcon, SparklesIcon, StarIcon } from "@heroicons/react/24/outline";
 import api from "../services/calismaKartlariApi.mjs";
 import { kullaniciHataMesaji } from "../utils/kullaniciHatasi.mjs";
 
@@ -127,7 +127,7 @@ function DersCalismaKartlari() {
   return <section className={`space-y-6 ${metin}`}>
     <div className="flex flex-wrap items-center justify-between gap-4">
       <div className="flex items-center gap-4">
-        <div className="rounded-2xl bg-violet-500/15 p-3"><ArchiveBoxIcon className="h-7 w-7 text-violet-400" /></div>
+        <div className="rounded-2xl bg-violet-500/15 p-3"><RectangleStackIcon className="h-7 w-7 text-violet-400" /></div>
         <div><h2 className="text-[25px] font-bold">Çalışma Kartları</h2><p className={`text-[13px] ${ikincil}`}>Konularını hatırla, bilgini pekiştir.</p></div>
       </div>
       <div className={`flex items-center gap-3 rounded-xl border px-5 py-3 ${panel}`}>
@@ -149,7 +149,7 @@ function DersCalismaKartlari() {
     {hata && <p role="alert" className="rounded-xl border border-rose-400/40 bg-rose-500/10 p-4 text-sm text-rose-400">{hata}</p>}
     {yukleniyor ? <div role="status" className="py-14 text-center">Kartlar yükleniyor...</div> : !kartlar.length ?
       <div className={`flex min-h-[380px] flex-col items-center justify-center rounded-2xl border p-8 text-center ${panel}`}>
-        <ArchiveBoxIcon className="h-14 w-14 text-violet-400" />
+        <RectangleStackIcon className="h-14 w-14 text-violet-400" />
         <h3 className="mt-5 text-xl font-bold">Bilgilerini kartlarla kalıcı hâle getir</h3>
         <p className={`mt-3 max-w-lg text-sm leading-6 ${ikincil}`}>Onaylanmış konu haritanız ve ders materyallerinizden her konuya uygun soru ve cevap kartları hazırlayalım.</p>
         <button type="button" disabled={olusturuluyor} onClick={olustur} className="mt-7 inline-flex items-center gap-2 rounded-xl bg-[#705CF5] px-6 py-3 font-semibold text-white hover:bg-[#6250DE] disabled:opacity-50">
