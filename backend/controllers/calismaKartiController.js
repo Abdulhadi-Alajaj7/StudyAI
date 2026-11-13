@@ -12,6 +12,6 @@ export const kartlariOlustur=async(req,res)=>{
 };
 export const kartDurumunuGuncelle=async(req,res)=>{
  if(!valid(req.params.dersId)||!valid(req.params.kartId))return res.status(400).json({hata:"Geçersiz kimlik."});
- if(!req.body||(typeof req.body.goruldu!=="boolean"&&typeof req.body.yildizli!=="boolean"))return res.status(400).json({hata:"Geçersiz kart durumu."});
- try{return res.json({kart:await calismaKartiDurumuGuncelle({kullaniciId:req.user._id,dersId:req.params.dersId,kartId:req.params.kartId,goruldu:req.body.goruldu,yildizli:req.body.yildizli})});}catch(e){return error(res,e);}
+ if(!req.body||(typeof req.body.goruldu!=="boolean"&&typeof req.body.yildizli!=="boolean"&&!["zor","orta","kolay"].includes(req.body.zorluk)))return res.status(400).json({hata:"Geçersiz kart durumu."});
+ try{return res.json({kart:await calismaKartiDurumuGuncelle({kullaniciId:req.user._id,dersId:req.params.dersId,kartId:req.params.kartId,goruldu:req.body.goruldu,yildizli:req.body.yildizli,zorluk:req.body.zorluk})});}catch(e){return error(res,e);}
 };
