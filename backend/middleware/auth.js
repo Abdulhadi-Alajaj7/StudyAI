@@ -23,7 +23,7 @@ const kimlikDogrula = async (req, res, next) => {
         const cozulmusToken = jwt.verify(token, process.env.JWT_SECRET, { algorithms: ["HS256"] });
 
         const kullanici = await Kullanici.findById(cozulmusToken.id).select(
-            "-sifre +oturumSurumu"
+            "-sifre +oturumSurumu +bekleyenEmail +emailDegisimSonTarih"
         );
 
         if (!kullanici) {
@@ -37,6 +37,7 @@ const kimlikDogrula = async (req, res, next) => {
             return res.status(401).json({ hata: "Oturumunuz sonlandırıldı. Yeniden giriş yapın." });
         }
         req.user = kullanici;
+        req.authTime = cozulmusToken.iat;
 
         next();
     } catch (hata) {

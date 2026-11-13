@@ -36,7 +36,8 @@ export const sifreSifirlamaServisiOlustur = ({ Model = Kullanici, eposta = epost
         // Tek belge: standalone MongoDB'de de şifre/token/oturum sürümü birlikte değişir.
         const sonuc = await Model.updateOne({ _id: aday._id, sifirlamaTokenHash: hash, sifirlamaSonTarih: { $gt: new Date(simdi()) } }, {
             $set: { sifre }, $inc: { oturumSurumu: 1 },
-            $unset: { sifirlamaTokenHash: 1, sifirlamaSonTarih: 1, sifirlamaSonIstek: 1 },
+            $unset: { sifirlamaTokenHash: 1, sifirlamaSonTarih: 1, sifirlamaSonIstek: 1,
+                bekleyenEmail: 1, emailDegisimTokenHash: 1, emailDegisimSonTarih: 1, emailDegisimSonIstek: 1 },
         });
         if (sonuc.matchedCount !== 1) throw gecersiz();
     },

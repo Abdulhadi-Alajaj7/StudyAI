@@ -2,6 +2,7 @@ import Kullanici from "../models/Kullanici.js";
 
 import { oturumTokeniOlustur, oturumCookieGonder, oturumCookieAyarlari, kullaniciyiSun, oturumSurumuFiltresi } from "../utils/authGuvenligi.js";
 import { sifreSifirlamaServisi } from "../services/sifreSifirlamaService.js";
+import { emailDegisimServisi } from "../services/emailDegisimService.js";
 
 /* =========================
    Kayıt Ol
@@ -115,15 +116,32 @@ export const profilGetir = async (req, res) => {
 export const profilGuncelle = async (req, res) => {
   try {
     const { kullaniciAdi, email, sifre } = req.body;
-    if (sifre || (email !== undefined && email !== req.user.email)) {
+    if (sifre) {
       return res.status(409).json({ kod: "PROFIL_DOGRULAMA_GEREKLI", hata: "E-posta değişikliği doğrulama gerektirir. Mevcut adresiniz korundu; şifre için şifre değiştirme işlemini kullanın." });
     }
+    if (email !== undefined && email !== req.user.email) {
+      const kullanici = await emailDegisimServisi.iste({ kullanici: req.user, email, kullaniciAdi, authTime: req.authTime });
+      return res.json({ basarili: true, kullanici: kullaniciyiSun(kullanici),
+        mesaj: "Doğrulama bağlantısı yeni adresinize gönderilmek üzere alındı. Onaylayana kadar mevcut adresiniz korunacak." });
+    }
     const kullanici = await Kullanici.findOneAndUpdate({ _id: req.user.id,
-      ...oturumSurumuFiltresi(req.user.oturumSurumu ?? 0) }, { $set: { kullaniciAdi: kullaniciAdi ?? req.user.kullaniciAdi } }, { new: true, runValidators: true });
+      ...oturumSurumuFiltresi(req.user.oturumSurumu ?? 0) }, { $set: { kullaniciAdi: kullaniciAdi ?? req.user.kullaniciAdi } }, { new: true, runValidators: true }).select("+bekleyenEmail +emailDegisimSonTarih");
     if (!kullanici) return res.status(401).json({ hata: "Oturumunuz geçersiz. Yeniden giriş yapın." });
     res.json({ basarili: true, kullanici: kullaniciyiSun(kullanici) });
-  } catch {
-    res.status(500).json({ hata: "Profil güncellenemedi." });
+  } catch (hata) {
+    const izinli = ["AUTH_YENIDEN_GIRIS", "EMAIL_KULLANILAMIYOR", "EMAIL_DEGISIM_BEKLE", "EPOSTA_YAPILANDIRMA", "AUTH_GECICI_HATA"].includes(hata.kod);
+    res.status(izinli ? hata.status : 500).json({ kod: izinli ? hata.kod : "AUTH_GECICI_HATA", hata: izinli ? hata.message : "Profil güncellenemedi." });
+  }
+};
+
+export const emailDegisiminiDogrula = async (req, res) => {
+  try {
+    const kullanici = await emailDegisimServisi.dogrula({ kullanici: req.user, token: req.body.token });
+    oturumCookieGonder(res, oturumTokeniOlustur(kullanici));
+    res.json({ basarili: true, kullanici: kullaniciyiSun(kullanici), mesaj: "E-posta adresiniz doğrulandı ve güncellendi." });
+  } catch (hata) {
+    const izinli = ["EMAIL_BAGLANTISI_GECERSIZ", "EMAIL_KULLANILAMIYOR"].includes(hata.kod);
+    res.status(izinli ? hata.status : 503).json({ kod: izinli ? hata.kod : "AUTH_GECICI_HATA", hata: izinli ? hata.message : "E-posta adresi şu anda doğrulanamıyor." });
   }
 };
 
@@ -135,13 +153,14 @@ export const sifreDegistir = async (req, res) => {
     const { mevcutSifre, yeniSifre } = req.body;
     const kullanici = await Kullanici.findById(req.user.id).select("+sifre +oturumSurumu");
     if (!kullanici || !(await kullanici.sifreEslesiyorMu(mevcutSifre))) {
-      return res.status(401).json({ hata: "Mevcut şifre hatalı." });
+      return res.status(401).json({ kod: "MEVCUT_SIFRE_HATALI", hata: "Mevcut şifre hatalı." });
     }
     const sifre = await Kullanici.sifreyiHashle(yeniSifre);
     const guncel = await Kullanici.findOneAndUpdate({ _id: kullanici._id, sifre: kullanici.sifre,
       ...oturumSurumuFiltresi(req.user.oturumSurumu ?? 0) }, {
       $set: { sifre }, $inc: { oturumSurumu: 1 },
-      $unset: { sifirlamaTokenHash: 1, sifirlamaSonTarih: 1, sifirlamaSonIstek: 1 },
+      $unset: { sifirlamaTokenHash: 1, sifirlamaSonTarih: 1, sifirlamaSonIstek: 1,
+        bekleyenEmail: 1, emailDegisimTokenHash: 1, emailDegisimSonTarih: 1, emailDegisimSonIstek: 1 },
     }, { new: true }).select("+oturumSurumu");
     if (!guncel) return res.status(409).json({ hata: "Hesap güvenlik bilgileri değişti. Yeniden giriş yapın." });
     const token = oturumTokeniOlustur(guncel);

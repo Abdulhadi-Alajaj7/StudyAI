@@ -7,6 +7,13 @@ const teknikMesajCevirileri = [
 
 // Yalnızca sabit mesajlar: sağlayıcının teknik hata gövdesini ekrana taşıma.
 const guvenliKodMesajlari = new Map([
+    ["MEVCUT_SIFRE_HATALI", "Mevcut şifreniz hatalı. Lütfen kontrol edin."],
+    ["AUTH_YENIDEN_GIRIS", "E-posta değişikliği için yeniden giriş yapın."],
+    ["AUTH_ISTEK_SINIRI", "Çok fazla istek gönderdiniz. Lütfen daha sonra tekrar deneyin."],
+    ["EPOSTA_YAPILANDIRMA", "E-posta servisi henüz kullanıma hazır değil. Lütfen yöneticiye bildirin."],
+    ["EMAIL_BAGLANTISI_GECERSIZ", "Bağlantı geçersiz, kullanılmış veya süresi dolmuş. Doğru hesapla giriş yapıp profilinizden yeni bağlantı isteyin."],
+    ["SIFIRLAMA_BAGLANTISI_GECERSIZ", "Bağlantı geçersiz, kullanılmış veya süresi dolmuş. Yeni sıfırlama bağlantısı isteyin."],
+
     ["GEMINI_GECICI_HATA", "Yapay zekâ hizmeti geçici olarak yoğun. Biraz sonra yeniden deneyin."],
     ["GEMINI_ISTEK_YOGUNLUGU", "Yapay zekâ işlemleri şu anda yoğun. Biraz sonra yeniden deneyin."],
     ["GEMINI_KOTA_ASIMI", "Yapay zekâ kullanım sınırına ulaşıldı. Bir süre bekleyip yeniden deneyin."],

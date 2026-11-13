@@ -7,10 +7,11 @@ import kimlikDogrula from "../middleware/auth.js";
 import { authIstekSiniri } from "../middleware/authIstekSiniri.js";
 import { epostaServisiOlustur } from "../services/epostaService.js";
 import { sifreSifirlamaServisiOlustur, sifreSifirlamaServisi } from "../services/sifreSifirlamaService.js";
-import { sifremiUnuttum, sifreSifirla, profilGetir, profilGuncelle, girisYap, cikisYap, sifreDegistir } from "../controllers/authControllers.js";
+import { sifremiUnuttum, sifreSifirla, profilGetir, profilGuncelle, girisYap, cikisYap, sifreDegistir, emailDegisiminiDogrula } from "../controllers/authControllers.js";
 import { tokenHashle, oturumTokeniOlustur, oturumCookieAyarlari, authOriginKontrolu } from "../utils/authGuvenligi.js";
 import authRoutes from "../routes/authRoutes.js";
 import AuthIstekSiniri from "../models/AuthIstekSiniri.js";
+import { emailDegisimServisiOlustur, emailDegisimServisi } from "../services/emailDegisimService.js";
 
 process.env.JWT_SECRET = "yalniz-test-icin-guvenli-anahtar";
 const token = "a".repeat(64);
@@ -125,7 +126,7 @@ test("profil yanıtında token alanları yok; doğrulamasız e-posta güncelleme
     const req = { user: { _id: "u", id: "u", kullaniciAdi: "Ad", email: "eski@example.test", sifirlamaTokenHash: "gizli" }, body: { email: "yeni@example.test" } };
     const r = resOlustur(); await profilGetir(req, r); assert.ok(!JSON.stringify(r.body).includes("gizli"));
     t.mock.method(Kullanici, "findOneAndUpdate", () => assert.fail("Doğrulanmamış adres kaydedilmemeli"));
-    const r2 = resOlustur(); await profilGuncelle(req, r2); assert.equal(r2.statusCode, 409);
+    const r2 = resOlustur(); await profilGuncelle(req, r2); assert.equal(r2.statusCode, 401);
 });
 
 test("bilinen/bilinmeyen ve hesaba özel arızalarda forgot HTTP yanıtı aynıdır", async t => {
@@ -247,4 +248,91 @@ test("reset endpoint zincirinde iki eşzamanlı istekten biri başarılı olur; 
     const r = await Promise.all([rotayiCalistir("/reset-password/:token", istek()), rotayiCalistir("/reset-password/:token", istek())]);
     assert.deepEqual(r.map(x => x.statusCode).sort(), [200, 400]);
     assert.equal(d.doc.oturumSurumu, 1); assert.equal(d.doc.sifirlamaTokenHash, undefined);
+});
+
+const emailDuzenegi = () => {
+    const d = duzenek(); let zaman = simdi, sira = 0, cakisma = false;
+    d.Model.findOneAndUpdate = (f, u) => ({ select: async () => {
+        if (!eslesir(d.doc, f)) return null;
+        if (cakisma && u.$set?.email) throw Object.assign(new Error(), { code: 11000 });
+        uygula(d.doc, u); return kopya(d.doc);
+    } });
+    return { ...d, servis: emailDegisimServisiOlustur({ Model: d.Model, eposta: d.eposta, simdi: () => zaman,
+        tokenUret: () => (++sira === 1 ? "a" : "b").repeat(64) }),
+        ilerlet: ms => { zaman += ms; }, cakisma: () => { cakisma = true; },
+        girdi: () => ({ kullanici: kopya(d.doc), email: "yeni@example.test", kullaniciAdi: "Yeni Ad", authTime: zaman / 1000 }) };
+};
+
+test("email değişimi eski adresi korur, yalnız hash saklar; onay adres/token/oturum sürümünü atomik değiştirir", async () => {
+    const d = emailDuzenegi(); await d.servis.iste(d.girdi());
+    assert.equal(d.doc.email, "ogrenci@example.test"); assert.equal(d.doc.bekleyenEmail, "yeni@example.test");
+    assert.equal(d.doc.emailDegisimTokenHash, tokenHashle(`email-degisim:u:${token}`));
+    assert.ok(!JSON.stringify(d.doc).includes(token)); assert.match(d.mesajlar[0].mesaj.text, /eposta-dogrula/);
+    const r = await Promise.allSettled([d.servis.dogrula({ kullanici: kopya(d.doc), token }), d.servis.dogrula({ kullanici: kopya(d.doc), token })]);
+    assert.equal(r.filter(x => x.status === "fulfilled").length, 1);
+    assert.equal(d.doc.email, "yeni@example.test"); assert.equal(d.doc.oturumSurumu, 1);
+    assert.equal(d.doc.emailDegisimTokenHash, undefined); assert.equal(d.doc.bekleyenEmail, undefined);
+});
+
+test("email token'ı kullanıcıya, süreye ve oturum sürümüne bağlıdır; şifre sıfırlama token'ı kullanılamaz", async () => {
+    for (const durum of ["yabanci", "sure", "oturum", "bozuk", "reset"]) {
+        const d = emailDuzenegi(); await d.servis.iste(d.girdi());
+        const kullanici = kopya(d.doc); let t = token;
+        if (durum === "yabanci") kullanici._id = "baska";
+        if (durum === "sure") d.ilerlet(900_000);
+        if (durum === "oturum") d.doc.oturumSurumu = 1;
+        if (durum === "bozuk") t = "bozuk";
+        if (durum === "reset") d.doc.emailDegisimTokenHash = tokenHashle(token);
+        await assert.rejects(d.servis.dogrula({ kullanici, token: t }), { kod: "EMAIL_BAGLANTISI_GECERSIZ" });
+        assert.equal(d.doc.email, "ogrenci@example.test");
+    }
+});
+
+test("email adresi son anda alınırsa unique hatasında eski adres ve token korunur", async () => {
+    const d = emailDuzenegi(); await d.servis.iste(d.girdi()); d.cakisma();
+    await assert.rejects(d.servis.dogrula({ kullanici: kopya(d.doc), token }), { kod: "EMAIL_KULLANILAMIYOR" });
+    assert.equal(d.doc.email, "ogrenci@example.test"); assert.ok(d.doc.emailDegisimTokenHash);
+});
+
+test("email değişimi yakın giriş ve resend sınırı ister; SMTP hatası yeni isteği silemez", async () => {
+    const d = emailDuzenegi();
+    await assert.rejects(d.servis.iste({ ...d.girdi(), authTime: (simdi - 901_000) / 1000 }), { kod: "AUTH_YENIDEN_GIRIS" });
+    assert.equal(d.mesajlar.length, 0);
+    await d.servis.iste(d.girdi()); const eski = d.mesajlar[0];
+    await assert.rejects(d.servis.iste(d.girdi()), { kod: "EMAIL_DEGISIM_BEKLE" });
+    d.ilerlet(61_000); await d.servis.iste(d.girdi());
+    const yeniHash = d.doc.emailDegisimTokenHash;
+    await eski.basarisiz(); assert.equal(d.doc.emailDegisimTokenHash, yeniHash);
+    await d.mesajlar[1].basarisiz(); assert.equal(d.doc.emailDegisimTokenHash, undefined);
+    assert.equal(d.doc.email, "ogrenci@example.test");
+});
+
+test("şifre sıfırlama bekleyen email doğrulamasını iptal eder", async () => {
+    const d = duzenek({ bekleyenEmail: "yeni@example.test", emailDegisimTokenHash: "hash", emailDegisimSonTarih: new Date(simdi + 900_000) });
+    await d.servis.iste(d.doc.email); await d.servis.sifirla(token, "Yeni123!");
+    assert.equal(d.doc.bekleyenEmail, undefined); assert.equal(d.doc.emailDegisimTokenHash, undefined);
+    assert.equal(d.doc.email, "ogrenci@example.test");
+});
+
+test("profil kaydı yalnız adı değiştirirken doğrulama bekleyen adresi yanıtta korur", async t => {
+    const k = { _id: "u", kullaniciAdi: "Yeni Ad", email: "eski@example.test", bekleyenEmail: "yeni@example.test", emailDegisimSonTarih: new Date(Date.now() + 60_000) };
+    t.mock.method(Kullanici, "findOneAndUpdate", (f, u) => {
+        assert.equal(u.$set.email, undefined); assert.equal(u.$set.sifre, undefined);
+        return { select: async () => k };
+    });
+    const r = resOlustur(); await profilGuncelle({ user: { ...k, id: "u" }, body: { kullaniciAdi: "Yeni Ad" } }, r);
+    assert.equal(r.statusCode, 200); assert.equal(r.body.kullanici.bekleyenEmail, "yeni@example.test");
+});
+
+test("profil isteği e-posta doğrulama servisine aktarılır; onay yeni oturum cookie'si verir", async t => {
+    t.mock.method(emailDegisimServisi, "iste", async g => {
+        assert.equal(g.email, "yeni@example.test"); assert.equal(g.authTime, 123);
+        return { _id: "u", email: "eski@example.test", kullaniciAdi: "Ad" };
+    });
+    const r = resOlustur(); await profilGuncelle({ user: { _id: "u", email: "eski@example.test" }, body: { email: "yeni@example.test" }, authTime: 123 }, r);
+    assert.equal(r.body.kullanici.email, "eski@example.test");
+    t.mock.method(emailDegisimServisi, "dogrula", async () => ({ _id: "u", email: "yeni@example.test", oturumSurumu: 2 }));
+    const onay = resOlustur(); await emailDegisiminiDogrula({ user: { _id: "u" }, body: { token } }, onay);
+    assert.equal(onay.body.kullanici.email, "yeni@example.test");
+    assert.equal(jwt.verify(onay.cookies[0][1], process.env.JWT_SECRET).oturumSurumu, 2);
 });

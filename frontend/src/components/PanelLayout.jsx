@@ -728,7 +728,7 @@ function PanelLayout() {
                         ? "pb-1 pt-3 sm:pb-2 sm:pt-4"
                         : "py-8 pb-20"
                 }`}>
-                    <Outlet context={{ isDark, kullanici }} />
+                    <Outlet context={{ isDark, kullanici, kullaniciGuncelle: setKullanici }} />
                 </div>
 
             </div>

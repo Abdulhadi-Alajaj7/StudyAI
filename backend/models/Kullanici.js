@@ -34,6 +34,10 @@ const kullaniciSchema = new mongoose.Schema(
         sifirlamaTokenHash: { type: String, select: false },
         sifirlamaSonTarih: { type: Date, select: false },
         sifirlamaSonIstek: { type: Date, select: false },
+        bekleyenEmail: { type: String, select: false },
+        emailDegisimTokenHash: { type: String, select: false },
+        emailDegisimSonTarih: { type: Date, select: false },
+        emailDegisimSonIstek: { type: Date, select: false },
     },
     {
         timestamps: true,

@@ -1,3 +1,6 @@
+import { useEffect, useRef, useState } from "react";
+import authApi from "../services/authApi.mjs";
+import { kullaniciHataMesaji } from "../utils/kullaniciHatasi.mjs";
 import { Link } from "react-router-dom";
 import {
     ArrowLeftIcon,
@@ -7,6 +10,17 @@ import {
 } from "@heroicons/react/24/outline";
 
 function SifremiUnuttum() {
+    const [email, setEmail] = useState(""), [hata, setHata] = useState(""), [mesaj, setMesaj] = useState(""), [mesgul, setMesgul] = useState(false);
+    const kilit = useRef(false), istek = useRef(null);
+    useEffect(() => () => istek.current?.abort(), []);
+    const gonder = async e => {
+        e.preventDefault(); if (kilit.current) return;
+        kilit.current = true; setMesgul(true); setHata(""); setMesaj("");
+        const c = new AbortController(); istek.current = c;
+        try { const r = await authApi.sifremiUnuttum(email.trim(), c.signal); if (!c.signal.aborted) setMesaj(r.data.mesaj); }
+        catch (err) { if (!c.signal.aborted) setHata(kullaniciHataMesaji(err)); }
+        finally { kilit.current = false; if (!c.signal.aborted) setMesgul(false); }
+    };
     return (
         <main className="min-h-screen bg-[#F7F9FC] flex items-center justify-center px-6">
             <div className="w-full max-w-[460px]">
@@ -45,7 +59,7 @@ function SifremiUnuttum() {
 
                     <form
                         className="mt-7"
-                        onSubmit={(e) => e.preventDefault()}
+                        onSubmit={gonder}
                     >
                         <label
                             htmlFor="email"
@@ -59,6 +73,7 @@ function SifremiUnuttum() {
 
                             <input
                                 id="email"
+                                name="email" autoComplete="email" maxLength={254} value={email} onChange={e => setEmail(e.target.value)} disabled={mesgul}
                                 type="email"
                                 required
                                 placeholder="ornek@email.com"
@@ -67,11 +82,13 @@ function SifremiUnuttum() {
                         </div>
 
                         <button
-                            type="submit"
+                            type="submit" disabled={mesgul}
                             className="w-full h-[50px] mt-5 rounded-[9px] bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-[15px] font-semibold transition"
                         >
-                            Sıfırlama Bağlantısı Gönder
+                            {mesgul ? "Gönderiliyor..." : "Sıfırlama Bağlantısı Gönder"}
                         </button>
+                        {hata && <p role="alert" className="mt-4 text-sm text-red-600">{hata}</p>}
+                        {mesaj && <p role="status" className="mt-4 text-sm text-emerald-700">{mesaj}</p>}
                     </form>
 
                     <Link

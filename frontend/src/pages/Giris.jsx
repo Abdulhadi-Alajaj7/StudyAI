@@ -1,5 +1,6 @@
+import { guvenliDonusYolu } from "../utils/authYardimcilari.mjs";
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useLocation } from "react-router-dom";
 
 import {
     ArrowRightIcon,
@@ -16,6 +17,7 @@ import api from "../api";
 
 function Giris() {
     const navigate = useNavigate();
+    const location = useLocation();
 
     const [sifreGoster, setSifreGoster] = useState(false);
 
@@ -62,7 +64,7 @@ function Giris() {
             localStorage.removeItem("user");
             sessionStorage.removeItem("user");
 
-            navigate("/panel");
+            navigate(guvenliDonusYolu(location.state?.donusYolu), { replace: true });
         } catch (error) {
             setHata(
                 error.response?.data?.hata ||

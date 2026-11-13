@@ -1,3 +1,5 @@
+import SifreSifirla from "./pages/SifreSifirla.jsx";
+import EpostaDogrula from "./pages/EpostaDogrula.jsx";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 
 import Giris from "./pages/Giris.jsx";
@@ -49,6 +51,8 @@ function App() {
                     element={<SifremiUnuttum />}
                 />
 
+                <Route path="/reset-password/:token" element={<SifreSifirla />} />
+                <Route path="/eposta-dogrula/:token" element={<EpostaDogrula />} />
                 {/* Korumalı Sayfalar */}
                 <Route element={<KorumaliRoute />}>
                     <Route element={<PanelLayout />}>

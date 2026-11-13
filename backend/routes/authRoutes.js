@@ -9,7 +9,7 @@ import {
     profilGetir,
     profilGuncelle,
     sifreDegistir,
-    cikisYap, sifremiUnuttum, sifreSifirla
+    cikisYap, sifremiUnuttum, sifreSifirla, emailDegisiminiDogrula
 } from "../controllers/authControllers.js";
 
 import kimlikDogrula from "../middleware/auth.js";
@@ -74,10 +74,15 @@ router.post("/reset-password/:token", authOriginKontrolu,
 ========================= */
 
 router.get("/profil", kimlikDogrula, profilGetir);
+router.post("/email-change/verify", authOriginKontrolu, kimlikDogrula,
+    authIstekSiniri({ kapsam: "email-dogrula", maksimum: 10 }),
+    body("token").isString().withMessage("Doğrulama bağlantısı geçersiz.").bail().matches(/^[a-f0-9]{64}$/).withMessage("Doğrulama bağlantısı geçersiz."),
+    girdiyiKontrolEt, emailDegisiminiDogrula);
 
 router.put("/profil", authOriginKontrolu, kimlikDogrula,
+    authIstekSiniri({ kapsam: "profil", maksimum: 10 }),
     body("kullaniciAdi").optional().isString().withMessage("Kullanıcı adını metin olarak giriniz.").bail().trim().isLength({ min: 3, max: 100 }).withMessage("Kullanıcı adı 3–100 karakter olmalıdır."),
-    body("email").optional().isString().withMessage("E-posta adresini metin olarak giriniz.").bail().isEmail().withMessage("Geçerli bir e-posta adresi giriniz"),
+    body("email").optional().isString().withMessage("E-posta adresini metin olarak giriniz.").bail().isLength({ max: 254 }).withMessage("E-posta adresi çok uzun.").bail().isEmail().withMessage("Geçerli bir e-posta adresi giriniz").normalizeEmail(),
     girdiyiKontrolEt, profilGuncelle);
 
 router.post("/sifre-degistir", authOriginKontrolu, kimlikDogrula,
