@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useOutletContext, useParams } from "react-router-dom";
-import { ArchiveBoxIcon, ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon, ClockIcon, SparklesIcon, StarIcon, ArrowPathIcon } from "@heroicons/react/24/outline";
+import { ArchiveBoxIcon, ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon, ClockIcon, SparklesIcon, StarIcon } from "@heroicons/react/24/outline";
 import api from "../services/calismaKartlariApi.mjs";
 import { kullaniciHataMesaji } from "../utils/kullaniciHatasi.mjs";
 
