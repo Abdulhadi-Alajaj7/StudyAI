@@ -8,6 +8,7 @@ import Sohbet from "../models/Sohbet.js";
 import Mesaj from "../models/Mesaj.js";
 import DersOzeti from "../models/DersOzeti.js";
 import Test from "../models/Test.js";
+import CalismaKarti from "../models/CalismaKarti.js";
 import { guvenliDosyaSil } from "../utils/dosyaIslemleri.js";
 
 const SOHBET_MESAJ_KILIDI_MS = 2 * 60 * 1000;
@@ -336,6 +337,7 @@ export const dersSil = async (req, res) => {
         dersId: kilitliDers._id,
         kullaniciId: req.user._id,
       }),
+      CalismaKarti.deleteMany({ dersId: kilitliDers._id, kullaniciId: req.user._id }),
       Test.deleteMany({
         dersId: kilitliDers._id,
         kullaniciId: req.user._id,

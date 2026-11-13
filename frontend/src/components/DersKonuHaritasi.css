@@ -100,3 +100,7 @@
     .konu-materyal-paneli { padding: 20px 16px; }
 }
 @media (prefers-reduced-motion: reduce) { .ders-konu-sayfasi *, .ders-konu-sayfasi *::before { transition: none; } }
+
+/* Konu başına çalışma kartı göstergesi */
+.konu-kart-sayisi { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; align-self: center; margin-left: auto; padding: 5px 9px; border: 1px solid color-mix(in srgb, var(--vurgu) 35%, transparent); border-radius: 999px; background: color-mix(in srgb, var(--vurgu) 11%, transparent); color: var(--vurgu); font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.konu-alt .konu-kart-sayisi { font-size: 10px; padding: 4px 8px; }

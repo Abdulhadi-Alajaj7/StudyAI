@@ -72,6 +72,8 @@ const dersSchema = new mongoose.Schema(
             default: 0,
             min: 0,
         },
+        kartUretimToken: { type: mongoose.Schema.Types.ObjectId, default: null },
+        kartUretimSonYenileme: { type: Date, default: null },
         temizleniyor: {
             type: Boolean,
             default: false,
