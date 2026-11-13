@@ -2,7 +2,7 @@ import { BookOpenIcon, Square3Stack3DIcon, DocumentTextIcon, FolderOpenIcon } fr
 import { materyalSunumu } from "../utils/konuHaritasiSunumu.mjs";
 import KonuHaritasiListesi from "./KonuHaritasiListesi.jsx";
 
-export default function DersKonuHaritasi({ ders, harita, materyaller, isDark, yukleniyor, haritaHatasi, materyalHatasi }) {
+export default function DersKonuHaritasi({ ders, harita, materyaller, isDark, yukleniyor, haritaHatasi, materyalHatasi, kartSayilari }) {
     const anaKonular = harita?.anaKonular || [];
     const altKonuSayisi = anaKonular.reduce((toplam, ana) => toplam + (ana.altKonular?.length || 0), 0);
     const aciklama = harita?.durum === "olusturuluyor" ? "Konu haritası hazırlanıyor. Hazır olduğunda burada görüntülenecek."
@@ -21,7 +21,7 @@ export default function DersKonuHaritasi({ ders, harita, materyaller, isDark, yu
                 {yukleniyor ? <p role="status" className="konu-bos-durum">Konu haritası yükleniyor...</p>
                     : haritaHatasi ? <p role="alert" className="konu-bos-durum konu-hata">{haritaHatasi}</p>
                         : !anaKonular.length ? <p role={harita?.durum === "hata" ? "alert" : "status"} className="konu-bos-durum">{aciklama}</p>
-                            : <KonuHaritasiListesi anaKonular={anaKonular} />}
+                            : <KonuHaritasiListesi anaKonular={anaKonular} kartSayilari={kartSayilari} />}
             </div>
             <aside className="konu-materyal-paneli" aria-labelledby="konu-materyal-baslik">
                 <header><DocumentTextIcon aria-hidden="true" /><div><h3 id="konu-materyal-baslik">Ders Materyalleri</h3><p>Bu derse eklediğin dosyalar.</p></div></header>
