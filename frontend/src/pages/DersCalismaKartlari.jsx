@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useOutletContext, useParams } from "react-router-dom";
-import { ArchiveBoxIcon, ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon, ClockIcon, SparklesIcon, StarIcon, ArrowUturnBackIcon } from "@heroicons/react/24/outline";
+import { ArchiveBoxIcon, ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon, ClockIcon, SparklesIcon, StarIcon, ArrowPathIcon } from "@heroicons/react/24/outline";
 import api from "../services/calismaKartlariApi.mjs";
 import { kullaniciHataMesaji } from "../utils/kullaniciHatasi.mjs";
 
@@ -187,7 +187,7 @@ function DersCalismaKartlari() {
                 disabled={kaydediliyor} aria-label={arka ? "Soruyu görmek için kartı çevir" : "Cevabı görmek için kartı çevir"}
                 className="flex min-h-0 flex-1 flex-col items-center justify-center gap-5 overflow-y-auto rounded-xl px-2 py-4 text-center focus-visible:outline focus-visible:outline-2 focus-visible:outline-violet-400">
                 <span className="whitespace-pre-wrap break-words text-xl font-semibold leading-relaxed sm:text-2xl">{arka ? aktif.cevap : aktif.soru}</span>
-                <span className={`inline-flex items-center gap-2 text-xs ${ikincil}`}><ArrowUturnBackIcon className="h-4 w-4" />{arka ? "Soruyu görmek için tıklayın" : "Cevabı görmek için tıklayın"}</span>
+                <span className={`inline-flex items-center gap-2 text-xs ${ikincil}`}><ArrowPathIcon className="h-4 w-4" />{arka ? "Soruyu görmek için tıklayın" : "Cevabı görmek için tıklayın"}</span>
               </button>
             </div>)}
           </div>
