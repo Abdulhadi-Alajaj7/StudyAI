@@ -76,6 +76,9 @@ export const calismaKartlariniOlustur=async({kullaniciId,dersId},d={})=>{
   const materyalAdlari=new Map(materyaller.map(m=>[String(m._id),m.orijinalDosyaAdi||m.dosyaAdi]));
   const sonuc=[],sorular=new Set();
   for(const konu of kotalar){
+   const yenile=await x.DersModel.updateOne({_id:dersId,kullaniciId,kartUretimToken:token,temizleniyor:{$ne:true}},{$currentDate:{kartUretimSonYenileme:true}});
+   if((yenile.matchedCount??yenile.n)!==1)throw new CalismaKartiHatasi("Kart üretim kilidi kaybedildi.",409);
+
    const kaynaklar=dengeliOzetParcalariniSec(konu.parcalar,18000).slice(0,20).map((p,i)=>({
     kod:"K"+(i+1),materyalId:p.materyalId,parcaIndex:p.parcaIndex,
     dosyaAdi:materyalAdlari.get(String(p.materyalId))||"Materyal",icerik:String(p.icerik||"").slice(0,4000)
