@@ -7,6 +7,7 @@ import Sohbet from "../models/Sohbet.js";
 import Mesaj from "../models/Mesaj.js";
 import DersOzeti from "../models/DersOzeti.js";
 import Test from "../models/Test.js";
+import CalismaKarti from "../models/CalismaKarti.js";
 import Kullanici from "../models/Kullanici.js";
 import { guvenliDosyaSil } from "../utils/dosyaIslemleri.js";
 
@@ -226,6 +227,7 @@ export const geciciDersTemizlemeTuruCalistir = async ({
                     dersId: kilit._id,
                     kullaniciId: kilit.kullaniciId
                 }),
+                CalismaKarti.deleteMany({ dersId: kilit._id, kullaniciId: kilit.kullaniciId }),
                 Test.deleteMany({
                     dersId: kilit._id,
                     kullaniciId: kilit.kullaniciId
