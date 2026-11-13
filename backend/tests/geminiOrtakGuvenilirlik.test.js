@@ -83,7 +83,7 @@ test("uzun veya bilinmeyen kota beklemesinde hızlı retry yok; 503 kota kelimes
             const hata = saglayiciHatasi(status, { message: "quota timeout" });
             hata.headers = { "retry-after": "60" };
             throw hata;
-        }, { bekle: async () => assert.fail("60 saniyelik kuyruğa girilmemeli") }), hata => hata.status === status);
+        }, { istekYonetimi: geminiOrtakIstekYonetimiOlustur(), bekle: async () => assert.fail("60 saniyelik kuyruğa girilmemeli") }), hata => hata.status === status);
         assert.equal(sayi, 1);
     }
 });

@@ -99,7 +99,7 @@ test("geçici 429 hatasında üstel geri çekilme ile yeniden dener", async () =
         istemci,
         ayarlar: ayarlar(),
         limitUygula: false,
-        beklet: async (sure) => { beklemeler.push(sure); },
+        rastgele: () => 0, beklet: async (sure) => { beklemeler.push(sure); },
     });
 
     assert.equal(cagri, 3);

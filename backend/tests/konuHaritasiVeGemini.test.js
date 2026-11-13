@@ -1,7 +1,7 @@
 import assert from "assert";
 import dotenv from "dotenv";
 
-dotenv.config();
+if (process.env.RUN_LIVE_GEMINI_TESTS === "true") dotenv.config();
 
 import { 
     geminiBaglantisiniDogrula, 

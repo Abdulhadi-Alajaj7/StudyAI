@@ -8,7 +8,7 @@ const ortam = (uret, ayarlar = {}) => {
     let saat = Date.parse("2026-11-11T10:00:00Z");
     const ai = { models: { async generateContent(istek) { istekler.push(istek); return uret(istekler.length, istek); } } };
     const bagimliliklar = { ayarlar: { ...haritaIstekAyarlari(), ...ayarlar }, sinir: haritaSinirlayiciOlustur(),
-        simdi: () => saat, beklet: async ms => { beklemeler.push(ms); saat += ms; }, logger: { info(...args) { loglar.push(args); } } };
+        rastgele: () => 0, simdi: () => saat, beklet: async ms => { beklemeler.push(ms); saat += ms; }, logger: { info(...args) { loglar.push(args); } } };
     return { istekler, beklemeler, loglar, calistir: () => callGeminiStructuredJson(ai, "mock-model", "Özel materyal", "Talimat", bagimliliklar) };
 };
 const hata = (status, extra = {}) => Object.assign(new Error("Gizli sağlayıcı ayrıntısı"), { status, ...extra });

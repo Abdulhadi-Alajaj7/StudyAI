@@ -1,5 +1,18 @@
 import { kartKelimeleri, kartMetniniNormalizeEt, kartlarBenzerMi } from "./calismaKartiDogrulama.js";
 
+// Yalnız açık tanım kalıpları soru-cevaba çevrilir. Serbest model sorusu veya
+// yeniden ifade kabul edilmez; koşul/olumsuzluk cevabın özgün aralığında kalır.
+export const dogalKartSeceneginiOlustur = metin => {
+    const eslesme = metin.match(/^([\p{L}\p{N}][\p{L}\p{N}\s()/'’.-]{1,79}):\s+(.+)$/u)
+        || metin.match(/^([\p{L}\p{N}][\p{L}\p{N}\s()/'’.-]{1,79}),\s+(.+?)(?:\s+olarak tanımlanır|\s+anlamına gelir)[.!]?$/u);
+    if (!eslesme) return null;
+    const terim = eslesme[1].trim(), cevap = eslesme[2].trim();
+    if (terim.split(/\s+/u).length > 8 || /^(örnek|not|soru|cevap|uyarı|bölüm|sayfa|kaynak|içindekiler)\b/iu.test(terim) || /[!?]/u.test(cevap) || cevap.length < 5 || cevap.length > 240) return null;
+    const baslangic = metin.indexOf(cevap, eslesme[1].length);
+    return { metin: cevap, baslangic, bitis: baslangic + cevap.length, terim,
+        soru: `${terim} ${/[=∑√]/u.test(cevap) ? "nasıl ifade edilir" : "nedir"}?` };
+};
+
 // Alıntı ve cevap modele yazdırılmaz. Kaynak aralıkları sunucuda çıkarılır;
 // model yalnızca kanıt kimliğini ve sunucunun belirlediği cevap aralığının indeksini seçer.
 export const kartCevapAraliklariniOlustur = metin => {
@@ -22,7 +35,8 @@ export const kartKanitlariniOlustur = kaynaklar => kaynaklar.flatMap(kaynak => {
         for (const cumle of cumleler.segment(satir[0])) {
             const metin = cumle.segment.trim();
             if (metin.length < 10 || metin.length > 320 || kartKelimeleri(metin).size < 2) continue;
-            const secenekler = kartCevapAraliklariniOlustur(metin);
+            const dogal = dogalKartSeceneginiOlustur(metin);
+            const secenekler = [...(dogal ? [dogal] : []), ...kartCevapAraliklariniOlustur(metin)].slice(0, 12);
             if (!secenekler.length) continue;
             const baslangic = satir.index + cumle.index + cumle.segment.indexOf(metin);
             sonuc.push({ kimlik: `${kaynak.anahtar}.E${sonuc.length + 1}`, metin, baslangic,
@@ -48,7 +62,8 @@ export const kartPartisiniDogrula = (veri, { konuId, konu, kartSayisi, kaynaklar
     // Beklenenden fazla çıktı hedefi büyütemez; sınırsız yanıt dolaşılmaz.
     for (const [index, kart] of veri.kartlar.slice(0, kartSayisi).entries()) {
         if (kart?.konuId !== konuId) { reddet(index, "KONU_KIMLIGI"); continue; }
-        if (Object.keys(kart).some(k => !["konuId", "kanitReferansi", "cevapIndex"].includes(k)) ||
+        if (Object.keys(kart).some(k => !["konuId", "kanitReferansi", "cevapIndex", "tur"].includes(k)) ||
+            (kart.tur != null && !["soru_cevap", "bosluk_doldurma"].includes(kart.tur)) ||
             typeof kart.kanitReferansi !== "string") {
             reddet(index, "KART_ALANLARI"); continue;
         }
@@ -71,11 +86,16 @@ export const kartPartisiniDogrula = (veri, { konuId, konu, kartSayisi, kaynaklar
         const { baslangic, bitis } = secenek;
         // Serbest soru/cevap yok: boşluk aynı kaynak cümlesinde açılır. Birkaç
         // ortak sözcükten anlamsal doğruluk sonucu çıkarmaya gerek kalmaz.
-        const soru = `Boşluğu tamamlayın: ${kanit.metin.slice(0, baslangic)}[…]${kanit.metin.slice(bitis)}`;
+        const dogal = kart.tur === "soru_cevap" ? dogalKartSeceneginiOlustur(kanit.metin) : null;
+        if (kart.tur === "soru_cevap" && (!dogal || dogal.baslangic !== baslangic || dogal.bitis !== bitis)) {
+            reddet(index, "CEVAP_ARALIGI_GECERSIZ"); continue;
+        }
+        const soru = dogal?.soru || `Boşluğu tamamlayın: ${kanit.metin.slice(0, baslangic)}[…]${kanit.metin.slice(bitis)}`;
         const cevap = kanit.metin.slice(baslangic, bitis);
-        const yeni = { konuId, soru, cevap, kaynak: {
+        const yeni = { konuId, soru, cevap, tur: dogal ? "soru_cevap" : "bosluk_doldurma", kaynak: {
             materyalId: kanit.kaynak.materyalId, islemeId: kanit.kaynak.islemeId,
             parcaIndex: kanit.kaynak.parcaIndex, dosyaAdi: kanit.kaynak.dosyaAdi,
+            ...(kanit.kaynak.metinParcasiId ? { metinParcasiId: kanit.kaynak.metinParcasiId } : {}),
             alinti: kanit.metin, kanitBaslangic: kanit.baslangic, kanitBitis: kanit.bitis,
             cevapBaslangic: kanit.baslangic + baslangic, cevapBitis: kanit.baslangic + bitis,
         } };

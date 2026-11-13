@@ -4,7 +4,7 @@ import mongoose from "mongoose";
 import CalismaKartiDestesi from "../models/CalismaKartiDestesi.js";
 import KartCalismaDurumu from "../models/KartCalismaDurumu.js";
 import KartDegerlendirmesi from "../models/KartDegerlendirmesi.js";
-import { geminiIleCalismaKartlariUret } from "../services/geminiService.js";
+import { geminiIleCalismaKartlariUret, geminiIleKartBatchiUret } from "../services/geminiService.js";
 import { kartGirdisiniDogrula } from "../controllers/calismaKartlariController.js";
 import { calismaKartlariniGetir, calismaKartlariniOlustur, kartDurumunuGuncelle, kartiDegerlendir, kartKonulariniGetir, konuKartKaynaklariniSec } from "../services/calismaKartlariService.js";
 import { kartHataTanilamasiniOlustur } from "../utils/calismaKartiTanilama.js";
@@ -85,6 +85,7 @@ const duzenek = () => {
         DersModel: model("ders"), KonuHaritasiModel: model("harita"), MateryalModel: model("materyal"), MetinParcasiModel: model("parca"),
         DesteModel: model("deste"), DurumModel: model("durum"), DegerlendirmeModel: model("degerlendirme"),
         simdi: () => new Date(zaman), heartbeatMs: 10000,
+        semanticArama: async () => ({ sonuclar: [] }), batchAyarlari: { konu: 1 },
         tanilamaLogla: veri => tanilamalar.push(veri),
         arkaPlandaBaslat: islem => isler.push(islem),
         oturumBaslat: async () => ({
@@ -109,6 +110,79 @@ const duzenek = () => {
         async tamamla() { while (isler.length) await isler.shift()(); } };
 };
 const hazirDuzenek = async () => { const d = duzenek(); await calismaKartlariniOlustur(d.girdi, d.deps); await d.tamamla(); return d; };
+
+const batchSdkAyarla = (d, degistir = kartlar => kartlar) => {
+    const istekler = [];
+    d.deps.batchAyarlari = { konu: 3 };
+    d.deps.kartBatchUret = g => geminiIleKartBatchiUret(g, { maxDeneme: 1, bekle: async () => {},
+        istemci: { models: { async generateContent(istek) {
+            const p = JSON.parse(istek.contents); istekler.push(p);
+            const kartlar = p.konular.flatMap(k => k.kanitlar.map(e => ({ konuId: k.konuId, kanitReferansi: e.kimlik,
+                cevapIndex: e.soruCevapIndex >= 0 ? e.soruCevapIndex : 0, tur: e.soruCevapIndex >= 0 ? "soru_cevap" : "bosluk_doldurma" })));
+            return { text: JSON.stringify({ kartlar: degistir(kartlar, istekler.length) }) };
+        } } } });
+    return istekler;
+};
+
+test("V2+ çok konulu batch kısmi checkpoint ve yalnız eksik kavramdan devam", async () => {
+    const d = duzenek();
+    d.db.parca[0].icerik = Array.from({ length: 8 }, (_, i) => `Yığın terim${i}: Eleman${i} için tanımlanan sentetik öğrenme bilgisidir.`).join("\n");
+    const c = batchSdkAyarla(d, (kartlar, n) => kartlar.map((k, i) => n === 1 && i === 1 ? { ...k, kanitReferansi: "sahte" } : k));
+    await calismaKartlariniOlustur(d.girdi, d.deps); await d.tamamla();
+    let r = await calismaKartlariniGetir(d.girdi, d.deps);
+    assert.equal(c.length, 1); assert.equal(c[0].konular.length, 2); assert.equal(r.durum, "kismi");
+    assert.equal(r.kartlar.length, 8); assert.equal(r.konular[0].kavramSayisi, 8);
+    const ids = r.kartlar.map(k => k._id), kartId = ids[0];
+    await kartDurumunuGuncelle({ ...d.girdi, kartId, goruldu: true, yildizli: true }, d.deps);
+    await kartiDegerlendir({ ...d.girdi, kartId, degerlendirme: "kolay", istemciIstekId: "batch-devam-istek-01" }, d.deps);
+    await calismaKartlariniOlustur(d.girdi, d.deps); await d.tamamla();
+    r = await calismaKartlariniGetir(d.girdi, d.deps);
+    assert.equal(r.durum, "hazir"); assert.equal(r.kartlar.length, 9);
+    assert.equal(c.length, 2); assert.equal(c[1].konular.length, 1); assert.equal(c[1].konular[0].kanitlar.length, 1);
+    assert.ok(ids.every(k => r.kartlar.some(c => c._id === k))); assert.equal(r.kartlar[0].yildizli, true);
+    assert.equal(d.db.degerlendirme.length, 1); assert.equal(d.db.deste[0].ayrilanCagriSayisi, 2);
+    await calismaKartlariniGetir(d.girdi, d.deps); await calismaKartlariniOlustur(d.girdi, d.deps);
+    assert.equal(d.isler.length, 0); assert.equal(c.length, 2);
+});
+
+test("V2+ batch checkpoint yazım hatası ilk konunun kalıcı kartını ve kimliğini korur", async () => {
+    const d = duzenek(); const c = batchSdkAyarla(d);
+    const kaydet = d.deps.DesteModel.findOneAndUpdate;
+    d.deps.DesteModel.findOneAndUpdate = async (f, u) => {
+        if (f["konular.konuId"] === "kuyruk" && u.$set?.["konular.$.kartlar"]) throw new Error("Sentetik transaction hatası");
+        return kaydet(f, u);
+    };
+    await calismaKartlariniOlustur(d.girdi, d.deps); await d.tamamla();
+    assert.equal(d.db.deste[0].hataKodu, "KART_KAYIT_HATASI");
+    const eskiId = d.db.deste[0].konular[0].kartlar[0]._id;
+    d.deps.DesteModel.findOneAndUpdate = kaydet;
+    await calismaKartlariniOlustur(d.girdi, d.deps); await d.tamamla();
+    assert.equal(d.db.deste[0].durum, "hazir"); assert.equal(d.db.deste[0].konular[0].kartlar[0]._id, eskiId);
+    assert.equal(c[1].konular.length, 1); assert.equal(c[1].konular[0].konuId, "kuyruk");
+});
+
+test("V2+ sıfır kavram konusu tamamlanır, kaynak hatalı konu tamamlandı sayılmaz", async () => {
+    const d = duzenek(); batchSdkAyarla(d);
+    d.db.parca[0].icerik = "Yığın çalışma notları";
+    d.db.parca[1].icerik = "İlgisiz içindekiler başlığı";
+    await calismaKartlariniOlustur(d.girdi, d.deps); await d.tamamla();
+    const [ilk, ikinci] = d.db.deste[0].konular;
+    assert.equal(ilk.tamamlandi, true); assert.equal(ilk.sifirKartNedeni, "ogrenilebilir_kavram_yok");
+    assert.equal(ikinci.tamamlandi, false); assert.equal(ikinci.sifirKartNedeni, "kaynak_yok");
+    assert.equal(d.db.deste[0].sonIslemSdkCagrisi, 0);
+});
+
+test("V2+ kaynak değiştiğinde eski kartlar ve öğrenci kayıtları salt okunur sunulur", async () => {
+    const d = await hazirDuzenek();
+    const once = await calismaKartlariniGetir(d.girdi, d.deps), kartId = once.kartlar[0]._id;
+    await kartDurumunuGuncelle({ ...d.girdi, kartId, goruldu: true, yildizli: true }, d.deps);
+    d.db.materyal[0].aktifIslemeId = id();
+    const sonra = await calismaKartlariniGetir(d.girdi, d.deps);
+    assert.deepEqual(sonra.kartlar.map(k => k._id), once.kartlar.map(k => k._id));
+    assert.equal(sonra.kartlar[0].yildizli, true); assert.equal(sonra.kaynakGuncel, false);
+    await assert.rejects(calismaKartlariniOlustur(d.girdi, d.deps), { kod: "KART_KAYNAK_DEGISTI" });
+    await assert.rejects(kartDurumunuGuncelle({ ...d.girdi, kartId, yildizli: false }, d.deps), { kod: "KART_KAYNAK_DEGISTI" });
+});
 
 const sdkYanitiniAyarla = (d, yanitla, maxDeneme = 1) => {
     const cagrilar = [];
@@ -401,7 +475,8 @@ test("üretim sırasında kaynak sürümü değişirse geç gelen kart kaydedilm
     await calismaKartlariniOlustur(d.girdi, d.deps); await d.tamamla();
     assert.equal(d.db.deste[0].konular.flatMap(k => k.kartlar).length, 0);
     assert.equal(d.db.deste[0].hataKodu, "KART_KAYNAK_DEGISTI");
-    await assert.rejects(calismaKartlariniGetir(d.girdi, d.deps), h => h.status === 409);
+    const eski = await calismaKartlariniGetir(d.girdi, d.deps);
+    assert.equal(eski.kaynakGuncel, false); assert.equal(eski.olusturulabilir, false);
 });
 
 test("ders silme kilidi geç gelen üretim veya çalışma durumu yazımını engeller", async () => {
@@ -450,17 +525,19 @@ test("kısmi destede çalışma durumu ve değerlendirmeler eksikler tamamlanır
     assert.equal(sonuc.kartlar[0]._id, kartId);
 });
 
-test("otomatik kart sayısı kaynak kapsamına göre 1–4 aralığındadır; yanlış materyalden kaynak alınmaz", async () => {
+test("tekrarlanan kaynak hedefi şişirmez; yanlış materyal başarısız konu olarak kaydedilir", async () => {
     const d = duzenek();
     d.db.parca[0].icerik = "Yığın LIFO işlemleri. ".repeat(350);
     await calismaKartlariniOlustur(d.girdi, d.deps);
-    assert.deepEqual(d.db.deste[0].konular.map(k => k.hedefKartSayisi), [4, 1]);
     assert.equal(d.cagrilar.length, 0, "Planlama Gemini çağrısı yapmaz");
+    await d.tamamla();
+    assert.deepEqual(d.db.deste[0].konular.map(k => k.hedefKartSayisi), [1, 1]);
     const yanlis = duzenek();
     yanlis.db.harita[0].anaKonular[0].altKonular[0].kaynakMateryalIds = [id()];
-    await assert.rejects(calismaKartlariniOlustur(yanlis.girdi, yanlis.deps), h => h.kod === "KART_KAYNAK_YETERSIZ");
-    assert.equal(yanlis.isler.length, 0);
-    assert.deepEqual(yanlis.tanilamalar, [{ kod: "KART_KAYNAK_YETERSIZ", asama: "KAYNAK_SECIMI", konuId: "yigin" }]);
+    await calismaKartlariniOlustur(yanlis.girdi, yanlis.deps); await yanlis.tamamla();
+    assert.equal(yanlis.db.deste[0].konular[0].hataKodu, "KART_KAYNAK_YETERSIZ");
+    assert.equal(yanlis.db.deste[0].konular[0].tamamlandi, false);
+    assert.ok(yanlis.cagrilar.every(c => c.konu.konuId !== "yigin"));
 });
 
 test("422 kaynak regresyonu: konu bağlantıları boş olan çok materyalli onaylı harita, doğrulanmış kaynak snapshot'larını kullanır", async () => {
@@ -499,8 +576,9 @@ test("422 kaynak regresyonu: doğrulanamayan konu bağlantısı içerik yetersiz
     d.db.harita[0].anaKonular[0].kaynakMateryalIds = [];
     for (const alt of d.db.harita[0].anaKonular[0].altKonular) alt.kaynakMateryalIds = [];
     d.db.harita[0].kaynakMateryaller = [{ materyalId: d.db.materyal[0]._id, aktifIslemeId: id() }];
-    await assert.rejects(calismaKartlariniOlustur(d.girdi, d.deps), h => h.status === 422 && h.kod === "KART_KAYNAK_BAGLANTISI_EKSIK");
-    assert.equal(d.cagrilar.length, 0); assert.equal(d.isler.length, 0); assert.equal(d.db.deste.length, 0);
+    await calismaKartlariniOlustur(d.girdi, d.deps); await d.tamamla();
+    assert.ok(d.db.deste[0].konular.every(k => k.hataKodu === "KART_KAYNAK_BAGLANTISI_EKSIK" && !k.tamamlandi));
+    assert.equal(d.cagrilar.length, 0); assert.equal(d.isler.length, 0);
 });
 
 test("422 kaynak kontrolü: alt konu kaynağı ana konuya ve harita geneline göre önceliklidir", () => {
@@ -535,6 +613,7 @@ test("422 kaynak kontrolü: kısa kaynak bir eşik yüzünden elenmez; asıl kar
     d.db.parca[1].icerik = "Kuyruk FIFO.";
     const sonuc = await calismaKartlariniOlustur(d.girdi, d.deps);
     assert.equal(sonuc.durum, "olusturuluyor");
-    assert.deepEqual(d.db.deste[0].konular.map(k => k.hedefKartSayisi), [1, 1]);
     assert.equal(d.cagrilar.length, 0);
+    await d.tamamla();
+    assert.deepEqual(d.db.deste[0].konular.map(k => k.hedefKartSayisi), [1, 1]);
 });

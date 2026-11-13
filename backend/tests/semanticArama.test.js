@@ -62,6 +62,33 @@ const modeller = ({
     });
 };
 
+test("kart sorgu cache'i aynı snapshot'ı kullanır; yeni sürüm, kullanıcı, model ve hata ayrıdır", async () => {
+    const parcalar = [{ _id: new mongoose.Types.ObjectId(), materyalId: materyal1, islemeId: aktif1, parcaIndex: 0, icerik: "Yığın LIFO ilkesini kullanır.", embedding: [1, 0, 0] }];
+    const cache = new Map(); let cagri = 0;
+    const d = modeller({ parcalar }); d.sorguOnbellegi = cache;
+    d.DersModel.findOne = async () => ({ _id: dersId });
+    d.embeddingUret = async () => { cagri++; return [[1, 0, 0]]; };
+    const g = { kullaniciId, dersId, sorgu: "Yığın", onbellekKullan: true };
+    await semanticAramaYap(g, d); await semanticAramaYap(g, d); assert.equal(cagri, 1);
+    await semanticAramaYap({ ...g, kullaniciId: new mongoose.Types.ObjectId() }, d); assert.equal(cagri, 2);
+    const yeni = new mongoose.Types.ObjectId(); parcalar[0].islemeId = yeni;
+    d.MateryalModel.find = () => zincir([{ ...varsayilanMateryaller()[0], aktifIslemeId: yeni }]);
+    await semanticAramaYap(g, d); assert.equal(cagri, 3);
+    d.ayarlar = { ...d.ayarlar, model: "sentetik-diger-model" }; await semanticAramaYap(g, d); assert.equal(cagri, 4);
+    d.embeddingUret = async () => { cagri++; throw new Error("Sentetik 503"); };
+    await assert.rejects(semanticAramaYap({ ...g, sorgu: "Hatalı sorgu" }, d));
+    await assert.rejects(semanticAramaYap({ ...g, sorgu: "Hatalı sorgu" }, d)); assert.equal(cagri, 6);
+});
+
+test("arama sahipliği doğrulanamazsa SDK çağrısı yapılmaz ve hata fallback için gizlenmez", async () => {
+    const parcalar = [{ _id: new mongoose.Types.ObjectId(), materyalId: materyal1, islemeId: aktif1, parcaIndex: 0, icerik: "Yığın LIFO kullanır.", embedding: [1, 0, 0] }];
+    const deps = modeller({ parcalar });
+    deps.embeddingUret = () => assert.fail("Sahiplik hatasında embedding çağrısı yapılmamalı");
+    await assert.rejects(semanticAramaYap({ kullaniciId, dersId, sorgu: "Yığın", sahipligiDogrula: () => {
+        throw new Error("Sentetik veritabanı hatası");
+    } }, deps), { kod: "GEMINI_SAHIPLIK_KONTROLU", sahiplikHatasi: true });
+});
+
 test("yalnızca kullanıcıya ait dersin aktif materyal sürümlerini sorgular ve sonuçları skora göre sıralar", async () => {
     let kullanilanFiltre;
     const parcalar = [

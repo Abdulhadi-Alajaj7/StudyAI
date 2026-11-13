@@ -12,13 +12,13 @@ const kartlar = [
     { _id: "222222222222222222222222", konuId: "yigin", soru: "Boşluğu tamamlayın: Yığın […] ilkesini kullanır.", cevap: "LIFO", goruldu: false, yildizli: false, kaynak: { dosyaAdi: "Veri Yapıları.pdf", parcaIndex: 0 } },
     { _id: "333333333333333333333333", konuId: "kuyruk", soru: "Boşluğu tamamlayın: Kuyruk […] ilkesini kullanır.", cevap: "FIFO", goruldu: false, yildizli: false, kaynak: { dosyaAdi: "Veri Yapıları.pdf", parcaIndex: 1 } },
 ];
-let durum = "yok", getSayisi = 0, uretimSayisi = 0, degerlendirmeler = [];
+let durum = "yok", getSayisi = 0, uretimSayisi = 0, degerlendirmeler = [], kaynakGuncel = true, kavramsiz = false;
 let ozetGetSayisi = 0;
 const kayitlar = new Map();
 const govde = () => {
-    const kayitli = durum === "hazir" ? kartlar : durum === "kismi" ? kartlar.slice(0, 1) : [];
+    const kayitli = kavramsiz ? [] : durum === "hazir" ? kartlar : durum === "kismi" ? kartlar.slice(0, 1) : [];
     return {
-        durum, olusturulabilir: true, hataKodu: durum === "kismi" ? "KART_ISLEM_CAGRI_SINIRI" : "", kartlar: kayitli,
+        durum, olusturulabilir: kaynakGuncel, kaynakGuncel, engelMesaji: kaynakGuncel ? "" : "Kaynaklar değişti; bu deste salt okunurdur.", hataKodu: durum === "kismi" ? "KART_ISLEM_CAGRI_SINIRI" : "", kartlar: kayitli,
         ilerleme: { tamamlananKonu: kayitli.length, toplamKonu: durum === "yok" ? 0 : 2 },
         istatistikler: { toplam: kayitli.length, gorulen: kayitli.filter(k => k.goruldu).length,
             gorulmeyen: kayitli.filter(k => !k.goruldu).length, yildizli: kayitli.filter(k => k.yildizli).length },
@@ -71,7 +71,7 @@ const Kabuk = () => React.createElement('main', {style:{maxWidth:1200,margin:'au
 const yol = location.search.includes('ozet') ? 'ozet' : 'calisma-kartlari';
 createRoot(document.getElementById('root')).render(React.createElement(MemoryRouter,{initialEntries:['/dersler/${dersId}/'+yol]},React.createElement(Routes,null,React.createElement(Route,{element:React.createElement(Kabuk)},React.createElement(Route,{path:'/dersler/:dersId',element:React.createElement(DersDetayLayout)},React.createElement(Route,{path:'calisma-kartlari',element:React.createElement(Sayfa)}),React.createElement(Route,{path:'ozet',element:React.createElement(DersOzet)}))))));
 </script></body></html>`, "utf8");
-    vite = await createServer({ server: { host: "127.0.0.1", port: 0 }, logLevel: "error" });
+    vite = await createServer({ server: { host: "127.0.0.1", port: 0, hmr: false, watch: null }, logLevel: "error" });
     await vite.listen();
     console.log("Tarayıcı testi: yerel Vite hazır");
     const origin = `http://127.0.0.1:${vite.httpServer.address().port}`;
@@ -87,8 +87,8 @@ createRoot(document.getElementById('root')).render(React.createElement(MemoryRou
     ws = new WebSocket(wsUrl);
     console.log("Tarayıcı testi: Chromium başladı");
     await sinirli(new Promise((ok, fail) => { ws.onopen = ok; ws.onerror = fail; }), 8000, "DevTools bağlantısı kurulamadı");
-    let sayac = 0;
-    const bekleyen = new Map(), hatalar = [];
+    let sayac = 0, navigasyonSurumu = 0, iptalEdilenEskiIstek = 0;
+    const bekleyen = new Map(), hatalar = [], iptalEdilenAgIstekleri = new Set(), gecersizIstekler = [];
     const send = (method, params = {}, sessionId) => new Promise((ok, fail) => {
         const id = ++sayac;
         const timer = setTimeout(() => { bekleyen.delete(id); fail(new Error(`DevTools zaman aşımı: ${method}`)); }, 8000);
@@ -99,8 +99,12 @@ createRoot(document.getElementById('root')).render(React.createElement(MemoryRou
         const m = JSON.parse(String(olay.data));
         if (m.id) { const p = bekleyen.get(m.id); if (p) { bekleyen.delete(m.id); m.error ? p.fail(new Error(JSON.stringify(m.error))) : p.ok(m.result); } return; }
         if (m.method === "Runtime.exceptionThrown") hatalar.push(m.params.exceptionDetails.text);
+        if (m.method === "Network.loadingFailed" && (m.params.canceled || m.params.errorText === "net::ERR_ABORTED")) {
+            iptalEdilenAgIstekleri.add(m.params.requestId);
+        }
         if (m.method !== "Fetch.requestPaused" || kapaniyor) return;
-        const { request, requestId } = m.params;
+        const { request, requestId, networkId } = m.params;
+        const istekNavigasyonu = navigasyonSurumu;
         try {
             const url = new URL(request.url);
             if (url.origin === origin) return await send("Fetch.continueRequest", { requestId }, m.sessionId);
@@ -136,6 +140,13 @@ createRoot(document.getElementById('root')).render(React.createElement(MemoryRou
                 body: Buffer.from(JSON.stringify(data)).toString("base64") }, m.sessionId);
         } catch (e) {
             if (kapaniyor) return;
+            // Navigasyon veya React cleanup AbortController'ı bekleyen isteği
+            // iptal edebilir. Yalnız CDP'nin doğruladığı iptali göz ardı et.
+            if (/Invalid InterceptionId/.test(e.message)) {
+                // loadingFailed olayı komutun hata yanıtından sonra da gelebilir.
+                gecersizIstekler.push({ networkId, navigasyonIptali: istekNavigasyonu !== navigasyonSurumu, url: request.url, hata: e.message });
+                return;
+            }
             hatalar.push(e.message);
             // Navigasyon/kapanış sırasında hedef zaten kalkmış olabilir.
             await send("Fetch.failRequest", { requestId, errorReason: "Failed" }, m.sessionId).catch(() => {});
@@ -143,7 +154,9 @@ createRoot(document.getElementById('root')).render(React.createElement(MemoryRou
     };
     const { targetId } = await send("Target.createTarget", { url: "about:blank" });
     const { sessionId } = await send("Target.attachToTarget", { targetId, flatten: true });
-    const cdp = (method, params) => send(method, params, sessionId);
+    const cdp = (method, params) => { if (method === "Page.navigate") navigasyonSurumu++; return send(method, params, sessionId); };
+    await cdp("Network.enable");
+    await cdp("Network.setBlockedURLs", { urls: ["https://*"] });
     await cdp("Fetch.enable", { patterns: [{ urlPattern: "*" }] }); await cdp("Runtime.enable");
     console.log("Tarayıcı testi: API mock hazır");
     const evaluate = async expression => {
@@ -206,8 +219,35 @@ createRoot(document.getElementById('root')).render(React.createElement(MemoryRou
     assert.equal(kartlar[0]._id, "222222222222222222222222");
     assert.equal(kartlar[0].goruldu, true); assert.equal(kartlar[0].yildizli, true);
     assert.equal(degerlendirmeler.length, 1, "Devam eski değerlendirmeyi değiştirmemeli");
+    // Doğal soru-cevap eski kayıtlarla aynı bileşende, gerçek klavye etkileşimiyle çalışır.
+    kartlar[0].soru = "Yığın nedir?"; kartlar[0].cevap = "Son giren elemanın ilk çıkarıldığı veri yapısıdır."; kartlar[0].tur = "soru_cevap";
+    await ac(false); await bekle("document.querySelector('[aria-label^=\"Cevabı göster\"]')?.textContent.includes('Yığın nedir?')");
+    await cdp("Page.bringToFront");
+    await cdp("Emulation.setFocusEmulationEnabled", { enabled: true });
+    await evaluate("document.querySelector('[aria-label^=\"Cevabı göster\"]').focus()");
+    assert.equal(await evaluate("document.activeElement === document.querySelector('[aria-label^=\"Cevabı göster\"]')"), true);
+    await cdp("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", text: "\r", unmodifiedText: "\r", windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 });
+    await cdp("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 });
+    await bekle("document.querySelector('.calisma-karti-donen').classList.contains('cevrili')");
+    await cdp("Input.dispatchKeyEvent", { type: "keyDown", key: " ", code: "Space", windowsVirtualKeyCode: 32, nativeVirtualKeyCode: 32 });
+    await cdp("Input.dispatchKeyEvent", { type: "keyUp", key: " ", code: "Space", windowsVirtualKeyCode: 32, nativeVirtualKeyCode: 32 });
+    await bekle("!document.querySelector('.calisma-karti-donen').classList.contains('cevrili')");
+    kaynakGuncel = false;
+    await ac(false); await bekle("document.body.innerText.includes('salt okunurdur')");
+    assert.equal(await evaluate("document.querySelector('[aria-label=\"Yıldızı kaldır\"]').disabled"), true);
+    await evaluate("document.querySelector('[aria-label^=\"Cevabı göster\"]').click()");
+    assert.equal(await evaluate("[...document.querySelectorAll('button')].some(b=>b.textContent==='Kolay')"), false);
+    kavramsiz = true; kaynakGuncel = true;
+    await ac(false); await bekle("document.body.innerText.includes('ayrı kart gerektiren')");
+    assert.equal(await evaluate("[...document.querySelectorAll('button')].some(b=>b.textContent.includes('Kartları Oluştur'))"), false);
+    assert.equal(uretimSayisi, 2);
+    await gecik(400);
+    for (const istek of gecersizIstekler) {
+        if (istek.navigasyonIptali || iptalEdilenAgIstekleri.has(istek.networkId)) iptalEdilenEskiIstek++;
+        else hatalar.push(JSON.stringify(istek));
+    }
     assert.deepEqual(hatalar, []);
-    console.log(JSON.stringify({ sonuc: "başarılı", uretimSayisi, ozetGetSayisi, degerlendirmeSayisi: degerlendirmeler.length, masaustu, mobil }));
+    console.log(JSON.stringify({ sonuc: "başarılı", uretimSayisi, ozetGetSayisi, degerlendirmeSayisi: degerlendirmeler.length, iptalEdilenEskiIstek, masaustu, mobil }));
 } finally {
     kapaniyor = true;
     console.log("Tarayıcı testi: kaynaklar kapatılıyor");

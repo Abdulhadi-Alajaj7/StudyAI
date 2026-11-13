@@ -1,6 +1,12 @@
 const guvenliKod = value => typeof value === "string" && /^[A-Z][A-Z0-9_]{0,79}$/.test(value) && !/KEY|SECRET|TOKEN/.test(value) ? value : null;
 const httpKodu = value => Number.isInteger(Number(value)) && Number(value) >= 100 && Number(value) <= 599 ? Number(value) : null;
 const mesajlar = {
+    GEMINI_YEREL_RPM: "Bu modelin dakikalık istek bütçesi doldu. Biraz sonra devam edebilirsiniz.",
+    GEMINI_YEREL_TPM: "Bu modelin dakikalık token bütçesi doldu. Biraz sonra devam edebilirsiniz.",
+    GEMINI_YEREL_RPD: "Bu modelin günlük uygulama bütçesi doldu. Kota yenilendiğinde devam edebilirsiniz.",
+    GEMINI_YEREL_KOTA: "Bu model için kota bekleme süresi devam ediyor. Daha sonra yeniden deneyin.",
+    GEMINI_MODEL_KAPALI: "Bu modelin kullanım bütçesi kapalı. Yönetici model ayarlarını kontrol etmeli.",
+    GEMINI_ISTEK_YOGUNLUGU: "Yapay zekâ işlemleri şu anda yoğun. Biraz sonra yeniden deneyin.",
     GEMINI_429: "Gemini istek sınırına ulaşıldı. Bir süre sonra yeniden deneyin.",
     GEMINI_GUNLUK_KOTA: "Gemini günlük kullanım kotası doldu. Kota yenilendikten sonra yeniden deneyin.",
     GEMINI_503: "Gemini geçici olarak kullanılamıyor. Bir süre sonra yeniden deneyebilirsiniz.",
@@ -31,9 +37,9 @@ export const geminiHazirlamaHatasiniSiniflandir = (hata, simdi = Date.now()) => 
     const metin = String(hata?.message || "");
     const ayrintilar = Array.isArray(govde.details) ? govde.details : [];
     const kotaMetni = JSON.stringify(ayrintilar) + metin;
-    const kotaTuru = /per.?day|daily|\brpd\b|günlük/i.test(kotaMetni) ? "gunluk"
+    const kotaTuru = hata?.kotaTuru || (/per.?day|daily|\brpd\b|günlük/i.test(kotaMetni) ? "gunluk"
         : /token.*per.?minute|\btpm\b/i.test(kotaMetni) ? "tpm"
-        : /per.?minute|\brpm\b/i.test(kotaMetni) ? "rpm" : "bilinmiyor";
+        : /per.?minute|\brpm\b/i.test(kotaMetni) ? "rpm" : "bilinmiyor");
     const headers = hata?.response?.headers || hata?.headers;
     const retryHeader = headers?.get?.("retry-after") ?? headers?.["retry-after"] ?? headers?.["Retry-After"];
     const retryInfo = ayrintilar.find(d => String(d?.["@type"] || "").endsWith("google.rpc.RetryInfo"));
@@ -79,7 +85,7 @@ export const geminiHazirlamaHatasiniSiniflandir = (hata, simdi = Date.now()) => 
     }
     const sonuc = new Error(mesajlar[kod], { cause: hata });
     Object.assign(sonuc, {
-        guvenliHazirlamaHatasi: true, kod, status, gecici, retryAfterMs,
+        guvenliHazirlamaHatasi: true, kod, status, gecici: !hata?.yerelSinir && gecici, retryAfterMs, yerelSinir: Boolean(hata?.yerelSinir),
         tanilama: {
             orijinalHttpDurumu: hata?.yerelSinir ? null : httpDurumu,
             saglayiciHataKodu: guvenliKod(govde.status),
@@ -91,13 +97,14 @@ export const geminiHazirlamaHatasiniSiniflandir = (hata, simdi = Date.now()) => 
     return sonuc;
 };
 
-export const geminiRetryBeklemesiniGetir = (hata, deneme, maksBeklemeMs = 30000) => {
-    if (!hata.gecici || hata.kod === "GEMINI_GUNLUK_KOTA") return null;
-    const sure = Math.max(hata.retryAfterMs || 0, hata.status === 429 ? (hata.retryAfterMs ?? 60000) : Math.min(8000, 1000 * 2 ** (deneme - 1)));
+export const geminiRetryBeklemesiniGetir = (hata, deneme, maksBeklemeMs = 30000, rastgele = () => 0) => {
+    if (!hata.gecici || hata.yerelSinir || hata.kod === "GEMINI_GUNLUK_KOTA") return null;
+    const sure = Math.max(hata.retryAfterMs ?? (hata.status === 429 ? 60000 : 0), Math.min(8000, 1000 * 2 ** (deneme - 1)))
+        + Math.floor(Math.max(0, Math.min(1, Number(rastgele()) || 0)) * 250);
     return sure <= maksBeklemeMs ? sure : null;
 };
 
-export const geminiTanilamasiniLogla = ({ asama, model, deneme, sureMs, hata, yanit, logger = console }) => {
+export const geminiTanilamasiniLogla = ({ asama, model, deneme, sureMs, hata, yanit, logger = console, tanilama }) => {
     const tokenlar = yanit?.usageMetadata || {};
     const veri = {
         asama, model: typeof model === "string" && /^[a-zA-Z0-9/_.-]{1,120}$/.test(model) && !/^(AIza|sk-)/.test(model) && model !== process.env.GEMINI_API_KEY ? model : "gecersiz_model_adi",
@@ -109,8 +116,15 @@ export const geminiTanilamasiniLogla = ({ asama, model, deneme, sureMs, hata, ya
     for (const alan of ["promptTokenCount", "candidatesTokenCount", "totalTokenCount"]) {
         if (Number.isFinite(tokenlar[alan]) && tokenlar[alan] >= 0) veri[alan] = tokenlar[alan];
     }
+    if (tanilama) {
+        for (const alan of ["gercekDenemeSayisi", "retrySayisi", "tahminiGirdiTokeni", "toplamIslemSureMs"]) {
+            if (Number.isFinite(tanilama[alan]) && tanilama[alan] >= 0) veri[alan] = tanilama[alan];
+        }
+        veri.fallbackKullanildi = tanilama.fallbackKullanildi === true;
+        veri.tokenOlcumu = Number.isFinite(tokenlar.promptTokenCount) ? "saglayici" : "tahmini";
+    }
     if (hata?.tanilama) Object.assign(hata.tanilama, {
         asama: veri.asama, model: veri.model, deneme: veri.deneme, sureMs: veri.sureMs,
     });
-    logger.info("[GeminiHazirlama]", veri);
+    try { logger.info("[GeminiHazirlama]", veri); } catch { /* Tanılama başarılı SDK sonucunu yeniden üretemez. */ }
 };

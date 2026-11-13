@@ -7,6 +7,13 @@ const teknikMesajCevirileri = [
 
 // Yalnızca sabit mesajlar: sağlayıcının teknik hata gövdesini ekrana taşıma.
 const guvenliKodMesajlari = new Map([
+    ["GEMINI_YEREL_RPM", "Bu modelin dakikalık istek bütçesi doldu. Biraz sonra devam edebilirsiniz."],
+    ["GEMINI_YEREL_TPM", "Bu modelin dakikalık token bütçesi doldu. Biraz sonra devam edebilirsiniz."],
+    ["GEMINI_YEREL_RPD", "Bu modelin günlük uygulama bütçesi doldu. Kota yenilendiğinde devam edebilirsiniz."],
+    ["GEMINI_YEREL_KOTA", "Kota bekleme süresi devam ediyor. Daha sonra yeniden deneyin."],
+    ["GEMINI_MODEL_KAPALI", "Yapay zekâ modelinin kullanım bütçesi kapalı. Lütfen yöneticiye bildirin."],
+    ["GEMINI_ISLEM_SURESI", "İşlem süresi doldu. Kaydedilen kartlar korunuyor; daha sonra devam edebilirsiniz."],
+    ["KART_BATCH_SINIRI", "Kart kaynakları üretim sınırını aşıyor. Lütfen yöneticiye bildirin."],
     ["KART_GECERSIZ_YANIT", "Üretilen kartlar kaynaklarıyla doğrulanamadı. Eksik konuları yeniden deneyebilirsiniz."],
     ["KART_ISLEM_CAGRI_SINIRI", "Bu işlemin güvenli çağrı sınırına ulaşıldı. Kaydedilen kartlar korundu; eksik konulara devam edebilirsiniz."],
     ["KART_DERS_CAGRI_SINIRI", "Bu dersin günlük kart üretim sınırına ulaşıldı. Kaydedilen kartlar korunuyor; daha sonra devam edebilirsiniz."],

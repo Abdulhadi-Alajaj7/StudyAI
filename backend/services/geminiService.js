@@ -1,7 +1,8 @@
-import { ortakGeminiIstekYonetimi, sinirliGeminiDenemesi } from "../utils/geminiOrtakIstekYonetimi.js";
+import { ortakGeminiIstekYonetimi, sinirliGeminiDenemesi, geminiIsteginiYurut, tahminiGirdiTokeni } from "../utils/geminiOrtakIstekYonetimi.js";
 import { kartKanitlariniOlustur, kartPartisiniDogrula, kartKanitiKonuyaUygunMu } from "../utils/calismaKartiKanit.js";
-import { geminiHazirlamaHatasiniSiniflandir, geminiRetryBeklemesiniGetir, geminiTanilamasiniLogla } from "../utils/geminiHazirlamaHatasi.js";
-import { haritaIstekAyarlari, haritaSinirlayiciOlustur } from "../utils/geminiHaritaSiniri.js";
+import { kartBatchAyarlari, kartBatchIsteginiHazirla } from "../utils/calismaKartiPlanlama.js";
+import { geminiHazirlamaHatasiniSiniflandir, geminiTanilamasiniLogla } from "../utils/geminiHazirlamaHatasi.js";
+import { haritaIstekAyarlari } from "../utils/geminiHaritaSiniri.js";
 import { sureOlc } from "../utils/islemSuresi.js";
 import { GoogleGenAI } from "@google/genai";
 import { koklerEslesiyorMu } from "./konuKimlikEslemeService.js";
@@ -50,17 +51,6 @@ const jsonMetniniAyikla = (hamMetin) => {
     }
     if (!metin) throw new Error("Gemini boş yanıt döndürdü.");
     return JSON.parse(metin);
-};
-
-const retryBeklemeSuresiniHesapla = (hata, deneme, rastgele = Math.random) => {
-    if (!hata.gecici || hata.kod === "GEMINI_GUNLUK_KOTA") return null;
-    const bekleme = Math.max(
-        hata.retryAfterMs ?? (hata.status === 429 ? 60_000 : 0),
-        Math.min(8_000, 1_000 * 2 ** (deneme - 1))
-    );
-    const jitter = Math.floor(Math.max(0, Math.min(1, Number(rastgele()) || 0)) * 250);
-    // Uzun kuyruk veya sohbet kilidini aşan retry beklemesi oluşturma.
-    return bekleme + jitter <= 10_000 ? bekleme + jitter : null;
 };
 
 const httpDurumunuGetir = (hata) => {
@@ -138,7 +128,7 @@ const geminiHatasiniSiniflandir = (hata) => {
         kod = "GEMINI_SERVIS_HATASI";
         mesaj = "Yapay zekâ isteği tamamlanamadı. Lütfen daha sonra yeniden deneyin.";
     }
-    if (hata?.yerelSinir) {
+    if (hata?.kod === "GEMINI_ISTEK_YOGUNLUGU") {
         kod = "GEMINI_ISTEK_YOGUNLUGU";
         mesaj = "Yapay zekâ işlemleri şu anda yoğun. Biraz sonra yeniden deneyin.";
     }
@@ -155,150 +145,54 @@ const geminiHatasiniSiniflandir = (hata) => {
     return sonuc;
 };
 
-const zamanAsimliCalistir = async (islem, timeoutMs) => {
-    let zamanlayici;
-    const iptalDenetleyicisi = new AbortController();
-    const zamanAsimi = new Promise((_, reject) => {
-        zamanlayici = setTimeout(() => {
-            iptalDenetleyicisi.abort();
-            reject(Object.assign(new Error("Gemini çağrısı zaman aşımına uğradı."), {
-                kod: "GEMINI_ZAMAN_ASIMI",
-            }));
-        }, timeoutMs);
-    });
-    try {
-        return await Promise.race([
-            Promise.resolve().then(() => islem(iptalDenetleyicisi.signal)),
-            zamanAsimi,
-        ]);
-    } finally {
-        clearTimeout(zamanlayici);
-    }
-};
-
 const yapilandirilmisGeminiCagrisi = async ({
-    istemci,
-    modelAdi,
-    prompt,
-    systemInstruction,
-    timeoutMs,
-    maxDeneme,
-    maxOutputTokens,
-    bekle,
-    rastgele = Math.random,
-    responseJsonSchema = null,
-    apiCagriButcesi = null,
-    uretimIzleyicisi = null,
-    sdkCagriBaglami = null,
-    istekYonetimi = ortakGeminiIstekYonetimi,
+    istemci, modelAdi, prompt, systemInstruction, timeoutMs, maxDeneme, maxOutputTokens,
+    bekle, rastgele = Math.random, responseJsonSchema = null, apiCagriButcesi = null,
+    uretimIzleyicisi = null, sdkCagriBaglami = null, istekYonetimi = ortakGeminiIstekYonetimi,
+    gorev, signal, sahipligiDogrula, toplamSureMs, env, logger,
 }) => {
-    maxDeneme = sinirliGeminiDenemesi(maxDeneme);
-    const baslangic = performance.now();
-    let gercekDenemeSayisi = 0;
-    let sonHata;
-    for (let deneme = 1; deneme <= maxDeneme; deneme += 1) {
-        if (
-            apiCagriButcesi &&
-            apiCagriButcesi.kullanilan >= apiCagriButcesi.maksimum
-        ) {
-            throw new GeminiSohbetHatasi(
-                "Yapay zekâ çağrı bütçesi aşıldığı için test güvenle tamamlanamadı.",
-                { status: 503, kod: "GEMINI_CAGRI_BUTCESI_ASILDI" }
-            );
-        }
+    let tanilama = { gercekDenemeSayisi: 0 };
+    try {
+        istemci ||= getGeminiClient();
+        const sonuc = await geminiIsteginiYurut({ modelAdi, gorev, maxDeneme, timeoutMs, toplamSureMs,
+            apiCagriButcesi, istekYonetimi, bekle, rastgele, signal, sahipligiDogrula, env, logger,
+            tahminiToken: tahminiGirdiTokeni(prompt, systemInstruction, JSON.stringify(responseJsonSchema || {})),
+            islem: ({ model, abortSignal, deneme, fallback }) => {
+                try { uretimIzleyicisi?.sdkCagrisiBasladi?.({ ...sdkCagriBaglami, sdkDenemesi: deneme, model, fallback }); } catch { /* İzleme üretimi engellemez. */ }
+                return istemci.models.generateContent({ model, contents: prompt, config: {
+                    systemInstruction, temperature: 0.2, maxOutputTokens, responseMimeType: "application/json",
+                    ...(responseJsonSchema ? { responseJsonSchema } : {}), abortSignal,
+                } });
+            },
+        });
+        const response = sonuc.yanit;
+        tanilama = sonuc.tanilama;
+        const tokenKullanimi = { girdi: response?.usageMetadata?.promptTokenCount,
+            cikti: response?.usageMetadata?.candidatesTokenCount, toplam: response?.usageMetadata?.totalTokenCount };
+        try { uretimIzleyicisi?.sdkCagrisiTamamlandi?.({ tokenKullanimi }); } catch { /* İzleme üretimi engellemez. */ }
+        const yanitMetni = String(response?.text || "").trim();
+        const sdkTanilamasi = { ...tanilama, geminiYanitiBos: !yanitMetni, jsonAyristirmaSonucu: "bilinmiyor",
+            finishReason: response?.candidates?.[0]?.finishReason ?? null, tokenKullanimi };
+        let veri;
         try {
-            // İstemci kurulumu da güvenli hata sınıflandırmasına dahildir.
-            istemci ||= getGeminiClient();
-            const yeriBirak = istekYonetimi.yerAyir(modelAdi);
-            let response;
-            try {
-                response = await zamanAsimliCalistir((abortSignal) => {
-                    if (apiCagriButcesi) apiCagriButcesi.kullanilan += 1;
-                    gercekDenemeSayisi += 1;
-                    try {
-                        uretimIzleyicisi?.sdkCagrisiBasladi?.({ ...sdkCagriBaglami, sdkDenemesi: deneme });
-                    } catch { /* İzleme, SDK çağrısını engellemez. */ }
-                    return istemci.models.generateContent({
-                        model: modelAdi, contents: prompt,
-                        config: {
-                            systemInstruction, temperature: 0.2, maxOutputTokens,
-                            responseMimeType: "application/json",
-                            ...(responseJsonSchema ? { responseJsonSchema } : {}), abortSignal,
-                        },
-                    });
-                }, timeoutMs);
-            } finally {
-                yeriBirak();
-            }
-            const tokenKullanimi = {
-                girdi: response?.usageMetadata?.promptTokenCount,
-                cikti: response?.usageMetadata?.candidatesTokenCount,
-                toplam: response?.usageMetadata?.totalTokenCount,
-            };
-            try {
-                uretimIzleyicisi?.sdkCagrisiTamamlandi?.({ tokenKullanimi });
-            } catch {
-                // Terminal izleme, Gemini yanıtının işlenmesini engellememelidir.
-            }
-            const yanitMetni = String(response?.text || "").trim();
-            const sdkTanilamasi = {
-                geminiYanitiBos: !yanitMetni,
-                jsonAyristirmaSonucu: "bilinmiyor",
-                finishReason: response?.candidates?.[0]?.finishReason ?? null,
-                tokenKullanimi,
-            };
-            let veri;
-            try {
-                if (["MAX_TOKENS", "MAX_OUTPUT_TOKENS"].includes(String(sdkTanilamasi.finishReason).toUpperCase())) {
-                    throw new SyntaxError("Gemini çıktısı token sınırında kesildi.");
-                }
-                veri = jsonMetniniAyikla(response?.text);
-                sdkTanilamasi.jsonAyristirmaSonucu = "basarili";
-                sdkTanilamasi.uretilenSoruSayisi = Array.isArray(veri?.sorular)
-                    ? veri.sorular.length
-                    : null;
-            } catch (hata) {
-                const finishReason = String(sdkTanilamasi.finishReason || "").toUpperCase();
-                const ciktiTokenSinirindaMi = [
-                    "MAX_TOKENS",
-                    "MAX_OUTPUT_TOKENS",
-                ].includes(finishReason);
-                hata.tanilama = {
-                    ...sdkTanilamasi,
-                    jsonAyristirmaSonucu: "basarisiz",
-                    asama: "JSON_AYRISTIRMA",
-                    dogrulamaAltKodu: ciktiTokenSinirindaMi
-                        ? "CIKTI_TOKEN_SINIRI"
-                        : (!yanitMetni ? "BOS_YANIT" : "JSON_PARSE"),
-                };
-                throw hata;
-            }
-            return {
-                veri,
-                tokenKullanimi,
-                tanilama: { ...sdkTanilamasi, gercekDenemeSayisi, toplamIslemSureMs: Math.round(performance.now() - baslangic) },
-            };
+            if (["MAX_TOKENS", "MAX_OUTPUT_TOKENS"].includes(String(sdkTanilamasi.finishReason).toUpperCase())) throw new SyntaxError("Gemini çıktısı token sınırında kesildi.");
+            veri = jsonMetniniAyikla(response?.text);
+            sdkTanilamasi.jsonAyristirmaSonucu = "basarili";
+            sdkTanilamasi.uretilenSoruSayisi = Array.isArray(veri?.sorular) ? veri.sorular.length : null;
         } catch (hata) {
-            sonHata = geminiHatasiniSiniflandir(hata);
-            const beklemeMs = retryBeklemeSuresiniHesapla(sonHata, deneme, rastgele);
-            const retryUygunMu = beklemeMs != null;
-            sonHata.tanilama = {
-                ...sonHata.tanilama,
-                ...hamGeminiHataTanilamasiniOlustur(hata),
-                orijinalHttpDurumu: hata?.yerelSinir ? null : sonHata.tanilama?.orijinalHttpDurumu,
-                saglayiciHataKodu: sonHata.tanilama?.saglayiciHataKodu || saglayiciHataKodunuGetir(hata),
-                ...(hata?.yerelSinir ? { hataKaynagi: "yerel_sinir" } : {}),
-                toplamIslemSureMs: Math.round(performance.now() - baslangic),
-                retryUygunMu,
-                retryEdildiMi: deneme > 1,
-                gercekDenemeSayisi,
-                maksimumDenemeSayisi: maxDeneme,
-            };
-            if (!retryUygunMu || deneme === maxDeneme) break;
-            await bekle(beklemeMs);
+            hata.tanilama = { ...sdkTanilamasi, jsonAyristirmaSonucu: "basarisiz", asama: "JSON_AYRISTIRMA",
+                dogrulamaAltKodu: ["MAX_TOKENS", "MAX_OUTPUT_TOKENS"].includes(String(sdkTanilamasi.finishReason).toUpperCase())
+                    ? "CIKTI_TOKEN_SINIRI" : (!yanitMetni ? "BOS_YANIT" : "JSON_PARSE") };
+            throw hata;
         }
+        return { veri, tokenKullanimi, tanilama: sdkTanilamasi };
+    } catch (hata) {
+        if (hata?.sahiplikHatasi || (hata?.kod && /KILIT|SAHIP|IPTAL/.test(hata.kod))) throw hata;
+        const sonuc = geminiHatasiniSiniflandir(hata);
+        sonuc.tanilama = { ...hamGeminiHataTanilamasiniOlustur(hata.cause || hata), ...tanilama, ...sonuc.tanilama,
+            ...(hata?.yerelSinir ? { orijinalHttpDurumu: null, hataKaynagi: "yerel_sinir" } : {}) };
+        throw sonuc;
     }
-    throw sonHata;
 };
 
 export const geminiIleSohbetYanitiUret = async ({
@@ -342,7 +236,8 @@ ${kaynakMetni}
 ${soru}
 </KULLANICI_SORUSU>`;
 
-    const { veri, tokenKullanimi } = await yapilandirilmisGeminiCagrisi({
+    const { veri, tokenKullanimi, tanilama } = await yapilandirilmisGeminiCagrisi({
+        gorev: "sohbet",
         istemci,
         istekYonetimi: bagimliliklar.istekYonetimi || ortakGeminiIstekYonetimi,
         rastgele: bagimliliklar.rastgele || Math.random,
@@ -368,16 +263,17 @@ ${soru}
         bilgiDurumu: ["yeterli", "kismi", "bulunamadi"].includes(veri.bilgiDurumu)
             ? veri.bilgiDurumu
             : (kaynaklar.length ? "kismi" : "bulunamadi"),
-        tokenKullanimi,
+        tokenKullanimi, model: tanilama.model, tanilama,
     };
 };
 
 export const geminiIleSohbetBasligiUret = async ({
     ilkMesaj,
-    modelAdi = process.env.GEMINI_SOHBET_MODELI || VARSAYILAN_GEMINI_MODELI,
+    modelAdi = process.env.GEMINI_SOHBET_BASLIK_MODELI || process.env.GEMINI_SOHBET_MODELI || VARSAYILAN_GEMINI_MODELI,
 }, bagimliliklar = {}) => {
     const istemci = bagimliliklar.istemci || null;
     const { veri } = await yapilandirilmisGeminiCagrisi({
+        gorev: "sohbet_basligi",
         istemci,
         istekYonetimi: bagimliliklar.istekYonetimi || ortakGeminiIstekYonetimi,
         rastgele: bagimliliklar.rastgele || Math.random,
@@ -528,7 +424,8 @@ ${ayrintiTalebi}
 ${kaynakMetni}
 </KAYNAK_ICERIGI>`;
 
-    const { veri, tokenKullanimi } = await yapilandirilmisGeminiCagrisi({
+    const { veri, tokenKullanimi, tanilama } = await yapilandirilmisGeminiCagrisi({
+        gorev: "ozet",
         istemci,
         istekYonetimi: bagimliliklar.istekYonetimi || ortakGeminiIstekYonetimi,
         rastgele: bagimliliklar.rastgele || Math.random,
@@ -544,7 +441,7 @@ ${kaynakMetni}
     return {
         icerik: ozetIceriginiDogrula(veri, araOzet ? 10 : ayar.diziSiniri),
         tokenKullanimi,
-        model: modelAdi,
+        model: tanilama.model, tanilama,
     };
 };
 
@@ -1784,6 +1681,7 @@ export const geminiIleTestSorulariUret = async ({
         ), 0)),
     };
     const toplamTokenKullanimi = { girdi: 0, cikti: 0, toplam: 0 };
+    const kullanilanModeller = new Set();
     const tumHamSorular = [];
     let onarimDenemeSayisi = 0;
     let sonTanilama = null;
@@ -1811,7 +1709,8 @@ export const geminiIleTestSorulariUret = async ({
             onarimBaglami,
             onarimStratejisi,
         });
-        return yapilandirilmisGeminiCagrisi({
+        const sonuc = await yapilandirilmisGeminiCagrisi({
+            gorev: "test",
             istemci,
             istekYonetimi: bagimliliklar.istekYonetimi || ortakGeminiIstekYonetimi,
             modelAdi,
@@ -1834,6 +1733,8 @@ export const geminiIleTestSorulariUret = async ({
             uretimIzleyicisi,
             sdkCagriBaglami: cagriBaglami,
         });
+        kullanilanModeller.add(sonuc.tanilama.model);
+        return sonuc;
     };
 
     const ciktiTokenSiniriniHesapla = (planUzunlugu) => Math.min(
@@ -2309,7 +2210,7 @@ export const geminiIleTestSorulariUret = async ({
     return {
         sorular,
         tokenKullanimi: toplamTokenKullanimi,
-        model: modelAdi,
+        model: [...kullanilanModeller].at(-1) || modelAdi, kullanilanModeller: [...kullanilanModeller],
     };
 };
 
@@ -2321,13 +2222,10 @@ export const geminiIleTestSorulariUret = async ({
 export const geminiBaglantisiniDogrula = async (modelAdi = VARSAYILAN_GEMINI_MODELI) => {
     try {
         const ai = getGeminiClient();
-        const response = await ai.models.generateContent({
-            model: modelAdi,
-            contents: "Ping test. Sadece 'PONG' yaz.",
-            config: {
-                maxOutputTokens: 10,
-                temperature: 0.1
-            }
+        const { yanit: response } = await geminiIsteginiYurut({ modelAdi, gorev: "baglanti_kontrolu", maxDeneme: 1,
+            timeoutMs: 20_000, apiCagriButcesi: { maksimum: 1, kullanilan: 0 }, tahminiToken: 20,
+            islem: ({ model, abortSignal }) => ai.models.generateContent({ model, contents: "Ping test. Sadece 'PONG' yaz.",
+                config: { maxOutputTokens: 10, temperature: 0.1, abortSignal } }),
         });
 
         const text = response?.text?.trim() || "";
@@ -2366,55 +2264,49 @@ export const geminiBaglantisiniDogrula = async (modelAdi = VARSAYILAN_GEMINI_MOD
 /**
  * Ortak API çağrısı ve yeniden deneme mekanizması.
  */
-const haritaSiniri = haritaSinirlayiciOlustur();
 export async function callGeminiStructuredJson(ai, modelAdi, prompt, systemInstruction, bagimliliklar = {}) {
     const ayarlar = bagimliliklar.ayarlar || haritaIstekAyarlari();
-    const beklet = bagimliliklar.beklet || (ms => new Promise(r => setTimeout(r, ms)));
     const simdi = bagimliliklar.simdi || Date.now;
-    const sinir = bagimliliklar.sinir || haritaSiniri;
     const logger = bagimliliklar.logger || console;
     const asama = bagimliliklar.asama || "konu_haritasi";
-    const tahminiToken = Math.ceil((prompt.length + systemInstruction.length) / 3);
-    let sonHata;
-    let istemci = ai;
-    for (let deneme = 1; deneme <= ayarlar.maksDeneme; deneme++) {
-        const baslangic = performance.now();
-        let yanit;
-        try {
-            istemci ||= getGeminiClient({ timeout: ayarlar.timeoutMs });
-            sinir.kontrolEt(modelAdi, tahminiToken, ayarlar, simdi());
-            yanit = await sureOlc("gemini_konu_haritasi_istegi", () => zamanAsimliCalistir(abortSignal => istemci.models.generateContent({
-                model: modelAdi, contents: prompt,
-                config: { systemInstruction, temperature: 0.2, responseMimeType: "application/json", abortSignal,
-                    ...(ayarlar.maxOutputTokens ? { maxOutputTokens: ayarlar.maxOutputTokens } : {}),
-                },
-            }), ayarlar.timeoutMs));
-            const finishReason = yanit?.candidates?.[0]?.finishReason;
-            if (finishReason === "MAX_TOKENS") throw Object.assign(new Error("Çıktı sınırı"), { kod: "GEMINI_CIKTI_SINIRI", status: 502 });
-            if (!yanit?.text?.trim()) throw Object.assign(new Error("Boş yanıt"), { kod: "GEMINI_BOS_YANIT", status: 502 });
-            let parsed;
-            try { parsed = jsonMetniniAyikla(yanit.text); }
-            catch { throw Object.assign(new Error("Geçersiz JSON"), { kod: "GEMINI_GECERSIZ_JSON", status: 502 }); }
-            const konular = semaDogrulaVeNormalizeEt(parsed);
-            if (!konular.length) throw Object.assign(new Error("Geçersiz şema"), { kod: "GEMINI_GECERSIZ_SEMA", status: 502 });
-            geminiTanilamasiniLogla({ asama, model: modelAdi, deneme, sureMs: performance.now() - baslangic, yanit, logger });
-            return konular;
-        } catch (hata) {
-            sonHata = geminiHazirlamaHatasiniSiniflandir(hata, simdi());
-            sinir.hataKaydet(modelAdi, sonHata, simdi());
-            geminiTanilamasiniLogla({ asama, model: modelAdi, deneme, sureMs: performance.now() - baslangic, hata: sonHata, yanit, logger });
-            const bekleme = geminiRetryBeklemesiniGetir(sonHata, deneme, ayarlar.maksBeklemeMs);
-            if (deneme === ayarlar.maksDeneme || bekleme == null) break;
-            await beklet(bekleme);
-        }
+    let yanit, tani = { gercekDenemeSayisi: 0 };
+    try {
+        const istemci = ai || getGeminiClient({ timeout: ayarlar.timeoutMs });
+        const sonuc = await geminiIsteginiYurut({
+            modelAdi, gorev: "konu_haritasi", maxDeneme: ayarlar.maksDeneme, timeoutMs: ayarlar.timeoutMs,
+            maksBeklemeMs: ayarlar.maksBeklemeMs, simdi, logger,
+            rastgele: bagimliliklar.rastgele || Math.random, bekle: bagimliliklar.beklet,
+            istekYonetimi: bagimliliklar.istekYonetimi || ortakGeminiIstekYonetimi,
+            signal: bagimliliklar.signal, sahipligiDogrula: bagimliliklar.sahipligiDogrula,
+            apiCagriButcesi: bagimliliklar.apiCagriButcesi,
+            tahminiToken: tahminiGirdiTokeni(prompt, systemInstruction), sinirlar: ayarlar,
+            islem: ({ model, abortSignal }) => {
+                return sureOlc("gemini_konu_haritasi_istegi", () => istemci.models.generateContent({ model, contents: prompt,
+                    config: { systemInstruction, temperature: 0.2, responseMimeType: "application/json", abortSignal,
+                        ...(ayarlar.maxOutputTokens ? { maxOutputTokens: ayarlar.maxOutputTokens } : {}) } }));
+            },
+        });
+        yanit = sonuc.yanit; tani = sonuc.tanilama;
+        if (["MAX_TOKENS", "MAX_OUTPUT_TOKENS"].includes(yanit?.candidates?.[0]?.finishReason)) throw Object.assign(new Error("Çıktı sınırı"), { kod: "GEMINI_CIKTI_SINIRI", status: 502 });
+        if (!yanit?.text?.trim()) throw Object.assign(new Error("Boş yanıt"), { kod: "GEMINI_BOS_YANIT", status: 502 });
+        let parsed;
+        try { parsed = jsonMetniniAyikla(yanit.text); }
+        catch { throw Object.assign(new Error("Geçersiz JSON"), { kod: "GEMINI_GECERSIZ_JSON", status: 502 }); }
+        const konular = semaDogrulaVeNormalizeEt(parsed);
+        if (!konular.length) throw Object.assign(new Error("Geçersiz şema"), { kod: "GEMINI_GECERSIZ_SEMA", status: 502 });
+        return konular;
+    } catch (hata) {
+        const sonuc = geminiHazirlamaHatasiniSiniflandir(hata, simdi());
+        sonuc.tanilama = { ...tani, ...sonuc.tanilama };
+        geminiTanilamasiniLogla({ asama, model: sonuc.tanilama.model || modelAdi, deneme: sonuc.tanilama.gercekDenemeSayisi, sureMs: 0, hata: sonuc, yanit, logger });
+        throw sonuc;
     }
-    throw sonHata;
 }
 
 /**
  * Tek bir metin bloğundan Gemini ile yapılandırılmış JSON konu haritası üretir.
  */
-export const geminiIleKonuHaritasiUret = async (metinIcerik, dersBilgisi, modelAdi = VARSAYILAN_GEMINI_MODELI) => {
+export const geminiIleKonuHaritasiUret = async (metinIcerik, dersBilgisi, modelAdi = process.env.GEMINI_KONU_HARITASI_MODELI || VARSAYILAN_GEMINI_MODELI) => {
 
     const systemInstruction = `Sen üniversite düzeyinde uzman bir müfredat ve konu taksonomisi analizcisisin.
 Görevin: Verilen ders materyali içeriğini hiyerarşik bir Konu Haritasına (Ana Konular ve Alt Konular) dönüştürmektir.
@@ -2459,7 +2351,7 @@ Lütfen yukarıdaki materyal metnine dayanarak müfredat Konu Haritasını yukar
 /**
  * Birden fazla batch'ten çıkarılan ara konu listelerini tek bir tutarlı, tekrar etmeyen hiyerarşik haritada birleştirir.
  */
-export const geminiIleKonulariBirlestir = async (araKonuListeleri, dersBilgisi, modelAdi = VARSAYILAN_GEMINI_MODELI) => {
+export const geminiIleKonulariBirlestir = async (araKonuListeleri, dersBilgisi, modelAdi = process.env.GEMINI_KONU_HARITASI_MODELI || VARSAYILAN_GEMINI_MODELI) => {
 
     const systemInstruction = `Sen üniversite düzeyinde uzman bir müfredat ve konu taksonomisi sentezleyicisisin.
 Sana bir dersin farklı materyal bölümlerinden çıkarılmış ham konu listeleri verilmektedir.
@@ -2536,8 +2428,8 @@ export function semaDogrulaVeNormalizeEt(data) {
 }
 
 
-export const geminiIleCalismaKartlariUret = async ({ konu, kartSayisi, kaynaklar, oncekiKartlar = [], apiCagriButcesi = null }, bagimliliklar = {}) => {
-    if (!Number.isInteger(kartSayisi) || kartSayisi < 1 || kartSayisi > 4 || !kaynaklar?.length) {
+export const geminiIleCalismaKartlariUret = async ({ konu, kartSayisi, kaynaklar, oncekiKartlar = [], apiCagriButcesi = null, sahipligiDogrula, signal }, bagimliliklar = {}) => {
+    if (!Number.isInteger(kartSayisi) || kartSayisi < 1 || kartSayisi > kartBatchAyarlari().kart || !kaynaklar?.length) {
         throw new GeminiSohbetHatasi("Kart üretmek için uygun kaynak bulunamadı.", { status: 422, kod: "KART_KAYNAK_YETERSIZ" });
     }
     const kanitlar = kartKanitlariniOlustur(kaynaklar);
@@ -2546,6 +2438,8 @@ export const geminiIleCalismaKartlariUret = async ({ konu, kartSayisi, kaynaklar
     const kalan = apiCagriButcesi ? apiCagriButcesi.maksimum - apiCagriButcesi.kullanilan : 5;
     if (kalan <= 0) throw new GeminiSohbetHatasi("Kart üretimi için bu işlemin çağrı sınırına ulaşıldı.", { status: 429, kod: "KART_ISLEM_CAGRI_SINIRI" });
     const { veri, tanilama } = await yapilandirilmisGeminiCagrisi({
+        gorev: "kart",
+        sahipligiDogrula, signal,
         istemci: bagimliliklar.istemci || null,
         modelAdi: process.env.GEMINI_KART_MODELI || VARSAYILAN_GEMINI_MODELI,
         istekYonetimi: bagimliliklar.istekYonetimi || ortakGeminiIstekYonetimi,
@@ -2553,7 +2447,7 @@ export const geminiIleCalismaKartlariUret = async ({ konu, kartSayisi, kaynaklar
         apiCagriButcesi,
         // Son izinli denemede 503 oluşursa bütçe hatasıyla üstünü örtme.
         maxDeneme: Math.min(kalan, sinirliGeminiDenemesi(bagimliliklar.maxDeneme ?? process.env.GEMINI_KART_MAKS_DENEME)),
-        maxOutputTokens: 1_000 + kartSayisi * 800,
+        maxOutputTokens: Math.min(kartBatchAyarlari().ciktiToken, 300 + kartSayisi * 120),
         bekle: bagimliliklar.bekle || (ms => new Promise(resolve => setTimeout(resolve, ms))),
         rastgele: bagimliliklar.rastgele || Math.random,
         systemInstruction: `StudyAI için Türkçe, kaynağa bağlı boşluk doldurma çalışma kartları seç.
@@ -2584,4 +2478,39 @@ Olumsuz/koşullu ifadeleri değiştirme. Aynı kanıtı veya önceki kartlarla a
     });
     return { ...kartPartisiniDogrula(veri, { konuId: konu.konuId, konu, kartSayisi, kaynaklar, kanitlar, oncekiKartlar }),
         tanilama: { ...tanilama, beklenenKartSayisi: kartSayisi, uretilenKartSayisi: Array.isArray(veri?.kartlar) ? veri.kartlar.length : 0 } };
+};
+
+export const geminiIleKartBatchiUret = async ({ isler, oncekiKartlar = [], apiCagriButcesi, sahipligiDogrula, signal }, bagimliliklar = {}) => {
+    const ayar = bagimliliklar.batchAyarlari || kartBatchAyarlari();
+    const adet = isler.reduce((n, i) => n + i.kavramlar.length, 0);
+    if (!adet || adet > ayar.kart || isler.length > ayar.konu) throw new GeminiSohbetHatasi("Kart batch sınırı aşıldı.", { status: 422, kod: "KART_BATCH_SINIRI" });
+    const { prompt, systemInstruction, responseJsonSchema, ciktiTokenTahmini } = kartBatchIsteginiHazirla(isler);
+    if (ciktiTokenTahmini > ayar.ciktiToken || new Set(isler.flatMap(i => i.kavramlar.map(k => String(k.kanit.kaynak.materyalId)))).size > ayar.materyal) {
+        throw new GeminiSohbetHatasi("Kart batch çıktı veya materyal bütçesini aşıyor.", { status: 422, kod: "KART_BATCH_SINIRI" });
+    }
+    if (tahminiGirdiTokeni(prompt, systemInstruction, JSON.stringify(responseJsonSchema)) > ayar.girdiToken) {
+        throw new GeminiSohbetHatasi("Kart kanıtları girdi bütçesini aşıyor.", { status: 422, kod: "KART_BATCH_SINIRI" });
+    }
+    const { veri, tanilama } = await yapilandirilmisGeminiCagrisi({
+        gorev: "kart", modelAdi: process.env.GEMINI_KART_MODELI || VARSAYILAN_GEMINI_MODELI,
+        istemci: bagimliliklar.istemci, istekYonetimi: bagimliliklar.istekYonetimi || ortakGeminiIstekYonetimi,
+        timeoutMs: bagimliliklar.timeoutMs || 60_000, maxDeneme: bagimliliklar.maxDeneme ?? process.env.GEMINI_KART_MAKS_DENEME,
+        maxOutputTokens: Math.min(ayar.ciktiToken, ciktiTokenTahmini), bekle: bagimliliklar.bekle,
+        rastgele: bagimliliklar.rastgele, systemInstruction, prompt, responseJsonSchema,
+        apiCagriButcesi, sahipligiDogrula, signal, env: bagimliliklar.env,
+    });
+    const gecerli = [...oncekiKartlar];
+    const sonuclar = isler.map(is => {
+        const secimler = Array.isArray(veri?.kartlar) ? veri.kartlar.slice(0, adet).filter(k => k?.konuId === is.konu.konuId) : null;
+        const sonuc = kartPartisiniDogrula({ kartlar: secimler }, { konuId: is.konu.konuId, konu: is.konu,
+            kartSayisi: is.kavramlar.length, kaynaklar: is.kaynaklar, kanitlar: is.kavramlar.map(k => k.kanit), oncekiKartlar: gecerli });
+        for (const kart of sonuc.kartlar) {
+            const kavram = is.kavramlar.find(k => k.kanit.metin === kart.kaynak.alinti && k.kanit.baslangic === kart.kaynak.kanitBaslangic);
+            kart.kavramId = kavram.kavramId; kart.kavramTuru = kavram.tur;
+        }
+        gecerli.push(...sonuc.kartlar);
+        return { konuId: is.konu.konuId, ...sonuc, tanilama: { ...tanilama, beklenenKartSayisi: is.kavramlar.length,
+            uretilenKartSayisi: secimler?.length || 0, gecerliKartSayisi: sonuc.kartlar.length, reddedilenKartSayisi: sonuc.reddedilenler.length } };
+    });
+    return { sonuclar, tanilama };
 };

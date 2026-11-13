@@ -1,0 +1,55 @@
+{
+  "tarih": "2026-11-12",
+  "kapsam": "Tek konulu V2 seçim protokolü ile V2+ batch; aynı güncel ortak SDK katmanı, aynı 9 sentetik kavram.",
+  "uyari": "Tokenlar karakter/3 tahminidir; süreler yalnız yerel mock süresidir. Sağlayıcı kalitesi, gerçek token veya canlı gecikme ölçümü değildir.",
+  "gercekGeminiCagrisi": 0,
+  "gercekEmbeddingCagrisi": 0,
+  "senaryolar": [
+    {
+      "senaryo": "gecerli_yanit",
+      "tekKonulu": {
+        "mockSdkCagrisi": 3,
+        "tahminiGirdiTokeni": 2343,
+        "gecerliKart": 9,
+        "hedefKavram": 9,
+        "kavramKapsami": 1,
+        "reddedilen": 0,
+        "retOrani": 0,
+        "mockIslemSureMs": 14.77
+      },
+      "batch": {
+        "mockSdkCagrisi": 1,
+        "tahminiGirdiTokeni": 1225,
+        "gecerliKart": 9,
+        "hedefKavram": 9,
+        "kavramKapsami": 1,
+        "reddedilen": 0,
+        "retOrani": 0,
+        "mockIslemSureMs": 3.8
+      }
+    },
+    {
+      "senaryo": "tek_gecersiz_kart",
+      "tekKonulu": {
+        "mockSdkCagrisi": 3,
+        "tahminiGirdiTokeni": 2308,
+        "gecerliKart": 8,
+        "hedefKavram": 9,
+        "kavramKapsami": 0.8888888888888888,
+        "reddedilen": 1,
+        "retOrani": 0.1111111111111111,
+        "mockIslemSureMs": 6.22
+      },
+      "batch": {
+        "mockSdkCagrisi": 1,
+        "tahminiGirdiTokeni": 1225,
+        "gecerliKart": 8,
+        "hedefKavram": 9,
+        "kavramKapsami": 0.8888888888888888,
+        "reddedilen": 1,
+        "retOrani": 0.1111111111111111,
+        "mockIslemSureMs": 2.52
+      }
+    }
+  ]
+}

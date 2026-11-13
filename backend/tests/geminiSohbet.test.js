@@ -62,7 +62,10 @@ test("Gemini kota aşımını agresif yeniden denemeden güvenli 429 hatasına �
         (hata) => {
             assert.equal(hata.status, 429);
             assert.equal(hata.kod, "GEMINI_KOTA_ASIMI");
-            const { kotaTuru, retryAfterMs, toplamIslemSureMs, ...temelTanilama } = hata.tanilama;
+            const { kotaTuru, retryAfterMs, toplamIslemSureMs, asama, deneme, fallbackKullanildi, model, ozellik, retrySayisi, sureMs, tahminiGirdiTokeni, ...temelTanilama } = hata.tanilama;
+            assert.equal(asama, "sohbet"); assert.equal(ozellik, "sohbet"); assert.equal(deneme, 1);
+            assert.equal(fallbackKullanildi, false); assert.equal(retrySayisi, 0);
+            assert.ok(model && sureMs >= 0 && tahminiGirdiTokeni > 0);
             assert.equal(kotaTuru, "bilinmiyor");
             assert.equal(retryAfterMs, null);
             assert.ok(toplamIslemSureMs >= 0);

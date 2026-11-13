@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { calismaKartlariApiOlustur } from "../src/services/calismaKartlariApi.mjs";
-import { acikKartiKoru, kartlariFiltrele, kartDurumunuUygula, kartKonulariniGrupla, kartGorunumleri } from "../src/utils/calismaKartlariYardimcilari.mjs";
+import { acikKartiKoru, kartlariFiltrele, kartDurumunuUygula, kartKonulariniGrupla, kartGorunumleri, kartKonuDurumMesaji } from "../src/utils/calismaKartlariYardimcilari.mjs";
 import { kullaniciHataMesaji } from "../src/utils/kullaniciHatasi.mjs";
 const kartlar = [
     { _id: "1", konuId: "a", goruldu: false, yildizli: true },
@@ -9,6 +9,18 @@ const kartlar = [
     { _id: "3", konuId: "b", goruldu: false, yildizli: false },
 ];
 const konular = [{ konuId: "a", anaKonuId: "ana", anaBaslik: "Ana", baslik: "A", kartSayisi: 2 }, { konuId: "b", anaKonuId: "ana", anaBaslik: "Ana", baslik: "B", kartSayisi: 1 }];
+test("V2+ sıfır kart nedeni ve gerçek eksik kavram ilerlemesi ayrılır", () => {
+    const nedenler = ["ogrenilebilir_kavram_yok", "kaynak_yok", "kanit_yetersiz", "uretim_basarisiz", "dogrulama_basarisiz"];
+    const mesajlar = nedenler.map(sifirKartNedeni => kartKonuDurumMesaji({ tamamlandi: sifirKartNedeni === "ogrenilebilir_kavram_yok", kartSayisi: 0, sifirKartNedeni }));
+    assert.equal(new Set(mesajlar).size, nedenler.length);
+    assert.match(kartKonuDurumMesaji({ kartSayisi: 7, eksikKartSayisi: 1, tamamlandi: false }), /7 kart hazır; 1 kavram bekliyor/);
+    assert.match(kartKonuDurumMesaji({ kartSayisi: 8, tamamlandi: true }), /8 kart hazır/);
+});
+test("V2+ yerel RPM/TPM/RPD ve model kapatma hataları güvenli Türkçe sunulur", () => {
+    const mesajlar = ["GEMINI_YEREL_RPM", "GEMINI_YEREL_TPM", "GEMINI_YEREL_RPD", "GEMINI_MODEL_KAPALI", "KART_BATCH_SINIRI"].map(kod =>
+        kullaniciHataMesaji({ response: { status: 429, data: { kod, hata: "gizli-provider-detayi" } } }));
+    assert.equal(new Set(mesajlar).size, 5); assert.ok(mesajlar.every(m => !m.includes("gizli-provider")));
+});
 test("dört görünüm gerçek görüldü/yıldız durumlarını birbirinden bağımsız süzer", () => {
     const sonuclar = [3, 2, 1, 1];
     kartGorunumleri.forEach((g, i) => assert.equal(kartlariFiltrele(kartlar, { gorunum: g.deger }, konular).length, sonuclar[i]));

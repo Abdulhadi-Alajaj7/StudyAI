@@ -1,4 +1,5 @@
 import Ders from "../models/Ders.js";
+import { createHash } from "node:crypto";
 import Materyal from "../models/Materyal.js";
 import MetinParcasi from "../models/MetinParcasi.js";
 import {
@@ -86,12 +87,28 @@ const aktifSurumAnahtari = (materyalId, islemeId) => (
     `${kimlikMetni(materyalId)}:${kimlikMetni(islemeId)}`
 );
 
+const sorguOnbellegi = new Map();
+// Yalnız sorgu vektörü; belge vektörleri tekrar üretilmez. Kullanıcı, ders,
+// model, boyut ve aktif kaynak snapshot'ı anahtara dahildir; hata cache edilmez.
+const sorguVektorunuGetir = async (anahtar, uret, onbellek) => {
+    const simdi = Date.now();
+    for (const [k, v] of onbellek) if (simdi - v.zaman > 600_000) onbellek.delete(k);
+    if (onbellek.has(anahtar)) return onbellek.get(anahtar).deger;
+    while (onbellek.size >= 100) onbellek.delete(onbellek.keys().next().value);
+    const kayit = { zaman: simdi, deger: Promise.resolve().then(uret) };
+    onbellek.set(anahtar, kayit);
+    try { return await kayit.deger; }
+    catch (hata) { if (onbellek.get(anahtar) === kayit) onbellek.delete(anahtar); throw hata; }
+};
+
 export const semanticAramaYap = async ({
     kullaniciId,
     dersId,
     sorgu,
     limit = 5,
     materyalIds = null,
+    onbellekKullan = false,
+    signal, sahipligiDogrula, apiCagriButcesi,
 }, bagimliliklar = {}) => {
     const DersModel = bagimliliklar.DersModel || Ders;
     const MateryalModel = bagimliliklar.MateryalModel || Materyal;
@@ -177,10 +194,21 @@ export const semanticAramaYap = async ({
         };
     }
 
-    const [sorguEmbedding] = await embeddingUret([sorgu], {
+    const sahipligiKontrolEt = async () => {
+        try { await sahipligiDogrula?.(); }
+        catch (hata) { throw Object.assign(new Error("Arama işleminin sahipliği doğrulanamadı.", { cause: hata }), {
+            kod: hata?.kod || "GEMINI_SAHIPLIK_KONTROLU", status: hata?.status || 409, sahiplikHatasi: true,
+        }); }
+    };
+    await sahipligiKontrolEt();
+    const uret = () => embeddingUret([sorgu], {
         tur: "sorgu",
-        ayarlar,
+        ayarlar, signal, sahipligiDogrula: sahipligiKontrolEt, apiCagriButcesi,
     });
+    const anahtar = createHash("sha256").update(JSON.stringify([String(kullaniciId), String(dersId), ayarlar.model, ayarlar.boyut,
+        aktifSurumler.map(k => aktifSurumAnahtari(k.materyalId, k.islemeId)).sort(), sorgu])).digest("hex");
+    const [sorguEmbedding] = onbellekKullan ? await sorguVektorunuGetir(anahtar, uret, bagimliliklar.sorguOnbellegi || sorguOnbellegi) : await uret();
+    await sahipligiKontrolEt();
     if (!sorguEmbedding) {
         const hata = new Error("Arama sorgusu için embedding oluşturulamadı.");
         hata.kod = "SORGU_EMBEDDING_HATASI";
@@ -222,6 +250,7 @@ export const semanticAramaYap = async ({
         sonuclar.push({
             metinParcasiId: String(parca._id),
             materyalId: String(parca.materyalId),
+            islemeId: String(parca.islemeId),
             materyalAdi: materyal.orijinalDosyaAdi || materyal.dosyaAdi,
             parcaIndex: parca.parcaIndex,
             icerik: parca.icerik,

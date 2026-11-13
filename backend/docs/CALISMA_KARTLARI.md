@@ -1,174 +1,169 @@
-# Çalışma Kartları
+# Çalışma Kartları V2+
 
-12 Kasım 2026 — `feature/calisma-kartlari-sistemi`
+13 Kasım 2026 — `feature/calisma-kartlari-sistemi`
 
-Güncel V1 güvenilirlik değişiklikleri ve canlı doğrulama sınırı:
-[V1 denetim raporu](CALISMA_KARTLARI_V1_GUVENILIRLIK.md).
+Güncel uygulama, test kanıtları, değişen dosyalar ve canlı izin sınırı:
+[V2+ uygulama kaydı](V2_PLUS_UYGULAMA_NOTLARI.md).
+[V1 denetimi](CALISMA_KARTLARI_V1_GUVENILIRLIK.md) ve bu belgenin sonundaki
+canlı denemeler tarihsel kayıtlardır; V2+ canlı kabulü olarak kullanılamaz.
 
 ## Kullanım
 
-Dersin **Çalışma Kartları** sekmesindeki **Kartları Oluştur** düğmesi üretimi başlatır.
-Konu, sayı veya zorluk seçimi yoktur. Hazır kartlar sonraki ziyarette doğrudan açılır.
-Karta tıklamak veya klavyede Enter/Boşluk kullanmak soru/cevap yüzünü değiştirir.
-İlk cevap açılışı görüldü olarak kaydedilir. Yıldız bundan bağımsızdır.
+Dersin **Çalışma Kartları** sekmesindeki **Kartları Oluştur** üretimi başlatır.
+Öğrenciden konu, kart sayısı, zorluk veya model seçmesi istenmez. Kayıtlı kartlar
+sonraki ziyarette açılır. Sayfa açılışı ve GET hiçbir üretim başlatmaz.
 
-Tüm/görülmeyen/görülen/yıldızlı görünümleri ve ana/alt konu filtreleri vardır.
-Görülmeyen görünümünde açılan kart, kullanıcı ilerleyene kadar ekrandan kaybolmaz.
-Yeni karta geçince soru yüzü gösterilir. Mobilde konu listesi açılıp kapanabilir.
-Değerlendirmeler **Tekrar, Zor, Orta, Kolay** olarak saklanır; tekrar değerlendirme
-eski kaydı değiştirmez. Ağ hatası sonrası aynı değerlendirme isteğini yeniden
-kaydetmek ikinci geçmiş kaydı oluşturmaz.
+Karta tıklamak veya Enter/Boşluk kullanmak cevabı açar; ilk açılış görüldü olarak
+kaydedilir. Yıldız bağımsızdır. Tüm/görülmeyen/görülen/yıldızlı görünümleri ve
+ana/alt konu filtreleri korunur. Görülmeyen kart açılınca kullanıcı ilerleyene
+kadar ekranda kalır; yeni kart soru yüzüyle açılır. Mobil konu paneli korunur.
 
-**Bugünkü Tekrarlar** açıkça pasiftir. Tekrar sayısı/tarihi hesaplanmaz; SM-2,
-FSRS, bildirim veya otomatik zamanlama uygulanmadı.
+**Tekrar, Zor, Orta, Kolay** değerlendirmeleri değişmez geçmiş kayıtlarıdır.
+Aynı istemci istek kimliğiyle tekrar gönderim ikinci kayıt oluşturmaz.
+**Bugünkü Tekrarlar** pasiftir; SM-2, FSRS veya tekrar takvimi eklenmedi.
 
-## Kaynak ve üretim
+## Kaynak, kavram ve kart üretimi
 
-- Dersin kullanıcıya ait, temizleme dışında ve materyalleri onaylanmış olması gerekir.
-- Hazır ve değişikliklere kilitli mevcut konu haritası kullanılır. Konu kimlikleri
-  değişmez. Alt konusu olmayan ana konu kendi kart grubunu oluşturur.
-- Yalnızca konunun materyal referansları ve materyallerin aktif işlem sürümlerindeki
-  parçalar okunur. Yeni embedding/konu haritası/özet/test üretimi başlatılmaz.
-- Tam ders haritasında alt/ana konu kaynak listeleri boşsa haritanın kayıtlı
-  `kaynakMateryaller` snapshot'larından yalnızca mevcut aktif sürümle eşleşenler
-  aday kapsamı oluşturur. Harita dışında kalan veya eski sürümlü materyaller bu
-  kapsama eklenmez. Yerel konu eşleştirmesi ve kart/alıntı doğrulaması aynen uygulanır;
-  konu haritası ve materyal kayıtları değiştirilmez. Doğrulanmış bağlantı da yoksa
-  içerik yetersizliği yerine `KART_KAYNAK_BAGLANTISI_EKSIK` döner.
-- Başlık/açıklama ile yerel eşleşen kaynaklar seçilir; dengeli kaynak seçimi mevcut
-  özet yardımcısını kullanır. Konu başına kaynak bütçesi 12.000 karakterdir.
-- Seçilen içeriğin sözcük kapsamına göre konu başına 1–4 kart planlanır. Destede
-  en fazla 120 konu bulunur. Daha büyük harita sessizce kırpılmak yerine açıklamayla reddedilir.
-- Bir Gemini çağrısı bir konunun küçük kart grubunu üretir. Ortak hata ayrıştırma,
-  exponential backoff/jitter, timeout iptali ve süreç içi eşzamanlı istek sınırı kullanılır.
-- Yeni kartlar boşluk doldurma biçimindedir. Sunucu kısa kaynak cümlelerini
-  kimliklendirir; model yalnızca kanıt kimliği ve sunucunun cevap seçeneklerindeki sayısal indeksi seçer. Soru,
-  cevap ve alıntı aynı özgün cümleden oluşturulur; gerçek karakter aralıkları kaydedilir.
-  Serbest model cevabı/alıntısı kabul edilmez. Konu yönlendirmesi cevabın anlamsal
-  doğruluğunun kanıtı olarak kullanılmaz. Aynı soru ve aynı kanıt tekrarı reddedilir;
-  farklı cevaplı kavramlar ortak soru kalıbı nedeniyle birleştirilmez.
-- Her kart bağımsız doğrulanır. Dört karttan biri hatalıysa üç geçerli kart kalır;
-  eksik sayı veya hatalı kart grubun tamamını iptal etmez. Hedef büyütülmez,
-  doğrulanmamış kart yayımlanmaz. Her ret sabit alt kod ve kart indeksiyle kaydedilir.
-- Önceki kartlardan en fazla son 80'i prompt'a eklenir; doğrulama tüm önceki
-  kartlara karşı yapılır. Boş/geçersiz/kesilmiş JSON başarı sayılmaz; daha az
-  geçerli kart içeren doğru JSON açıkça kısmi sonuçtur.
+1. Kullanıcıya ait onaylı dersin hazır ve kilitli mevcut konu haritası okunur.
+   `konuId`, ana/alt konu bağlantıları ve kaynak snapshot'ı değişmez. Konu kaynağı
+   belirtilmemişse yalnız haritanın snapshot'ıyla aktif sürümü eşleşen materyaller
+   aday olur. Doğrulanmış bağlantı yoksa `KART_KAYNAK_BAGLANTISI_EKSIK` döner.
+2. Keyword eşleşmesi mevcut `semanticAramaService` ve kayıtlı cosine vektörleriyle
+   birleştirilir. Materyal, kullanıcı, ders, aktif işlem sürümü ve özgün parça metni
+   doğrulanır. Yüksek anlamsal skor tek başına konu kanıtı sayılmaz. Materyaller
+   arasında çeşitlilik korunur; en fazla 10 bütün parça / 12.000 karakter seçilir.
+3. Belge embedding'leri yeniden üretilmez. Gerekirse yalnız sorgu embedding'i
+   kullanılır. Kullanıcı+ders+model+boyut+aktif snapshot+sorgu anahtarlı cache,
+   100 kayıt ve 10 dakika ile sınırlıdır. Başarısız sorgu cache edilmez. Semantic
+   hata sonrası keyword fallback açıkça kaydedilir; yeterli kanıt yoksa üretim durur.
+4. Kaynaktaki tanım, özellik/kural, formül, işleyiş, fark, neden-sonuç ve kullanım
+   ifadeleri deterministik olarak ayrılır. Başlık/alıştırma/boilerplate elenir.
+   Normalize kavram veya aynı alıntı tekrar planlanmaz. Hedef **1–4 değildir**;
+   farklı kanıtlanabilir kavram sayısıdır. Teknik kaynak sınırları ve bu sezgisel
+   çıkarım, tüm dersin pedagojik kapsamının eksiksiz olduğunu garanti etmez.
+5. Aynı ana konuya bağlı işler küçük batch'lere ayrılır. Varsayılan üst sınırlar
+   3 konu, 12 kart, 6 materyal, 6.000 tahmini girdi ve 2.400 çıktı tokenıdır.
+   Sistem talimatı, JSON schema ve kanıtlar girdi tahminine dahildir. Bir kanıt bile
+   sığmazsa güvenli sınır hatası döner. Batch sınırı toplam kavram hedefini kırpmaz.
+6. Gemini yalnız `konuId`, `kanitReferansi`, `cevapIndex`, `tur` seçer. Tanımı veya
+   formülü açık kaynaklarda sunucu kısa doğal Türkçe soru-cevap oluşturur; cevap
+   kaynaktan aynen alınır. Diğerlerinde güvenli boşluk doldurma korunur. Serbest
+   model sorusu, cevabı veya yeniden yazılmış alıntısı kabul edilmez.
+7. Her kartın konusu, kanıtı, materyal/sürüm/parça bilgisi, cevap indeksi, karakter
+   aralığı ve tekrarı bağımsız doğrulanır. Bir kartın reddi diğer geçerli kartları
+   kaybettirmez. JSON/source hatası sağlayıcı kesintisi sayılmaz; otomatik model
+   fallback veya aynı başarılı cevabı yeniden üretme gerekçesi olmaz.
 
-Bu deterministik kontroller desteksiz cevabı önemli ölçüde sınırlar; modelin her
-soru-cevap eşleştirmesinin anlamsal doğruluğuna ilişkin mutlak bir garanti değildir.
-Konuya uygun yeterli kaynak veya farklı doğrulanabilir kart üretilemezse hata döner;
-doğrulama gevşetilip uydurma kart kaydedilmez.
+Kavramın konu bağlantısı kaynak ifadesi, kavram kimliği/türü ve planın eşleşen
+kelimeleriyle izlenebilir. Doğal kart biçimi kaynakta açıkça doğrulanabilen
+kalıplarla sınırlıdır. Geçerli JSON veya sözcük örtüşmesi semantik doğruluk
+kanıtı olarak sunulmaz. Desteklenemeyen serbest cevap yayımlanmaz.
 
-## Kalıcılık ve devam
+## Kalıcılık, sıfır kart ve güvenli devam
 
-`CalismaKartiDestesi` ders başına tek kayıt tutar; konu grupları ve kart içerikleri
-gömülüdür. Kaynak sürümleri ve konu haritasından üretilen SHA-256 imza saklanır.
-Her konu denemesi, işlem token'ı koşuluyla atomik checkpoint olarak kaydedilir.
-Kısmi gruptaki geçerli kartlar yayımlanabilir; bozuk kartlar yayımlanmaz. Konu
-hedefe ulaşmadan tamamlanmış sayılmaz. **Eksik Konuları Tamamla** yalnızca eksik
-kart sayısını ister; mevcut kart kimlikleri ve çalışma/değerlendirme verileri korunur.
-Doğrulama hatasında bütçe içinde diğer konular denenir; 503/kota/ağ/JSON hatasında
-iş durur. Daha az denenmiş konulara öncelik verilir; tek başarısız konu diğerlerini aç bırakmaz.
+`CalismaKartiDestesi` kullanıcı+ders başına tek kayıttır. Konu planı ve kartlar,
+SHA-256 kaynak imzası ve işlem lease'iyle tutulur. Yeni alanlar opsiyoneldir;
+eski kart kimlikleri, kaynakları, yıldızları, görülme ve değerlendirmeleri korunur.
 
-Üretim POST'u işlem durumunu hızlıca döndürür; iş Node.js sürecinde devam eder.
-GET hiçbir zaman Gemini üretimi başlatmaz. Arayüz aktif işte 2,5 saniyede bir
-gerçek konu ilerlemesini okur; sahte yüzde yoktur. Okumalar ve yazmalar ders
-değişiminde iptal edilir; eski okuma çalışma durumu yazımını ezmez.
+Batch sonucu konu başına ayrı transaction/checkpoint ile kaydedilir. Sonraki
+konunun yazımı başarısızsa önceki checkpoint kalır. Devam, tamamlanan konuları ve
+kaynakta zaten kapsanan kavramları yeniden göndermez. Yeni kartlar eski kartlara
+eklenir; silip yeniden oluşturma veya veri migration'ı uygulanmaz.
 
-Veritabanı kilidi 30 saniyede bir yenilenir; 3 dakika yenilenmeyen iş kesilmiş
-sayılır. Sunucu yeniden başlatılırsa mevcut gruplar kalır ve kullanıcı devam
-düğmesiyle eksikleri başlatabilir. Hazır desteyi tekrar istemek yeni üretim yapmaz.
-Kalıcı harici iş kuyruğu eklenmedi; çalışan sunucunun kapanması aktif SDK çağrısını
-tamamlayamayabilir. İptal edilmiş bir sağlayıcı isteğinin ücretinin iptal edildiği
-garanti edilemez.
+Sıfır kart durumları ayrıdır: `ogrenilebilir_kavram_yok` ve zaten başka kartta
+kapsanan kavramlar başarıyla tamamlanabilir. `kaynak_yok`, `kanit_yetersiz`,
+üretim veya doğrulama hatası eksik kalır. Semantic fallback ayrıca gösterilir.
+Kavramsız hazır deste arayüzde açıklanır; tekrar üretim döngüsü başlatılmaz.
 
-Kaynak/harita sürümü değişirse eski kartlar otomatik silinmez veya sıfırlanmaz;
-güncel olmayan deste için güvenli 409 döner. Onay sonrası değişmezlik mevcut
-sistemce korunur. Eski kartları başka sürüme taşıyan bir veri göçü eklenmedi.
+Üretim POST'u hızlı döner, Node.js içindeki worker çalışır; arayüz 2,5 saniyelik
+GET polling ile gerçek ilerlemeyi okur. Kilit 30 saniyede yenilenir, 3 dakika
+kesilirse iş eksik olarak kapanır. Yeni SDK denemesi öncesinde ve başarıdan sonra
+sahiplik kontrol edilir. Kaynak imzası her checkpoint'te tekrar doğrulanır.
 
-## Veriler ve yetkilendirme
+Kaynak sürümü değişince eski kartlar **GET ile salt okunur** gösterilir. Üretim,
+yıldız, görülme ve değerlendirme yazımları 409 ile engellenir. Arayüzde eski
+kartlar çevrilebilir; bu durumda görülme isteği gönderilmez. Kaynakları yeni
+sürüme taşıyan otomatik bir işlem yoktur.
 
-| Model | İçerik / benzersizlik |
+Transaction'lar dersin `kartSurumu` üzerinden mevcut silme kilidiyle sıralanır;
+geç kalan yazım yetim kayıt oluşturamaz. Kalıcı harici iş kuyruğu eklenmedi.
+Süreç kapanırsa kaydedilmiş işler korunur; kullanıcı eksiklerden devam eder.
+
+## Gemini 503, model ve kota
+
+Bütün üretim özellikleri ve embedding aynı SDK deneme yöneticisini kullanır.
+İlk istek dahil en fazla 3 primary denemesi, ardından yalnız 503 için 1
+fallback mümkündür; varsayılan toplam 4 SDK denemesidir. Daha düşük özellik veya
+işlem bütçesi önceliklidir. Backoff+jitter, Retry-After/RetryInfo, SDK timeout,
+toplam süre (varsayılan 120 saniye), iptal ve lease kontrolü uygulanır.
+
+400/401/403/404 ve günlük kota kör retry/fallback başlatmaz. Geçersiz JSON veya
+kaynak aynı retry döngüsüne girmez. Yerel yoğunluk/RPM/TPM/RPD sağlayıcı 429'undan
+ayrı kodlarla raporlanır. Embedding model fallback'i yoktur; başarılı batch'ler,
+metin/model/boyut hash cache'i ve mevcut `gemini-embedding-001` / 768 kayıtları korunur.
+Ders hazırlamanın zorunlu embedding koşulu kaldırılmadı.
+
+Routing varsayılan kapalıdır. Eski `GEMINI_*_MODELI` ayarları çalışmaya devam eder.
+`*_PRIMARY_MODELI` ancak `GEMINI_DOGRULANMIS_MODELLER` içinde ise kullanılır.
+Fallback ayrıca pozitif, açık RPM/TPM/RPD profili gerektirir. Sıfır kota modeli
+kapatır. Yeni model erişimi bu geliştirmede canlı doğrulanmadı ve etkinleştirilmedi.
+
+Aynı modelin sohbet/özet/test/kart/harita çağrıları ortak bütçeyi paylaşır.
+Metin modeli varsayılanları 10 RPM / 175.000 TPM / 400 RPD; embedding varsayılanları
+60 / 20.000 / 700'dür. Bunlar yapılandırılabilir iç güvenlik sınırlarıdır,
+evrensel Google kotaları değildir. Anahtar sayısı bütçeyi çoğaltmaz.
+TPM girdi tokenıdır; tahmin çağrıdan önce ayrılır, `usageMetadata` ile mutabakat
+yapılır. Bilinmeyen başarısız çağrının tahmini tüketimi korunur. RPD Pacific gece
+yarısında yenilenir. Limiter **süreç içidir**; çoklu instance veya restart sonrası
+Google proje kotasını tam koruma garantisi vermez. Mevcut tek süreç için Redis eklenmedi.
+
+Kart işlem bütçesi (`GEMINI_KART_ISLEM_CAGRI_BUTCESI`, varsayılan 4) sorgu
+embedding'i, retry ve fallback'i kapsar; retrieval üretime en az bir deneme
+bırakır. Kullanıcı+ders 24 saatlik kalıcı bütçesi (`GEMINI_KART_DERS_GUNLUK_CAGRI_BUTCESI`,
+varsayılan 48) bundan ve Pacific RPD'den ayrıdır. İş başlangıcında hak ayrılır,
+normal bitişte kullanılmayan hak iade edilir; çökmede belirsiz hak tüketilmiş sayılır.
+Konuya yazılan SDK sayısı paylaşılan batch'e katılımı gösterir; konu sayaçları
+toplanarak gerçek toplam çağrı hesaplanmamalıdır. Destenin `sonIslemSdkCagrisi`
+ve ortak yöneticinin sayaçları gerçek SDK denemelerini sayar.
+
+Tüm ayarlar [`.env.example`](../.env.example) içindedir. Gerçek `.env` değiştirilmedi.
+Ham materyal, anahtar ve öğrenci içeriği loglanmaz; model, özellik, deneme, token
+ölçümünün tahmini/gerçek oluşu, süre ve güvenli hata/ret kodları kaydedilir.
+
+## API ve test
+
+Tüm uçlar oturum gerektirir; kullanıcı, ders, deste ve kart ilişkisini doğrular.
+
+| Metot / yol (`/dersler/:dersId/calisma-kartlari`) | İşlem |
 | --- | --- |
-| `CalismaKartiDestesi` | Kullanıcı+ders tekilliği, konu planı, kartlar, kaynaklar, üretim durumu ve lease |
-| `KartCalismaDurumu` | Kullanıcı+deste+kart tekilliği; ilk görülme, yıldız; gelecekteki algoritma için boş tekrar alanları |
-| `KartDegerlendirmesi` | Her değerlendirme için ayrı, değişmez kayıt; sunucu zamanı ve kullanıcı+istemci istek kimliği tekilliği |
-
-Tüm uçlar mevcut oturum middleware'inden geçer. Okuma/yazma işlemleri kullanıcı,
-ders ve ilgili kartın destede bulunmasıyla sınırlandırılır. İstemciden gönderilen
-kullanıcı kimliği, sahte değerlendirme zamanı veya tekrar tarihi kabul edilmez.
-
-Checkpoint ve çalışma durumu yazımları, mevcut sohbet akışına benzer MongoDB
-transaction'ları kullanır. Dersin `kartSurumu` alanına yapılan kısa yazım bunları
-ders silme kilidiyle sıralar. Silme başlamışsa geç gelen işlem yetim kayıt oluşturmaz.
-Mevcut ders silme/temizlik akışları üç yeni koleksiyonu da kapsar; bu geliştirme
-sırasında gerçek kullanıcı verisi silinmedi veya sıfırlanmadı.
-
-## API
-
-Tüm yollar `/dersler/:dersId/calisma-kartlari` altında ve oturum gerektirir.
-
-| Metot / yol | İşlem |
-| --- | --- |
-| `GET /` | Kayıtlı kartlar, gerçek istatistikler, konular ve üretim durumu |
-| `POST /olustur` | Boş gövdeyle başlat/devam et; aktifte 202, hazırda 200 |
+| `GET /` | Kayıtlı kartlar, istatistikler, konu ve retrieval durumu; üretim yapmaz |
+| `POST /olustur` | Boş gövde ile başlat/devam; aktif ikinci POST aynı işi döndürür |
 | `PATCH /:kartId/durum` | `{goruldu:true}` ve/veya `{yildizli:boolean}` |
-| `POST /:kartId/degerlendirmeler` | `{degerlendirme, istemciIstekId}`; cevap önce açılmış olmalı |
+| `POST /:kartId/degerlendirmeler` | `{degerlendirme, istemciIstekId}`; cevap önceden açılmış olmalı |
 
-Aktif üretimde ikinci POST aynı işlemi döndürür. Ders başına veritabanı kilidi
-birden fazla backend sürecini de kapsar; ortak Gemini ani yük sınırı önceki
-altyapıdaki gibi süreç içidir ve dağıtık Google proje kotası garantisi değildir.
-Ham SDK hatası/log gövdesi kullanıcıya aktarılmaz.
+Backend `npm test` bir ön yükleyiciyle gerçek fetch/TCP/MongoDB bağlantısını
+engeller, sahte anahtar ve mock SDK kullanır. Frontend birim testleri, lint/build
+ve kurulu başsız Chromium testi bulunur. Tarayıcıda API'ler sentetik yanıtlanır,
+harici HTTPS engellenir, HMR/dosya izleme kapalıdır. Doğal/eski kart, gerçek
+Enter/Space, filtreler, kısmi devam, salt okunur ve kavramsız hazır durumları test edilir.
 
-## Yapılandırma ve doğrulama
+Mock karşılaştırma: [ölçümler](V2_PLUS_MOCK_KARSILASTIRMA.json).
+Komut: `node --import ./tests/helpers/guvenliTestOrtami.js scripts/kartV2MockKarsilastirma.js`.
+Aynı 9 kavramda tek konulu 3 çağrı/2.343 tahmini girdi tokenına karşı batch
+1 çağrı/1.225 tahmini token, aynı 9 geçerli kart üretir. Bunlar gerçek sağlayıcı
+tokenı, kalite veya süre ölçümü değildir.
 
-`GEMINI_KART_MODELI` boşsa mevcut varsayılan Gemini modeli kullanılır.
-`GEMINI_KART_MAKS_DENEME` varsayılan 3; izin verilen aralık 1–5 toplam SDK denemesidir.
-`GEMINI_KART_ISLEM_CAGRI_BUTCESI` varsayılan 4 (1–12), retry dahil işlem toplamıdır.
-`GEMINI_KART_DERS_GUNLUK_CAGRI_BUTCESI` varsayılan 48 (1–200), kullanıcı+ders için
-ilk hak ayrımından başlayan 24 saatlik kalıcı sınırdır. İş başlangıcında hak atomik
-ayrılır; normal bitişte kullanılmayan hak iade edilir. Süreç çökerse bilinmeyen
-ayrılmış çağrılar güvenlik için tüketilmiş sayılır. Pencere bitince yeni işlemde
-yenilenir. Bütçe sınırında otomatik yeni POST yoktur; kullanıcı devam eder.
-Konu başına toplam/son SDK sayısı ve deste başına son işlem sayısı ayrıca saklanır.
-Bu sınırlar Google projesindeki diğer özelliklerin kotası değildir; salt okunur
-tanılamanın ayrıca kendi tek çağrılık koruması ve açık onay şartı vardır.
-Yeni bağımlılık yoktur. Yeni modellerin bileşik benzersiz indekslerinin oluşturulması
-ve mevcut sohbetin de gerektirdiği MongoDB transaction desteği dağıtımda doğrulanmalıdır.
+Canlı test için hazırlanan `scripts/calismaKartiSaltOkunurTani.js` ilk eksik
+konunun ilk sınırlı V2+ batch'ini seçer. Varsayılan yalnız MongoDB okur;
+`--gemini` ayrıca açık kullanıcı izni gerektirir: en fazla 1 SDK çağrısı,
+retry/fallback yok, embedding yok, MongoDB yazımı yok. Bu oturumda çalıştırılmadı.
+Gerçek model erişimi ve MongoDB kabul testi mock başarısından ayrı onaylanmalıdır.
 
-Backend ve frontend testleri gerçek Gemini çağrısı olmadan çalıştırılır.
-`frontend/tests/calismaKartlari.browser.mjs` kurulu Chromium ve mevcut Vite ile
-gerçek React etkileşimlerini kontrol eder; tüm API yanıtları sentetiktir ve
-harici sayfa istekleri engellenir. Tarayıcı yolu gerekirse `STUDYAI_TEST_BROWSER`
-ile belirtilir. Test üretim, çevirme, yeni kartın soru yüzü, yıldız, değerlendirme,
-yenilemede tekrar üretmeme ve mobil taşma/konu panelini kapsar.
+## Tarihsel V1/V2 sonuçları — V2+ kabulü değildir
 
-Gerçek sağlayıcı kalitesi, gerçek MongoDB üzerinde çoklu instance/yük ve dağıtım
-indeksleri bu mock testlerin yerine geçmez. Otomatik testler gerçek sağlayıcıya
-çağrı yapmaz. Ayrı, kullanıcı onaylı tek canlı tanılama sonucu aşağıdadır.
-
-Son doğrulama: backend **437/437**, frontend **106/106** test başarılı. Frontend lint
-ve build, backend JavaScript sözdizimi ve `git diff --check` başarılı. Masaüstü
-koyu tema ve 390 px mobil açık tema Chromium senaryosu başarılıdır.
-Backend paketinde ayrı lint/build script'i yoktur. Son build başarılıdır; JS parçası
-587,59 kB'dir. Build 500 kB parça boyutu uyarısı verir; hata değildir.
-
-## Değişen dosyalar
-
-- Backend: `models/CalismaKartiDestesi.js`, `models/KartCalismaDurumu.js`,
-  `models/KartDegerlendirmesi.js`, `services/calismaKartlariService.js`,
-  `utils/calismaKartiDogrulama.js`, `controllers/calismaKartlariController.js`,
-  `routes/calismaKartlariRoutes.js`.
-- Backend bağlantıları: `models/Ders.js`, `services/geminiService.js`, `server.js`,
-  `controllers/dersController.js`, `services/geciciDersTemizlemeService.js`, `.env.example`.
-- Frontend: `pages/DersCalismaKartlari.jsx`, `pages/DersCalismaKartlari.css`,
-  `services/calismaKartlariApi.mjs`, `utils/calismaKartlariYardimcilari.mjs`,
-  `utils/kullaniciHatasi.mjs`.
-- Testler: backend `calismaKartlari.test.js`, `geminiCalismaKartlari.test.js`;
-  frontend `calismaKartlari.test.mjs`, `calismaKartlari.browser.mjs`.
-  Eski `dersHazirlama.test.js`, `dersSil.test.js`, `geciciDersTemizleme.test.js`
-  düzenekleri yeni koleksiyonları da mock edecek şekilde genişletildi.
-- Bu kullanım ve uygulama belgesi: `backend/docs/CALISMA_KARTLARI.md`.
+Önceki V2 doğrulaması 437/437 backend, 106/106 frontend testiydi. Aşağıdaki gerçek
+ders incelemesi ve canlı denemeler önceki görevlerin kayıtlarıdır; V2+ sırasında
+tekrarlanmadı. Güncel sonuçlar V2+ uygulama kaydındadır.
 
 ## 422 kaynak bağlantısı düzeltmesi
 

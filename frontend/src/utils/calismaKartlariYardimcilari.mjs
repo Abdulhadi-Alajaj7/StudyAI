@@ -28,3 +28,14 @@ export const kartKonulariniGrupla = konular => {
 };
 // Filtreye artık uymasa bile açık kart, kullanıcı ilerleyene kadar ekranda kalır.
 export const acikKartiKoru = (liste, aktifKart) => aktifKart && !liste.some(k => k._id === aktifKart._id) ? [aktifKart, ...liste] : liste;
+
+export const kartKonuDurumMesaji = konu => {
+    if (konu.tamamlandi && !konu.kartSayisi) return konu.sifirKartNedeni === "kavramlar_zaten_kapsandi"
+        ? "Bu konunun kavramları mevcut kartlarda yer alıyor." : "Kaynaklarda ayrı kart gerektiren bir öğrenme ifadesi belirlenmedi.";
+    if (konu.sifirKartNedeni === "kaynak_yok") return "Konuya uygun kaynak bulunamadı.";
+    if (konu.sifirKartNedeni === "kanit_yetersiz") return "Kaynakta doğrulanabilir kısa kanıt bulunamadı.";
+    if (konu.sifirKartNedeni === "uretim_basarisiz") return "Üretim tamamlanamadı; yeniden denenebilir.";
+    if (konu.sifirKartNedeni === "dogrulama_basarisiz") return "Üretilen kartların kaynak doğrulaması başarısız oldu.";
+    if (konu.tamamlandi) return `${konu.kartSayisi} kart hazır.`;
+    return `${konu.kartSayisi || 0} kart hazır${konu.eksikKartSayisi ? `; ${konu.eksikKartSayisi} kavram bekliyor` : "; konu işlenmeyi bekliyor"}.`;
+};

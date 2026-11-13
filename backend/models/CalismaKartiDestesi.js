@@ -18,6 +18,7 @@ const kaynakSchema = new mongoose.Schema({
     alinti: { type: String, required: true, maxlength: 1600 },
     // Eski kartlarda bulunması zorunlu değildir; yeni kartta gerçek parça aralıklarıdır.
     kanitBaslangic: Number, kanitBitis: Number, cevapBaslangic: Number, cevapBitis: Number,
+    metinParcasiId: { type: mongoose.Schema.Types.ObjectId, ref: "MetinParcasi" },
 }, { _id: false });
 
 const kartSchema = new mongoose.Schema({
@@ -25,13 +26,22 @@ const kartSchema = new mongoose.Schema({
     soru: { type: String, required: true, trim: true, maxlength: 400 },
     cevap: { type: String, required: true, trim: true, maxlength: 800 },
     kaynak: { type: kaynakSchema, required: true },
+    tur: { type: String, enum: ["soru_cevap", "bosluk_doldurma"] },
+    kavramId: { type: String, maxlength: 24 },
+    kavramTuru: { type: String, maxlength: 40 },
 });
 const konuSchema = new mongoose.Schema({
     konuId: { type: String, required: true, maxlength: 200 },
     anaKonuId: { type: String, required: true, maxlength: 200 },
     baslik: { type: String, required: true, maxlength: 500 },
     anaBaslik: { type: String, required: true, maxlength: 500 },
-    hedefKartSayisi: { type: Number, required: true, min: 1, max: 4 },
+    hedefKartSayisi: { type: Number, required: true, min: 0 },
+    kavramSayisi: { type: Number, min: 0 },
+    sifirKartNedeni: { type: String, default: "", maxlength: 60 },
+    retrievalYontemi: { type: String, enum: ["keyword", "hybrid", "keyword_fallback"] },
+    retrievalHataKodu: { type: String, maxlength: 80 },
+    kullanilanModel: { type: String, maxlength: 120 },
+    planSurumu: Number,
     tamamlandi: { type: Boolean, default: false },
     kartlar: { type: [kartSchema], default: [] },
     denemeSayisi: { type: Number, default: 0, min: 0 },

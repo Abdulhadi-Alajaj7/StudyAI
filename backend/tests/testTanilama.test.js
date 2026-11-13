@@ -412,7 +412,8 @@ test("başarılı üretimin soru çıktısı ve token davranışı değişmez", 
     assert.equal(sonuc.sorular[0].metin, hamSoru.metin);
     assert.deepEqual(sonuc.tokenKullanimi, { girdi: 10, cikti: 20, toplam: 30 });
     assert.equal(sonuc.model, "gemini-3.5-flash-lite");
-    assert.deepEqual(Object.keys(sonuc).sort(), ["model", "sorular", "tokenKullanimi"]);
+    assert.deepEqual(sonuc.kullanilanModeller, ["gemini-3.5-flash-lite"]);
+    assert.deepEqual(Object.keys(sonuc).sort(), ["kullanilanModeller", "model", "sorular", "tokenKullanimi"]);
 });
 
 test("tanılama kaydı yalnızca beyaz listedeki metadata alanlarını yazar", () => {

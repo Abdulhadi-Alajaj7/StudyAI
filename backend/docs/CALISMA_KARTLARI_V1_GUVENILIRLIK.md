@@ -1,5 +1,7 @@
 # Çalışma Kartları V1 güvenilirlik denetimi
 
+> Tarihsel V1/V2 kaydıdır. Aşağıdaki canlı çağrı önceki göreve aittir. 13 Kasım V2+ geliştirmesinde gerçek Gemini/Embedding çağrısı ve MongoDB yazımı yapılmadı. Güncel kod, test ve izin sınırı için [V2+ uygulama kaydı](V2_PLUS_UYGULAMA_NOTLARI.md).
+
 12 Kasım 2026. Bu rapor kod/mock/tarayıcı doğrulamasını gerçek üretimden ayırır.
 Bu geliştirme turunda onaylı tek gerçek Gemini çağrısı yapıldı; gerçek veritabanı yazımı yoktur. Canlı sonuç ve sonrasındaki çevrimdışı düzeltme aşağıda ayrılmıştır.
 

@@ -8,6 +8,9 @@ const ortusme = (sol, sag) => [...sol].filter(k => [...sag].some(s => s === k ||
 
 export const kartlarBenzerMi = (sol, sag) => {
     if (kartMetniniNormalizeEt(sol.soru) === kartMetniniNormalizeEt(sag.soru)) return true;
+    // Ortak cevap, farklı konulardaki ayrı öğrenme hedeflerini tek başına
+    // birleştiremez. Tam soru ve özgün kanıt tekrarları ayrıca denetlenir.
+    if (sol.konuId && sag.konuId && sol.konuId !== sag.konuId) return false;
     // Ortak soru kalıbı farklı kavramları tek başına tekrar yapmaz (LIFO/FIFO).
     // Aynı soru yine reddedilir; yaklaşık soru eşleşmesi aynı cevabı da gerektirir.
     if (kartMetniniNormalizeEt(sol.cevap) !== kartMetniniNormalizeEt(sag.cevap)) return false;

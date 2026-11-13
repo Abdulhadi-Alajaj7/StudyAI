@@ -88,7 +88,7 @@ test("günlük kota tekrar edilmez; kaynak, kanıt veya hak yoksa SDK çağrılm
         sayi++; throw Object.assign(new Error(JSON.stringify({ error: { code: 429, message: "RequestsPerDay quota" } })), { status: 429 });
     } } } }), h => h.kod === "GEMINI_GUNLUK_KOTA");
     assert.equal(sayi, 1);
-    for (const g of [{ ...girdi, kartSayisi: 5 }, { ...girdi, kaynaklar: [] },
+    for (const g of [{ ...girdi, kartSayisi: 31 }, { ...girdi, kaynaklar: [] },
         { ...girdi, kaynaklar: [{ ...kaynak, icerik: " " }] }, { ...girdi, apiCagriButcesi: { maksimum: 1, kullanilan: 1 } }]) {
         await assert.rejects(uret(null, {}, g), h => [422, 429].includes(h.status));
     }
