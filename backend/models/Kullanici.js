@@ -30,6 +30,14 @@ const kullaniciSchema = new mongoose.Schema(
             type: String,
             default: null,
         },
+        // Varsayılan yok: sp3 ve öncesindeki hesaplar geriye uyumlu kalır.
+        emailDogrulandi: { type: Boolean, default: undefined },
+        emailDogrulamaZorunluKayit: { type: Boolean, default: undefined, select: false },
+        kayitDogrulamaTokenHash: { type: String, select: false },
+        kayitDogrulamaSonTarih: { type: Date, select: false },
+        kayitDogrulamaSonIstek: { type: Date, select: false },
+        hesapTemizlemeToken: { type: mongoose.Schema.Types.ObjectId, select: false },
+        hesapTemizlemeSonTarih: { type: Date, select: false },
         oturumSurumu: { type: Number, default: 0, select: false, min: 0 },
         sifirlamaTokenHash: { type: String, select: false },
         sifirlamaSonTarih: { type: Date, select: false },
@@ -64,6 +72,8 @@ kullaniciSchema.methods.sifreEslesiyorMu = async function (girilenSifre) {
 };
 
 kullaniciSchema.index({ sifirlamaTokenHash: 1 }, { sparse: true });
+kullaniciSchema.index({ kayitDogrulamaTokenHash: 1 }, { sparse: true });
+kullaniciSchema.index({ emailDogrulamaZorunluKayit: 1, emailDogrulandi: 1, kayitDogrulamaSonTarih: 1 });
 const Kullanici = mongoose.model("Kullanici", kullaniciSchema);
 
 export default Kullanici;

@@ -9,6 +9,7 @@ import { sifreSifirlamaEpostasi } from "../../backend/services/epostaSablonlari.
 
 const root = resolve(process.cwd()), alan = await mkdtemp(join(root, ".auth-browser-"));
 let browser, vite, ws, kapali = false, oturum = true, sifreSayisi = 0, resetSayisi = 0, forgotSayisi = 0, emailSayisi = 0;
+let kayitSayisi = 0, kayitDogrulamaSayisi = 0, yenidenSayisi = 0, hesapDogrulandi = true;
 const kullanici = { id: "111111111111111111111111", kullaniciAdi: "Ahmet Yılmaz", email: "ahmet@example.test" };
 const hatalar = [], gecik = ms => new Promise(r => setTimeout(r, ms));
 try {
@@ -19,7 +20,7 @@ try {
     assert.ok(chrome, "Kurulu Chromium bulunamadı.");
     await writeFile(join(alan, "fixture.html"), `<!doctype html><html lang="tr"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><div id="root"></div><script type="module">
 import React from 'react';import {createRoot} from 'react-dom/client';import App from '/src/App.jsx';import '/src/index.css';
-const q=new URLSearchParams(location.search);localStorage.setItem('studyai-theme',q.get('theme')||'dark');history.replaceState(null,'',q.get('path')||'/panel/profil');createRoot(document.getElementById('root')).render(React.createElement(App));
+const q=new URLSearchParams(location.search);localStorage.setItem('studyai-theme',q.get('theme')||'dark');history.replaceState(null,'',q.get('path')||'/panel/profil');createRoot(document.getElementById('root')).render(React.createElement(React.StrictMode,null,React.createElement(App)));
 </script></html>`);
     await writeFile(join(alan, "email.html"), sifreSifirlamaEpostasi(`https://studyai.example.test/reset-password/${"a".repeat(64)}`).html);
     vite = await createServer({ server: { host: "127.0.0.1", port: 0, hmr: false, watch: null }, logLevel: "error" }); await vite.listen();
@@ -63,7 +64,15 @@ const q=new URLSearchParams(location.search);localStorage.setItem('studyai-theme
             } else if (u.pathname === "/auth/email-change/verify") {
                 emailSayisi++; if (body.token === "b".repeat(64)) { status = 400; data = { kod: "EMAIL_BAGLANTISI_GECERSIZ" }; }
                 else { kullanici.email = kullanici.bekleyenEmail || "yeni@example.test"; delete kullanici.bekleyenEmail; data = { kullanici }; }
-            } else if (u.pathname === "/auth/giris") { oturum = true; data = { kullanici }; }
+            } else if (u.pathname === "/auth/kayit") { kayitSayisi++; hesapDogrulandi = false; oturum = false; status = 201; data = { epostaGonderildi: true, mesaj: "Hesabınızı aktifleştirmek için e-posta adresinize gönderilen doğrulama bağlantısına tıklayın." }; }
+            else if (u.pathname === "/auth/verify-email") { kayitDogrulamaSayisi++;
+                if (hesapDogrulandi || body.token === "b".repeat(64)) { status = 400; data = { kod: "KAYIT_DOGRULAMA_GECERSIZ" }; }
+                else { hesapDogrulandi = true; data = { basarili: true }; }
+            } else if (u.pathname === "/auth/resend-verification") { yenidenSayisi++; data = { mesaj: "Hesabınız doğrulama bekliyorsa yeni bağlantı gönderilecektir." }; }
+            else if (u.pathname === "/auth/giris") {
+                if (!hesapDogrulandi) { status = 403; data = { kod: "EMAIL_DOGRULAMA_GEREKLI" }; }
+                else { oturum = true; data = { kullanici }; }
+            }
             else if (u.pathname === "/auth/cikis") { oturum = false; data = { basarili: true }; }
             else throw new Error(`Beklenmeyen auth rotası: ${u.pathname}`);
             await send("Fetch.fulfillRequest", { requestId, responseCode: status, responseHeaders: [
@@ -128,6 +137,16 @@ const q=new URLSearchParams(location.search);localStorage.setItem('studyai-theme
     await cdp("Emulation.setDeviceMetricsOverride", { width: 360, height: 844, deviceScaleFactor: 1, mobile: true });
     await ac(`/reset-password/${"a".repeat(64)}`); await bekle("document.getElementById('yeniSifre')");
     assert.ok(await evaluate("document.documentElement.scrollWidth<=innerWidth"));
+    await ac("/kayit"); await bekle("document.getElementById('kullaniciAdi')");
+    await doldur("kullaniciAdi", "Yeni Öğrenci"); await doldur("email", "kayit@example.test"); await doldur("sifre", "Guvenli123!"); await doldur("sifreTekrar", "Guvenli123!"); await tikla("Hesap Oluştur");
+    await bekle("document.body.innerText.includes('Hesabınızı aktifleştirmek için')"); assert.equal(oturum, false); assert.equal(kayitSayisi, 1);
+    await tikla("Doğrulama Bağlantısını Yeniden Gönder"); await bekle("document.querySelector('[role=status]')"); assert.equal(yenidenSayisi, 1);
+    await ac("/"); await bekle("document.getElementById('sifre')"); await doldur("email", "kayit@example.test"); await doldur("sifre", "Guvenli123!"); await tikla("Giriş Yap");
+    await bekle("document.body.innerText.includes('Doğrulama bağlantısı iste')"); assert.equal(oturum, false);
+    await ac(`/hesap-dogrula/${"a".repeat(64)}`); await bekle("document.body.innerText.includes('E-posta adresiniz doğrulandı. Yeni hesabınızla giriş yapabilirsiniz.')");
+    assert.equal(kayitDogrulamaSayisi, 1, "StrictMode tek token'ı iki kez tüketmemeli"); assert.equal(oturum, false, "Doğrulama otomatik oturum açmamalı");
+    await doldur("email", "kayit@example.test"); await doldur("sifre", "Guvenli123!"); await tikla("Giriş Yap"); await bekle("location.pathname==='/panel'"); assert.equal(oturum, true);
+    await ac(`/hesap-dogrula/${"b".repeat(64)}`); await bekle("document.body.innerText.includes('Bağlantı geçersiz, kullanılmış veya süresi dolmuş')");
     await cdp("Page.navigate", { url: `${origin}/${basename(alan)}/email.html` }); await bekle("document.querySelector('a')?.textContent==='Şifremi Sıfırla'");
     assert.ok(await evaluate("document.documentElement.scrollWidth<=innerWidth"), "Mobil e-posta taşmamalı");
     const emailMobil = join(tmpdir(), "studyai-reset-email-mobile.png");
@@ -136,7 +155,7 @@ const q=new URLSearchParams(location.search);localStorage.setItem('studyai-theme
     const emailDesktop = join(tmpdir(), "studyai-reset-email-desktop.png");
     await writeFile(emailDesktop, Buffer.from((await cdp("Page.captureScreenshot", { format: "png" })).data, "base64"));
     assert.deepEqual(hatalar, []);
-    console.log(JSON.stringify({ sonuc: "başarılı", sifreSayisi, resetSayisi, forgotSayisi, emailSayisi, masaustu, mobil, forgotMobil, forgotDesktop, resetDesktop, emailMobil, emailDesktop }));
+    console.log(JSON.stringify({ sonuc: "başarılı", kayitSayisi, kayitDogrulamaSayisi, yenidenSayisi, sifreSayisi, resetSayisi, forgotSayisi, emailSayisi, masaustu, mobil, forgotMobil, forgotDesktop, resetDesktop, emailMobil, emailDesktop }));
 } finally {
     kapali = true;
     if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ id: 999999, method: "Browser.close" }));

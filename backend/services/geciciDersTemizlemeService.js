@@ -7,6 +7,7 @@ import Sohbet from "../models/Sohbet.js";
 import Mesaj from "../models/Mesaj.js";
 import DersOzeti from "../models/DersOzeti.js";
 import Test from "../models/Test.js";
+import Kullanici from "../models/Kullanici.js";
 import { guvenliDosyaSil } from "../utils/dosyaIslemleri.js";
 
 const BIR_SAAT = 60 * 60 * 1000;
@@ -284,4 +285,55 @@ export const geciciDersleriTemizle = async (secenekler = {}) => {
     } finally {
         temizlikCalisiyor = false;
     }
+};
+
+let hesapTemizligiCalisiyor = false;
+
+// Ders temizliğinin seçim/lease kurallarından bağımsız; aynı mevcut zamanlayıcı çağırır.
+export const dogrulanmamisHesaplariTemizle = async ({ KullaniciModel = Kullanici,
+    bagliModeller = [Ders, Materyal, MetinParcasi, KonuHaritasi, Sohbet, Mesaj, DersOzeti, Test],
+    simdi = Date.now, logger = console } = {}) => {
+    if (hesapTemizligiCalisiyor) return { temizlenenHesapSayisi: 0 };
+    hesapTemizligiCalisiyor = true;
+    let temizlenenHesapSayisi = 0;
+    try {
+        const zaman = simdi();
+        const temel = { emailDogrulamaZorunluKayit: true, emailDogrulandi: false,
+            createdAt: { $lte: new Date(zaman - BIR_SAAT) }, kayitDogrulamaSonTarih: { $lte: new Date(zaman) } };
+        const adaylar = await KullaniciModel.find({ ...temel, $or: [
+            { hesapTemizlemeToken: { $exists: false } }, { hesapTemizlemeSonTarih: { $lte: new Date(zaman) } },
+        ] }).select("_id").sort({ createdAt: 1 }).limit(TEMIZLIK_LIMITI).lean();
+        for (const aday of adaylar) {
+            const token = new mongoose.Types.ObjectId();
+            const sahiplik = { _id: aday._id, ...temel, hesapTemizlemeToken: token };
+            try {
+                const kilit = await KullaniciModel.findOneAndUpdate({ _id: aday._id, ...temel, $or: [
+                    { hesapTemizlemeToken: { $exists: false } }, { hesapTemizlemeSonTarih: { $lte: new Date(zaman) } },
+                ] }, { $set: { hesapTemizlemeToken: token, hesapTemizlemeSonTarih: new Date(zaman + TEMIZLIK_LEASE_SURESI) } }, { new: true });
+                if (!kilit) continue;
+                // Doğrulanmamış hesap korumalı API'lere erişemez. Kilit doğrulamayı da
+                // engeller; ilişkili veri varsa hesap ve bütün verileri korunur.
+                const iliskiler = await Promise.all(bagliModeller.map(Model => Model.exists({ kullaniciId: aday._id })));
+                if (iliskiler.some(Boolean)) {
+                    logger.warn("[HesapTemizligi] ILISKILI_VERI_NEDENIYLE_KORUNDU");
+                    continue;
+                }
+                const sonuc = await KullaniciModel.deleteOne(sahiplik);
+                temizlenenHesapSayisi += sonuc.deletedCount || 0;
+            } catch {
+                logger.error("[HesapTemizligi] HESAP_TEMIZLENEMEDI");
+            } finally {
+                // Başka çalışanın aldığı lease veya doğrulanmış hesap değiştirilemez.
+                await KullaniciModel.updateOne(sahiplik, { $unset: { hesapTemizlemeToken: 1, hesapTemizlemeSonTarih: 1 } })
+                    .catch(() => {});
+            }
+        }
+    } catch { logger.error("[HesapTemizligi] TARAMA_TAMAMLANAMADI"); }
+    finally { hesapTemizligiCalisiyor = false; }
+    return { temizlenenHesapSayisi };
+};
+
+export const zamanlanmisTemizlikleriCalistir = async () => {
+    await geciciDersleriTemizle();
+    await dogrulanmamisHesaplariTemizle();
 };

@@ -9,7 +9,7 @@ import {
     profilGetir,
     profilGuncelle,
     sifreDegistir,
-    cikisYap, sifremiUnuttum, sifreSifirla, emailDegisiminiDogrula
+    cikisYap, sifremiUnuttum, sifreSifirla, emailDegisiminiDogrula, kayitEmailiniDogrula, kayitEmailiniYenidenGonder
 } from "../controllers/authControllers.js";
 
 import kimlikDogrula from "../middleware/auth.js";
@@ -61,6 +61,11 @@ router.post("/kayit", authOriginKontrolu, authIstekSiniri({ kapsam: "kayit", mak
 router.post("/giris", authOriginKontrolu, authIstekSiniri({ kapsam: "giris", maksimum: 30 }), girisDogrulama, girdiyiKontrolEt, girisYap);
 
 router.post("/cikis", authOriginKontrolu, cikisYap);
+router.post("/verify-email", authOriginKontrolu, authIstekSiniri({ kapsam: "kayit-dogrula", maksimum: 20 }),
+    body("token").isString().withMessage("Doğrulama bağlantısı geçersiz.").bail().matches(/^[a-f0-9]{64}$/).withMessage("Doğrulama bağlantısı geçersiz."),
+    girdiyiKontrolEt, kayitEmailiniDogrula);
+router.post("/resend-verification", authOriginKontrolu, authIstekSiniri({ kapsam: "kayit-yeniden-ip", maksimum: 10 }),
+    emailDogrula(), girdiyiKontrolEt, authIstekSiniri({ kapsam: "kayit-yeniden-email", maksimum: 5, email: true }), kayitEmailiniYenidenGonder);
 router.post("/forgot-password", authOriginKontrolu,
     authIstekSiniri({ kapsam: "sifirlama-ip", maksimum: 10 }), emailDogrula(), girdiyiKontrolEt,
     authIstekSiniri({ kapsam: "sifirlama-email", maksimum: 5, email: true }), sifremiUnuttum);

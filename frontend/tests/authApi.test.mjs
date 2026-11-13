@@ -22,3 +22,12 @@ test("yanlış mevcut şifre, süresi dolmuş link ve SMTP ayarı için doğru T
     assert.match(m("SIFIRLAMA_BAGLANTISI_GECERSIZ", 400), /süresi dolmuş/);
     assert.match(m("EPOSTA_YAPILANDIRMA", 503), /E-posta servisi/);
 });
+
+test("hesap doğrulaması ve yeniden gönderim oturum gerektirmeyen ayrı endpoint'leri kullanır", async () => {
+    const cagrilar = []; const client = { post: async (...a) => { cagrilar.push(a); return { data: {} }; } };
+    const a = authApiOlustur(client), signal = new AbortController().signal;
+    await a.kayitDogrula("token", signal); await a.kayitYenidenGonder("a@b.test", signal);
+    assert.equal(cagrilar[0][0], "/auth/verify-email"); assert.deepEqual(cagrilar[0][1], { token: "token" });
+    assert.equal(cagrilar[1][0], "/auth/resend-verification"); assert.deepEqual(cagrilar[1][1], { email: "a@b.test" });
+    assert.ok(cagrilar.every(c => c[2].signal === signal));
+});

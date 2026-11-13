@@ -13,7 +13,7 @@ import sohbetRoutes from "./routes/sohbetRoutes.js";
 import dersOzetiRoutes from "./routes/dersOzetiRoutes.js";
 import testRoutes from "./routes/testRoutes.js";
 
-import { geciciDersleriTemizle } from "./services/geciciDersTemizlemeService.js";
+import { zamanlanmisTemizlikleriCalistir } from "./services/geciciDersTemizlemeService.js";
 import { baslangicIslemleriniKurtar } from "./services/baslangicKurtarmaService.js";
 import { kullanilmayanMetinParcalariniTemizle } from "./services/metinParcasiTemizlemeService.js";
 import { yarimKalanBaslikUretimleriniKapat } from "./services/dersAsistaniService.js";
@@ -64,10 +64,10 @@ const sunucuyuBaslat = async () => {
         return;
     }
 
-    await geciciDersleriTemizle();
+    await zamanlanmisTemizlikleriCalistir();
 
     setInterval(() => {
-        void geciciDersleriTemizle();
+        void zamanlanmisTemizlikleriCalistir();
     }, 10 * 60 * 1000);
 
     app.listen(PORT, () => {

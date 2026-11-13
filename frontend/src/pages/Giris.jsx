@@ -27,6 +27,7 @@ function Giris() {
     });
 
     const [hata, setHata] = useState("");
+    const [dogrulamaGerekli, setDogrulamaGerekli] = useState(false);
     const [yukleniyor, setYukleniyor] = useState(false);
 
     const inputDegistir = (e) => {
@@ -41,6 +42,7 @@ function Giris() {
     const girisYap = async (e) => {
         e.preventDefault();
         setHata("");
+        setDogrulamaGerekli(false);
 
         try {
             setYukleniyor(true);
@@ -66,6 +68,7 @@ function Giris() {
 
             navigate(guvenliDonusYolu(location.state?.donusYolu), { replace: true });
         } catch (error) {
+            setDogrulamaGerekli(error.response?.data?.kod === "EMAIL_DOGRULAMA_GEREKLI");
             setHata(
                 error.response?.data?.hata ||
                 error.response?.data?.mesaj ||
@@ -386,6 +389,8 @@ function Giris() {
                                 </div>
                             )}
 
+                            {dogrulamaGerekli && <Link to="/dogrulama-bekleniyor" state={{ email: formData.email }} className="block text-sm font-semibold text-blue-600 underline">Doğrulama bağlantısı iste</Link>}
+                            {location.state?.hesapDogrulandi && <p role="status" className="rounded-[10px] border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">E-posta adresiniz doğrulandı. Yeni hesabınızla giriş yapabilirsiniz.</p>}
                             {/* GİRİŞ BUTTON */}
                             <button
                                 type="submit"

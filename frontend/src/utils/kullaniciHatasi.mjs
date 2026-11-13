@@ -7,6 +7,8 @@ const teknikMesajCevirileri = [
 
 // Yalnızca sabit mesajlar: sağlayıcının teknik hata gövdesini ekrana taşıma.
 const guvenliKodMesajlari = new Map([
+    ["EMAIL_DOGRULAMA_GEREKLI", "Giriş yapmadan önce e-posta adresinizi doğrulayın."],
+    ["KAYIT_DOGRULAMA_GECERSIZ", "Doğrulama bağlantısı geçersiz, kullanılmış veya süresi dolmuş. Yeni bağlantı isteyin veya yeniden kayıt olun."],
     ["MEVCUT_SIFRE_HATALI", "Mevcut şifreniz hatalı. Lütfen kontrol edin."],
     ["AUTH_YENIDEN_GIRIS", "E-posta değişikliği için yeniden giriş yapın."],
     ["AUTH_ISTEK_SINIRI", "Çok fazla istek gönderdiniz. Lütfen daha sonra tekrar deneyin."],

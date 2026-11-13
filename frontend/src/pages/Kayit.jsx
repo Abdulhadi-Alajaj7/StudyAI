@@ -50,15 +50,16 @@ function Kayit() {
         try {
             setYukleniyor(true);
 
-            await api.post("/auth/kayit", {
+            const yanit = await api.post("/auth/kayit", {
                 kullaniciAdi: formData.kullaniciAdi,
                 email: formData.email,
                 sifre: formData.sifre,
             });
 
-            navigate("/");
+            navigate("/dogrulama-bekleniyor", { replace: true, state: { email: formData.email, epostaGonderildi: yanit.data.epostaGonderildi } });
         } catch (error) {
             setHata(
+                error.response?.data?.hata ||
                 error.response?.data?.mesaj ||
                 error.response?.data?.message ||
                 "Kayıt sırasında bir hata oluştu."

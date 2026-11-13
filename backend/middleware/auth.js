@@ -31,6 +31,8 @@ const kimlikDogrula = async (req, res, next) => {
                 hata: "Yetkilendirme başarısız, kullanıcı bulunamadı",
             });
         }
+        if (kullanici.emailDogrulandi === false) return res.status(403).json({ kod: "EMAIL_DOGRULAMA_GEREKLI",
+            hata: "Bu işlem için önce e-posta adresinizi doğrulayın." });
 
         const surum = cozulmusToken.oturumSurumu ?? 0;
         if (!Number.isSafeInteger(surum) || surum < 0 || surum !== (kullanici.oturumSurumu ?? 0)) {

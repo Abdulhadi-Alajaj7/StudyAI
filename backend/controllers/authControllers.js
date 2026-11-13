@@ -3,6 +3,7 @@ import Kullanici from "../models/Kullanici.js";
 import { oturumTokeniOlustur, oturumCookieGonder, oturumCookieAyarlari, kullaniciyiSun, oturumSurumuFiltresi } from "../utils/authGuvenligi.js";
 import { sifreSifirlamaServisi } from "../services/sifreSifirlamaService.js";
 import { emailDegisimServisi } from "../services/emailDegisimService.js";
+import { kayitDogrulamaServisi, KAYIT_DOGRULAMA_MESAJI } from "../services/kayitDogrulamaService.js";
 
 /* =========================
    Kayıt Ol
@@ -25,27 +26,10 @@ export const kayitOl = async (req, res) => {
       });
     }
 
-    const kullanici = await Kullanici.create({
-      kullaniciAdi,
-      email,
-      sifre,
-    });
-
-    const token = oturumTokeniOlustur(kullanici);
-
-    oturumCookieGonder(res, token);
-
-    res.status(201).json({
-      basarili: true,
-      token,
-      kullanici: {
-        id: kullanici._id,
-        kullaniciAdi: kullanici.kullaniciAdi,
-        email: kullanici.email,
-      },
-    });
+    const sonuc = await kayitDogrulamaServisi.kaydet({ kullaniciAdi, email, sifre });
+    res.status(201).json({ basarili: true, mesaj: KAYIT_DOGRULAMA_MESAJI, ...sonuc });
   } catch (hata) {
-    res.status(500).json({
+    res.status(hata.code === 11000 ? 409 : 500).json({
       hata: "İşlem tamamlanamadı. Lütfen daha sonra tekrar deneyin.",
     });
   }
@@ -80,6 +64,9 @@ export const girisYap = async (req, res) => {
       });
     }
 
+    if (kullanici.emailDogrulandi === false) return res.status(403).json({ kod: "EMAIL_DOGRULAMA_GEREKLI",
+      hata: "Giriş yapmadan önce e-posta adresinizi doğrulayın." });
+
     const token = oturumTokeniOlustur(kullanici);
 
     oturumCookieGonder(res, token);
@@ -98,6 +85,24 @@ export const girisYap = async (req, res) => {
       hata: "İşlem tamamlanamadı. Lütfen daha sonra tekrar deneyin.",
     });
   }
+};
+
+export const kayitEmailiniDogrula = async (req, res) => {
+  try {
+    await kayitDogrulamaServisi.dogrula(req.body.token);
+    res.json({ basarili: true, mesaj: "E-posta adresiniz doğrulandı. Artık giriş yapabilirsiniz." });
+  } catch (e) {
+    const gecersiz = e.kod === "KAYIT_DOGRULAMA_GECERSIZ";
+    res.status(gecersiz ? 400 : 503).json({ kod: gecersiz ? e.kod : "AUTH_GECICI_HATA", hata: gecersiz ? e.message : "Doğrulama şu anda tamamlanamıyor. Tekrar deneyin." });
+  }
+};
+export const kayitEmailiniYenidenGonder = async (req, res) => {
+  const baslangic = Date.now();
+  try { await kayitDogrulamaServisi.yenidenGonder(req.body.email); }
+  catch { return res.status(503).json({ kod: "AUTH_GECICI_HATA", hata: "İstek şu anda tamamlanamıyor. Daha sonra tekrar deneyin." }); }
+  await new Promise(r => setTimeout(r, Math.max(0, 250 - (Date.now() - baslangic))));
+  // SMTP durumu hesap varlığını açığa çıkarmasın; teslimat başarısı vaat edilmez.
+  res.json({ basarili: true, mesaj: "Hesabınız doğrulama bekliyorsa ve 1 saatlik süre dolmadıysa yeni bağlantı gönderilecektir. Gelen kutunuzu ve spam klasörünü kontrol edin." });
 };
 
 /* =========================

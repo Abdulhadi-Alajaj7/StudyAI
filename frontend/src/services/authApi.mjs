@@ -7,5 +7,7 @@ export const authApiOlustur = client => ({
     sifreSifirla: (token, veri, signal) => client.post(`/auth/reset-password/${encodeURIComponent(token)}`, veri, { withCredentials: true, signal }),
     emailDogrula: (token, signal) => client.post("/auth/email-change/verify", { token }, { withCredentials: true, signal }),
     cikis: () => client.post("/auth/cikis", {}, { withCredentials: true }),
+    kayitDogrula: (token, signal) => client.post("/auth/verify-email", { token }, { signal }),
+    kayitYenidenGonder: (email, signal) => client.post("/auth/resend-verification", { email }, { signal }),
 });
 export default authApiOlustur(api);

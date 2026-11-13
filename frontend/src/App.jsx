@@ -1,5 +1,6 @@
 import SifreSifirla from "./pages/SifreSifirla.jsx";
 import EpostaDogrula from "./pages/EpostaDogrula.jsx";
+import KayitDogrulama, { DogrulamaBekleniyor } from "./pages/KayitDogrulama.jsx";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 
 import Giris from "./pages/Giris.jsx";
@@ -53,6 +54,8 @@ function App() {
 
                 <Route path="/reset-password/:token" element={<SifreSifirla />} />
                 <Route path="/eposta-dogrula/:token" element={<EpostaDogrula />} />
+                <Route path="/hesap-dogrula/:token" element={<KayitDogrulama />} />
+                <Route path="/dogrulama-bekleniyor" element={<DogrulamaBekleniyor />} />
                 {/* Korumalı Sayfalar */}
                 <Route element={<KorumaliRoute />}>
                     <Route element={<PanelLayout />}>

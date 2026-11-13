@@ -10,7 +10,7 @@ export const sifreSifirlamaServisiOlustur = ({ Model = Kullanici, eposta = epost
         // Yapılandırma hatası hesap aramasından önce kontrol edilir; hesap varlığı sızmaz.
         const ayar = eposta.ayarlariGetir();
         const kullanici = await Model.findOne({ email }).select("+oturumSurumu");
-        if (!kullanici) return;
+        if (!kullanici || kullanici.emailDogrulandi === false) return;
         const token = tokenUret(), hash = tokenHashle(token), zaman = simdi();
         const sonuc = await Model.updateOne({ _id: kullanici._id, email,
             ...oturumSurumuFiltresi(kullanici.oturumSurumu ?? 0),
