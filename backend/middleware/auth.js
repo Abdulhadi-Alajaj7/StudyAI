@@ -20,10 +20,10 @@ const kimlikDogrula = async (req, res, next) => {
     }
 
     try {
-        const cozulmusToken = jwt.verify(token, process.env.JWT_SECRET);
+        const cozulmusToken = jwt.verify(token, process.env.JWT_SECRET, { algorithms: ["HS256"] });
 
         const kullanici = await Kullanici.findById(cozulmusToken.id).select(
-            "-sifre"
+            "-sifre +oturumSurumu"
         );
 
         if (!kullanici) {
@@ -32,11 +32,15 @@ const kimlikDogrula = async (req, res, next) => {
             });
         }
 
+        const surum = cozulmusToken.oturumSurumu ?? 0;
+        if (!Number.isSafeInteger(surum) || surum < 0 || surum !== (kullanici.oturumSurumu ?? 0)) {
+            return res.status(401).json({ hata: "Oturumunuz sonlandırıldı. Yeniden giriş yapın." });
+        }
         req.user = kullanici;
 
         next();
     } catch (hata) {
-        console.error("Kimlik doğrulama hatası:", hata.message);
+        // Ham JWT veya hata içeriği loglanmaz.
 
         return res.status(401).json({
             hata: "Yetkilendirme başarısız, geçersiz token",
