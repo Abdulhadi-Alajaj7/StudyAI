@@ -1,163 +1,125 @@
-# Çalışma Kartları V2+
+# Çalışma Kartları — Konu Bazlı Otomatik + Akıllı Batch
 
 13 Kasım 2026 — `feature/calisma-kartlari-sistemi`
 
-Güncel uygulama, test kanıtları, değişen dosyalar ve canlı izin sınırı:
-[V2+ uygulama kaydı](V2_PLUS_UYGULAMA_NOTLARI.md).
-[V1 denetimi](CALISMA_KARTLARI_V1_GUVENILIRLIK.md) ve bu belgenin sonundaki
-canlı denemeler tarihsel kayıtlardır; V2+ canlı kabulü olarak kullanılamaz.
+Güncel uygulama ve test kaydı: [Otomatik üretim raporu](KART_OTOMATIK_URETIM.md).
+[Önceki V2+ kaydı](V2_PLUS_UYGULAMA_NOTLARI.md) ve aşağıdaki canlı denetimler tarihseldir;
+bu protokolün canlı kabulü veya bu oturumda canlı işlem yapıldığı anlamına gelmez.
 
 ## Kullanım
 
-Dersin **Çalışma Kartları** sekmesindeki **Kartları Oluştur** üretimi başlatır.
-Öğrenciden konu, kart sayısı, zorluk veya model seçmesi istenmez. Kayıtlı kartlar
-sonraki ziyarette açılır. Sayfa açılışı ve GET hiçbir üretim başlatmaz.
+Öğrenci **Kartları Oluştur** düğmesine bir kez basar. Kayıtlı ve onaylı Konu Haritası
+okunur; mevcut `konuId`, aktif materyal sürümleri ve metin parçaları kullanılır.
+Harita veya belge embedding'leri yeniden oluşturulmaz. Kart sayısı/model seçimi istenmez.
+Hazır kartlarla diğer konular üretilirken çalışılabilir; tarayıcının açık kalması gerekmez.
+GET yeni iş başlatmaz. Sunucu önceden başlatılan kalıcı işi otomatik sürdürür.
 
-Karta tıklamak veya Enter/Boşluk kullanmak cevabı açar; ilk açılış görüldü olarak
-kaydedilir. Yıldız bağımsızdır. Tüm/görülmeyen/görülen/yıldızlı görünümleri ve
-ana/alt konu filtreleri korunur. Görülmeyen kart açılınca kullanıcı ilerleyene
-kadar ekranda kalır; yeni kart soru yüzüyle açılır. Mobil konu paneli korunur.
+Karta tıklamak veya Enter/Boşluk cevabı açar, ilk açılış görüldü olarak kaydedilir.
+Yıldız bağımsızdır. Tüm/görülmeyen/görülen/yıldızlı görünümleri, konu filtreleri,
+mobil panel ve **Tekrar, Zor, Orta, Kolay** değerlendirmeleri korunur. Aynı istemci
+istek kimliği ikinci değerlendirme oluşturmaz. SM-2/FSRS veya hâkimiyet hesabı eklenmedi;
+konu ve kart kimlikleri gelecekteki sistemlerin kullanabileceği biçimde korunur.
 
-**Tekrar, Zor, Orta, Kolay** değerlendirmeleri değişmez geçmiş kayıtlarıdır.
-Aynı istemci istek kimliğiyle tekrar gönderim ikinci kayıt oluşturmaz.
-**Bugünkü Tekrarlar** pasiftir; SM-2, FSRS veya tekrar takvimi eklenmedi.
+## Kaynak seçimi ve doğal protokol
 
-## Kaynak, kavram ve kart üretimi
+1. Ders, kullanıcı, onaylı harita ve aktif sürümler doğrulanır. Konu kaynak bağlantısı
+   yoksa yalnız haritanın kaynak snapshot'ı ile aktif sürümü eşleşen materyaller kullanılır.
+2. Mevcut semantic search ile lexical sıralama birleştirilir. Tam kimlik/sürüm/metin
+   eşleşmesi olan güçlü semantik sonuç (skor >= 0,65), kelime örtüşmesi olmasa da
+   adaydır. En fazla 10 bütün parça / 12.000 karakter seçilir; kaynak metni kesilmez.
+   Bu teknik seçim bütün pedagojik kapsamın eksiksiz olduğu garantisi değildir.
+3. Sorgu embedding'i ortak çağrı/kota sınırındadır. Belge vektörlerine dokunulmaz.
+   Kesinti/kotada lexical fallback kullanılabilir. Semantik arama yapılamadığı ve lexical
+   kaynak bulunamadığı için konu kalıcı olarak kaynak yok sayılmaz: bütçede sonraki tur,
+   geçici hatada kayıtlı bekleme kullanılır. Seçilen parça kimlikleri checkpoint'e alınır.
+4. Aynı ana konuya bağlı konular girdi tokenı, konu ve materyal sınırlarına göre batch'e
+   ayrılır. Gemini'ye `konuId`, başlık, açıklama, ana başlık, tam kaynak metinleri ve
+   önceki kavramlar gönderilir. Backend önceden kavram veya cevapIndex listesi çıkarmaz.
+5. Gemini önemli farklı kavramları, sayıyı ve doğal Türkçe soruları belirler. Yanıt:
+   `{konular:[{konuId,tamamlandi,bosNedeni,kartlar:[{konuId,metinParcasiId,kavram,soru,cevap,kanit}]}]}`.
+   Tek yanıtın kart üst sınırı çıktı tokenına bağlıdır (varsayılan 2.400 tokenla 4);
+   bu konu başına toplam sınır değildir. Kalan kavram varsa `tamamlandi:false` ile devam eder.
+6. Backend her kart için konu/parça bağını, kullanıcı/dersi, materyali ve aktif sürümü
+   tekrar doğrular. Kanıt özgün metindeki TAM cümle/satırla birebir aynı olmalıdır.
+   Cevap bu alıntının tamamı veya açık tanımın TAM cevap aralığıdır. Serbest açıklama,
+   kesilmiş koşul/olumsuzluk ve yalnız doğru parça kimliği kabul edilmez. Kaynak aralıkları saklanır.
+7. Soru uzunluğu, tek soru işareti, kavram odağı, sayısal/teknik iddialar, şema ve
+   tekrarlar kontrol edilir. Geçerli kartlar tek kartın reddinden etkilenmez. Modelin
+   soru kalitesi ve kavram kapsamının tamamı deterministik kontrollerle kanıtlanmış
+   sayılmaz; gerçek ders örnekleriyle ayrıca pedagojik değerlendirme gerekir.
 
-1. Kullanıcıya ait onaylı dersin hazır ve kilitli mevcut konu haritası okunur.
-   `konuId`, ana/alt konu bağlantıları ve kaynak snapshot'ı değişmez. Konu kaynağı
-   belirtilmemişse yalnız haritanın snapshot'ıyla aktif sürümü eşleşen materyaller
-   aday olur. Doğrulanmış bağlantı yoksa `KART_KAYNAK_BAGLANTISI_EKSIK` döner.
-2. Keyword eşleşmesi mevcut `semanticAramaService` ve kayıtlı cosine vektörleriyle
-   birleştirilir. Materyal, kullanıcı, ders, aktif işlem sürümü ve özgün parça metni
-   doğrulanır. Yüksek anlamsal skor tek başına konu kanıtı sayılmaz. Materyaller
-   arasında çeşitlilik korunur; en fazla 10 bütün parça / 12.000 karakter seçilir.
-3. Belge embedding'leri yeniden üretilmez. Gerekirse yalnız sorgu embedding'i
-   kullanılır. Kullanıcı+ders+model+boyut+aktif snapshot+sorgu anahtarlı cache,
-   100 kayıt ve 10 dakika ile sınırlıdır. Başarısız sorgu cache edilmez. Semantic
-   hata sonrası keyword fallback açıkça kaydedilir; yeterli kanıt yoksa üretim durur.
-4. Kaynaktaki tanım, özellik/kural, formül, işleyiş, fark, neden-sonuç ve kullanım
-   ifadeleri deterministik olarak ayrılır. Başlık/alıştırma/boilerplate elenir.
-   Normalize kavram veya aynı alıntı tekrar planlanmaz. Hedef **1–4 değildir**;
-   farklı kanıtlanabilir kavram sayısıdır. Teknik kaynak sınırları ve bu sezgisel
-   çıkarım, tüm dersin pedagojik kapsamının eksiksiz olduğunu garanti etmez.
-5. Aynı ana konuya bağlı işler küçük batch'lere ayrılır. Varsayılan üst sınırlar
-   3 konu, 12 kart, 6 materyal, 6.000 tahmini girdi ve 2.400 çıktı tokenıdır.
-   Sistem talimatı, JSON schema ve kanıtlar girdi tahminine dahildir. Bir kanıt bile
-   sığmazsa güvenli sınır hatası döner. Batch sınırı toplam kavram hedefini kırpmaz.
-6. Gemini yalnız `konuId`, `kanitReferansi`, `cevapIndex`, `tur` seçer. Tanımı veya
-   formülü açık kaynaklarda sunucu kısa doğal Türkçe soru-cevap oluşturur; cevap
-   kaynaktan aynen alınır. Diğerlerinde güvenli boşluk doldurma korunur. Serbest
-   model sorusu, cevabı veya yeniden yazılmış alıntısı kabul edilmez.
-7. Her kartın konusu, kanıtı, materyal/sürüm/parça bilgisi, cevap indeksi, karakter
-   aralığı ve tekrarı bağımsız doğrulanır. Bir kartın reddi diğer geçerli kartları
-   kaybettirmez. JSON/source hatası sağlayıcı kesintisi sayılmaz; otomatik model
-   fallback veya aynı başarılı cevabı yeniden üretme gerekçesi olmaz.
+Eski V2 kart şeması ve eski tanı/test çağıranları için cevapIndex doğrulayıcısı korunur.
+Normal üretim worker'ı yalnız yeni kaynak protokolünü kullanır. Kaynakta açık bilgi
+bulunmayan serbest açıklamalar yayınlanmaz.
 
-Kavramın konu bağlantısı kaynak ifadesi, kavram kimliği/türü ve planın eşleşen
-kelimeleriyle izlenebilir. Doğal kart biçimi kaynakta açıkça doğrulanabilen
-kalıplarla sınırlıdır. Geçerli JSON veya sözcük örtüşmesi semantik doğruluk
-kanıtı olarak sunulmaz. Desteklenemeyen serbest cevap yayımlanmaz.
+## Kalıcı iş, checkpoint ve sınırlar
 
-## Kalıcılık, sıfır kart ve güvenli devam
+`CalismaKartiDestesi` kullanıcı+ders başına unique kayıttır. Opsiyonel `uretimIsi`,
+aynı belgedeki kalıcı işi temsil eder: `kuyrukta`, `calisiyor`, `bekliyor`, `tamamlandi`,
+`durduruldu`. Eski tamamlanmış desteler aynen okunur; eski kısmi deste kullanıcı
+başlattığında yeni işe geçer. Otomatik tarama eski kayıtlara kendiliğinden iş eklemez.
 
-`CalismaKartiDestesi` kullanıcı+ders başına tek kayıttır. Konu planı ve kartlar,
-SHA-256 kaynak imzası ve işlem lease'iyle tutulur. Yeni alanlar opsiyoneldir;
-eski kart kimlikleri, kaynakları, yıldızları, görülme ve değerlendirmeleri korunur.
+Her konu sonucu ayrı MongoDB transaction/checkpoint ile eklenir. Kartlar silinmez,
+kimlikleri yenilenmez; öğrenci ilerlemesi ve değerlendirme koleksiyonlarına üretim
+worker'ı yazmaz. Tam incelenen parçalar metin/sürüm/kimlik hash'iyle işaretlenir;
+kalan kaynaklar ve kaydedilmiş kavramlar sonraki tura aktarılır.
 
-Batch sonucu konu başına ayrı transaction/checkpoint ile kaydedilir. Sonraki
-konunun yazımı başarısızsa önceki checkpoint kalır. Devam, tamamlanan konuları ve
-kaynakta zaten kapsanan kavramları yeniden göndermez. Yeni kartlar eski kartlara
-eklenir; silip yeniden oluşturma veya veri migration'ı uygulanmaz.
+Sunucu başlangıcında ve 15 saniyede bir yalnız zamanı gelmiş aktif işler taranır.
+Ders transaction'ı ve 30 saniyelik heartbeat/3 dakikalık lease aynı işin eşzamanlı
+çalışmasını engeller. Sunucu kesilirse kalıcı checkpoint devralınır. Yeni SDK denemesi
+ve kayıt öncesi lease kontrol edilir; geç kalan eski worker yeni sonucu ezemez.
+Kaynak imzası her konu checkpoint'inde ve başarılı sonlandırmada transaction içinde
+kontrol edilir. Ders silme kilidi aynı ders belgesi üzerinden sıralanır.
 
-Sıfır kart durumları ayrıdır: `ogrenilebilir_kavram_yok` ve zaten başka kartta
-kapsanan kavramlar başarıyla tamamlanabilir. `kaynak_yok`, `kanit_yetersiz`,
-üretim veya doğrulama hatası eksik kalır. Semantic fallback ayrıca gösterilir.
-Kavramsız hazır deste arayüzde açıklanır; tekrar üretim döngüsü başlatılmaz.
+- Tur SDK sınırı: `GEMINI_KART_ISLEM_CAGRI_BUTCESI` (varsayılan 4, en fazla 12).
+  Tur bitince iş kuyruğa döner; yeniden tıklama gerekmez. Tek çağrılık tur gerekirse
+  yalnız semantik seçimi kaydeder, sonraki tur üretimi yapar.
+- Dersin 24 saatlik sınırı: `GEMINI_KART_DERS_GUNLUK_CAGRI_BUTCESI` (48, en fazla 200).
+  Zamanı gelene kadar kalıcı bekleme; sonra otomatik devam.
+- İşin ömrü boyunca sınır: `GEMINI_KART_TOPLAM_CAGRI_BUTCESI` (varsayılan günlük ders
+  sınırı, en fazla 200). Başlangıçta işe kaydedilir. Gün/restart/POST bunu sıfırlamaz;
+  env değişikliği mevcut işin iznini otomatik yükseltmez. Aşılırsa otomatik çağrı durur,
+  arayüz sebebi gösterir ve yeniden üretim butonunu kapatır.
+- Sorgu embedding'i, retry ve fallback gerçek SDK sınırlarına dahildir. Önceden ayrılan
+  kullanılmamış tur hakkı normal bitişte iade edilir. Çökmede belirsiz kullanım harcanmış
+  sayılır; `gercekSdkCagrisi` yalnız sonucu kaydedilebilen turları kesin sayabilir.
+- RPM/TPM/429 beklemesi Retry-After veya güvenli bekleme süresiyle; RPD Pasifik gece
+  yarısına göre kaydedilir (yaz/kış saati dahil). Tek istek TPM'ye hiç sığmıyorsa kalıcı
+  boyut hatasıdır. 503/ağ/DB kayıt hatası en fazla 3 otomatik devamla sınırlıdır.
+- Üç başarısız konu doğrulaması veya üç ilerlemesiz üretim turu otomatik tekrarları
+  durdurur. Kalıcı model/yetki hatası durur. Sonradan manuel yeniden deneme toplam
+  kullanım hakkını yenilemez. Toplam sınır onayı için yeni yönetim ekranı eklenmedi.
 
-Üretim POST'u hızlı döner, Node.js içindeki worker çalışır; arayüz 2,5 saniyelik
-GET polling ile gerçek ilerlemeyi okur. Kilit 30 saniyede yenilenir, 3 dakika
-kesilirse iş eksik olarak kapanır. Yeni SDK denemesi öncesinde ve başarıdan sonra
-sahiplik kontrol edilir. Kaynak imzası her checkpoint'te tekrar doğrulanır.
+Hazır kartlar bekleme süresince sunulur. Sıfır kart, kaynağın gerçekten kavramsız
+olması veya önceki kartlarda kapsanmasıyla açıklanır. Kaynak/kanıt/doğrulama hatası
+başarı sayılmaz. Kaynak sürümü değişirse eski kartlar salt okunur sunulur; yeni
+üretim ve öğrenci verisi yazımı engellenir. Otomatik migration yoktur.
 
-Kaynak sürümü değişince eski kartlar **GET ile salt okunur** gösterilir. Üretim,
-yıldız, görülme ve değerlendirme yazımları 409 ile engellenir. Arayüzde eski
-kartlar çevrilebilir; bu durumda görülme isteği gönderilmez. Kaynakları yeni
-sürüme taşıyan otomatik bir işlem yoktur.
+## Ortak Gemini altyapısı
 
-Transaction'lar dersin `kartSurumu` üzerinden mevcut silme kilidiyle sıralanır;
-geç kalan yazım yetim kayıt oluşturamaz. Kalıcı harici iş kuyruğu eklenmedi.
-Süreç kapanırsa kaydedilmiş işler korunur; kullanıcı eksiklerden devam eder.
+Önceden çalışan routing, 503 retry/fallback, model bazlı ortak RPM/TPM/RPD ve
+embedding checkpoint/cache korunmuştur. Yeni model etkinleştirilmedi, gerçek `.env`
+değiştirilmedi. Routing varsayılan kapalı; primary/fallback yalnız doğrulanmış model
+listesi ve pozitif kota profiliyle çalışır. 400/401/403/404 kör retry/fallback başlatmaz.
+JSON/kanıt reddi sağlayıcı 503'ü gibi değerlendirilmez.
 
-## Gemini 503, model ve kota
+Model başına ortak kota defteri süreç içidir; çoklu sunucu veya restart boyunca
+Google proje kotasını kalıcı olarak garanti etmez. Ders ve iş tüketim sınırları
+MongoDB'de kalıcıdır. Bu görevde Redis veya başka kuyruk altyapısı eklenmedi.
 
-Bütün üretim özellikleri ve embedding aynı SDK deneme yöneticisini kullanır.
-İlk istek dahil en fazla 3 primary denemesi, ardından yalnız 503 için 1
-fallback mümkündür; varsayılan toplam 4 SDK denemesidir. Daha düşük özellik veya
-işlem bütçesi önceliklidir. Backoff+jitter, Retry-After/RetryInfo, SDK timeout,
-toplam süre (varsayılan 120 saniye), iptal ve lease kontrolü uygulanır.
+## Güvenli doğrulama ve canlı sınır
 
-400/401/403/404 ve günlük kota kör retry/fallback başlatmaz. Geçersiz JSON veya
-kaynak aynı retry döngüsüne girmez. Yerel yoğunluk/RPM/TPM/RPD sağlayıcı 429'undan
-ayrı kodlarla raporlanır. Embedding model fallback'i yoktur; başarılı batch'ler,
-metin/model/boyut hash cache'i ve mevcut `gemini-embedding-001` / 768 kayıtları korunur.
-Ders hazırlamanın zorunlu embedding koşulu kaldırılmadı.
+Backend `npm test` preload'u gerçek fetch ve TCP/Mongo bağlantısını engeller,
+sahte anahtar ve enjekte edilmiş model/DB kullanır. Frontend tarayıcı testinde
+bütün uygulama API'leri intercept edilir, dış HTTPS engellenir. Test/Özet/Sohbet/
+Konu Haritası regresyonları aynı tam test paketinde çalışır.
 
-Routing varsayılan kapalıdır. Eski `GEMINI_*_MODELI` ayarları çalışmaya devam eder.
-`*_PRIMARY_MODELI` ancak `GEMINI_DOGRULANMIS_MODELLER` içinde ise kullanılır.
-Fallback ayrıca pozitif, açık RPM/TPM/RPD profili gerektirir. Sıfır kota modeli
-kapatır. Yeni model erişimi bu geliştirmede canlı doğrulanmadı ve etkinleştirilmedi.
-
-Aynı modelin sohbet/özet/test/kart/harita çağrıları ortak bütçeyi paylaşır.
-Metin modeli varsayılanları 10 RPM / 175.000 TPM / 400 RPD; embedding varsayılanları
-60 / 20.000 / 700'dür. Bunlar yapılandırılabilir iç güvenlik sınırlarıdır,
-evrensel Google kotaları değildir. Anahtar sayısı bütçeyi çoğaltmaz.
-TPM girdi tokenıdır; tahmin çağrıdan önce ayrılır, `usageMetadata` ile mutabakat
-yapılır. Bilinmeyen başarısız çağrının tahmini tüketimi korunur. RPD Pacific gece
-yarısında yenilenir. Limiter **süreç içidir**; çoklu instance veya restart sonrası
-Google proje kotasını tam koruma garantisi vermez. Mevcut tek süreç için Redis eklenmedi.
-
-Kart işlem bütçesi (`GEMINI_KART_ISLEM_CAGRI_BUTCESI`, varsayılan 4) sorgu
-embedding'i, retry ve fallback'i kapsar; retrieval üretime en az bir deneme
-bırakır. Kullanıcı+ders 24 saatlik kalıcı bütçesi (`GEMINI_KART_DERS_GUNLUK_CAGRI_BUTCESI`,
-varsayılan 48) bundan ve Pacific RPD'den ayrıdır. İş başlangıcında hak ayrılır,
-normal bitişte kullanılmayan hak iade edilir; çökmede belirsiz hak tüketilmiş sayılır.
-Konuya yazılan SDK sayısı paylaşılan batch'e katılımı gösterir; konu sayaçları
-toplanarak gerçek toplam çağrı hesaplanmamalıdır. Destenin `sonIslemSdkCagrisi`
-ve ortak yöneticinin sayaçları gerçek SDK denemelerini sayar.
-
-Tüm ayarlar [`.env.example`](../.env.example) içindedir. Gerçek `.env` değiştirilmedi.
-Ham materyal, anahtar ve öğrenci içeriği loglanmaz; model, özellik, deneme, token
-ölçümünün tahmini/gerçek oluşu, süre ve güvenli hata/ret kodları kaydedilir.
-
-## API ve test
-
-Tüm uçlar oturum gerektirir; kullanıcı, ders, deste ve kart ilişkisini doğrular.
-
-| Metot / yol (`/dersler/:dersId/calisma-kartlari`) | İşlem |
-| --- | --- |
-| `GET /` | Kayıtlı kartlar, istatistikler, konu ve retrieval durumu; üretim yapmaz |
-| `POST /olustur` | Boş gövde ile başlat/devam; aktif ikinci POST aynı işi döndürür |
-| `PATCH /:kartId/durum` | `{goruldu:true}` ve/veya `{yildizli:boolean}` |
-| `POST /:kartId/degerlendirmeler` | `{degerlendirme, istemciIstekId}`; cevap önceden açılmış olmalı |
-
-Backend `npm test` bir ön yükleyiciyle gerçek fetch/TCP/MongoDB bağlantısını
-engeller, sahte anahtar ve mock SDK kullanır. Frontend birim testleri, lint/build
-ve kurulu başsız Chromium testi bulunur. Tarayıcıda API'ler sentetik yanıtlanır,
-harici HTTPS engellenir, HMR/dosya izleme kapalıdır. Doğal/eski kart, gerçek
-Enter/Space, filtreler, kısmi devam, salt okunur ve kavramsız hazır durumları test edilir.
-
-Mock karşılaştırma: [ölçümler](V2_PLUS_MOCK_KARSILASTIRMA.json).
-Komut: `node --import ./tests/helpers/guvenliTestOrtami.js scripts/kartV2MockKarsilastirma.js`.
-Aynı 9 kavramda tek konulu 3 çağrı/2.343 tahmini girdi tokenına karşı batch
-1 çağrı/1.225 tahmini token, aynı 9 geçerli kart üretir. Bunlar gerçek sağlayıcı
-tokenı, kalite veya süre ölçümü değildir.
-
-Canlı test için hazırlanan `scripts/calismaKartiSaltOkunurTani.js` ilk eksik
-konunun ilk sınırlı V2+ batch'ini seçer. Varsayılan yalnız MongoDB okur;
-`--gemini` ayrıca açık kullanıcı izni gerektirir: en fazla 1 SDK çağrısı,
-retry/fallback yok, embedding yok, MongoDB yazımı yok. Bu oturumda çalıştırılmadı.
-Gerçek model erişimi ve MongoDB kabul testi mock başarısından ayrı onaylanmalıdır.
+Bu görevde gerçek Gemini/embedding çağrısı, gerçek Mongo yazımı/silme/migration
+ve uygulama backend'ini başlatma yapılmaz. Salt okunur tanı komutunun CLI akışı da
+çalıştırılmadı; yalnız saf hazırlık fonksiyonu sentetik verilerle test edilir.
+Gerçek API, Mongo transaction/lease davranışı ve derslerde soru kalitesi canlı
+izin sonrasında doğrulanmalıdır. Backend'in açılması önceden başlatılmış işleri
+sürdürebileceğinden canlı deneme izni olmadan burada başlatılmamalıdır.
 
 ## Tarihsel V1/V2 sonuçları — V2+ kabulü değildir
 

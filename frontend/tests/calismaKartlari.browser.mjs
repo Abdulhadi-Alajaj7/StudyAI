@@ -13,12 +13,13 @@ const kartlar = [
     { _id: "333333333333333333333333", konuId: "kuyruk", soru: "Boşluğu tamamlayın: Kuyruk […] ilkesini kullanır.", cevap: "FIFO", goruldu: false, yildizli: false, kaynak: { dosyaAdi: "Veri Yapıları.pdf", parcaIndex: 1 } },
 ];
 let durum = "yok", getSayisi = 0, uretimSayisi = 0, degerlendirmeler = [], kaynakGuncel = true, kavramsiz = false;
-let ozetGetSayisi = 0;
+let ozetGetSayisi = 0, otomatikBekleme = false, toplamSinir = false;
 const kayitlar = new Map();
 const govde = () => {
-    const kayitli = kavramsiz ? [] : durum === "hazir" ? kartlar : durum === "kismi" ? kartlar.slice(0, 1) : [];
+    const kayitli = kavramsiz ? [] : durum === "hazir" ? kartlar : (durum === "kismi" || otomatikBekleme) ? kartlar.slice(0, 1) : [];
     return {
-        durum, olusturulabilir: kaynakGuncel, kaynakGuncel, engelMesaji: kaynakGuncel ? "" : "Kaynaklar değişti; bu deste salt okunurdur.", hataKodu: durum === "kismi" ? "KART_ISLEM_CAGRI_SINIRI" : "", kartlar: kayitli,
+        durum, olusturulabilir: kaynakGuncel && !toplamSinir, kaynakGuncel, engelMesaji: kaynakGuncel ? "" : "Kaynaklar değişti; bu deste salt okunurdur.", hataKodu: toplamSinir ? "KART_TOPLAM_CAGRI_SINIRI" : durum === "kismi" ? "KART_ISLEM_CAGRI_SINIRI" : "", kartlar: kayitli,
+        uretimIsi: otomatikBekleme ? { durum: "bekliyor", sonrakiDeneme: "2026-11-14T09:00:00Z", beklemeNedeni: "GEMINI_YEREL_RPM" } : null,
         ilerleme: { tamamlananKonu: kayitli.length, toplamKonu: durum === "yok" ? 0 : 2 },
         istatistikler: { toplam: kayitli.length, gorulen: kayitli.filter(k => k.goruldu).length,
             gorulmeyen: kayitli.filter(k => !k.goruldu).length, yildizli: kayitli.filter(k => k.yildizli).length },
@@ -133,7 +134,7 @@ createRoot(document.getElementById('root')).render(React.createElement(MemoryRou
                 kayitlar.set(kart._id, { gorulduTarihi: kart.goruldu ? "2026-11-12T09:00:00Z" : null, yildizli: kart.yildizli });
                 data = { durum: kayitlar.get(kart._id) };
             } else if (url.pathname.endsWith("/degerlendirmeler")) { degerlendirmeler.push(body); data = { basarili: true }; }
-            else if (url.pathname.endsWith("/calisma-kartlari")) { if (durum === "olusturuluyor" && ++getSayisi >= 2) durum = "hazir"; data = govde(); }
+            else if (url.pathname.endsWith("/calisma-kartlari")) { if (!otomatikBekleme && durum === "olusturuluyor" && ++getSayisi >= 2) durum = "hazir"; data = govde(); }
             else throw new Error("Beklenmeyen API isteği");
             await send("Fetch.fulfillRequest", { requestId, responseCode,
                 responseHeaders: [{ name: "content-type", value: "application/json" }, { name: "access-control-allow-origin", value: origin }, { name: "access-control-allow-credentials", value: "true" }, { name: "access-control-allow-methods", value: "GET,POST,PATCH,OPTIONS" }, { name: "access-control-allow-headers", value: "content-type" }],
@@ -219,6 +220,19 @@ createRoot(document.getElementById('root')).render(React.createElement(MemoryRou
     assert.equal(kartlar[0]._id, "222222222222222222222222");
     assert.equal(kartlar[0].goruldu, true); assert.equal(kartlar[0].yildizli, true);
     assert.equal(degerlendirmeler.length, 1, "Devam eski değerlendirmeyi değiştirmemeli");
+    // Backend işi beklerken tarayıcı kapanıp açılır; yeni POST olmadan ilerler.
+    durum = "olusturuluyor"; otomatikBekleme = true;
+    await ac(false); await bekle("document.body.innerText.includes('Kart üretimi otomatik devam edecek')");
+    await tikla("Kartları Görüntüle"); await bekle("document.body.innerText.includes('Kart 1 / 1')");
+    await ac(false); await bekle("document.body.innerText.includes('Kart üretimi otomatik devam edecek')");
+    assert.equal(uretimSayisi, 2, "Bekleme ve yeniden açma üretim POST'u göndermemeli");
+    otomatikBekleme = false; durum = "hazir";
+    await bekle("document.body.innerText.includes('Kart 1 / 2')");
+    assert.equal(uretimSayisi, 2); assert.equal(kartlar[0].yildizli, true);
+    toplamSinir = true; durum = "kismi";
+    await ac(false); await bekle("document.body.innerText.includes('toplam kullanım sınırına')");
+    assert.equal(await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent.includes('Eksik Konuları Tamamla')).disabled"), true);
+    toplamSinir = false; durum = "hazir";
     // Doğal soru-cevap eski kayıtlarla aynı bileşende, gerçek klavye etkileşimiyle çalışır.
     kartlar[0].soru = "Yığın nedir?"; kartlar[0].cevap = "Son giren elemanın ilk çıkarıldığı veri yapısıdır."; kartlar[0].tur = "soru_cevap";
     await ac(false); await bekle("document.querySelector('[aria-label^=\"Cevabı göster\"]')?.textContent.includes('Yığın nedir?')");

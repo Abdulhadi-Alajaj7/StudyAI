@@ -18,6 +18,7 @@ import { geciciDersleriTemizle } from "./services/geciciDersTemizlemeService.js"
 import { baslangicIslemleriniKurtar } from "./services/baslangicKurtarmaService.js";
 import { kullanilmayanMetinParcalariniTemizle } from "./services/metinParcasiTemizlemeService.js";
 import { yarimKalanBaslikUretimleriniKapat } from "./services/dersAsistaniService.js";
+import { kartUretimZamanlayicisiniBaslat } from "./services/calismaKartlariService.js";
 
 const app = express();
 
@@ -72,9 +73,11 @@ const sunucuyuBaslat = async () => {
         void geciciDersleriTemizle();
     }, 10 * 60 * 1000);
 
-    app.listen(PORT, () => {
+    const kartIsleriniDurdur = kartUretimZamanlayicisiniBaslat();
+    const sunucu = app.listen(PORT, () => {
         console.log(`StudyAI sunucusu ${PORT} portunda çalışıyor`);
     });
+    sunucu.on("close", kartIsleriniDurdur);
 };
 
 void sunucuyuBaslat();

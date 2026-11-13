@@ -74,21 +74,14 @@ test("iki konu tek SDK çağrısında; yanlış konu kanıtı yalnız ilgili kar
     }
 });
 
-test("ilk eksik konunun tanısı aynı V2+ protokolünü kullanır; kayıtlı kart yeniden seçilmez", async () => {
+test("salt okunur tanı yeni kaynak protokolünü hazırlar; kayıtlı kartlar ve incelenen parçalar korunur", () => {
     const girdi = { konular: [{ ...konu, konuId: "tamamlanan" }, konu],
         parcalar: [{ _id: "p", ...kaynaklar[0] }], materyaller: [{ _id: "m", aktifIslemeId: "v" }],
-        deste: { konular: [{ konuId: "tamamlanan", tamamlandi: true, kartlar: [] }, { konuId: konu.konuId, tamamlandi: false, kartlar: [] }] } };
+        deste: { konular: [{ konuId: "tamamlanan", tamamlandi: true, kartlar: [] }, { konuId: konu.konuId, tamamlandi: false, kartlar: [{ konuId: "yigin", kavram: "Yığın" }] }] } };
     const hazirlik = ilkEksikKartBatchiniHazirla(girdi);
-    assert.equal(hazirlik.konu.konuId, konu.konuId); assert.equal(hazirlik.plan.hedefKartSayisi, 8);
-    const sonuc = await geminiIleKartBatchiUret({ isler: hazirlik.parti, apiCagriButcesi: { maksimum: 1, kullanilan: 0 } }, {
-        maxDeneme: 1, env: { GEMINI_MODEL_ROUTING_AKTIF: "false" }, istemci: { models: { generateContent: async istek => ({ text: JSON.stringify({ kartlar: mockSecimler(istek) }) }) } },
-    });
-    assert.ok(sonuc.sonuclar[0].kartlar.length >= 1);
-    girdi.deste.konular[1].kartlar = [sonuc.sonuclar[0].kartlar[0]];
-    const devam = ilkEksikKartBatchiniHazirla(girdi, { ...kartBatchAyarlari(), kart: 2 });
-    assert.equal(devam.plan.kavramlar.filter(k => !k.tamamlandi).length, 7);
-    assert.equal(devam.parti[0].kavramlar.length, 2);
-    assert.ok(devam.parti[0].kavramlar.every(k => k.kavramId !== girdi.deste.konular[1].kartlar[0].kavramId));
+    assert.equal(hazirlik.konu.konuId, konu.konuId); assert.equal(hazirlik.kalanKaynakSayisi, 1);
+    assert.equal(hazirlik.parti[0].kaynaklar[0].icerik, metin);
+    assert.equal(hazirlik.oncekiKartlar[0].kavram, "Yığın"); assert.equal(hazirlik.parti[0].kavramlar, undefined);
     girdi.deste.konular[1].tamamlandi = true;
     assert.equal(ilkEksikKartBatchiniHazirla(girdi), null);
 });
@@ -99,7 +92,7 @@ test("doğrudan batch çağrısı da çıktı ve materyal sınırından önce SD
         batchAyarlari: { ...kartBatchAyarlari(), ...degisim }, istemci: { models: { generateContent() { assert.fail("Bütçe dışında SDK çağrısı"); } } },
     }), { kod: "KART_BATCH_SINIRI" });
 });
-test("hybrid mevcut kaynak kimliği/sürümünü doğrular; yüksek skorlu başka konu elenir, 503 keyword'e döner", async () => {
+test("hybrid mevcut kaynak kimliği/sürümünü doğrular; güçlü semantik kaynak kelime eşleşmesi olmadan kalır, 503 keyword'e döner", async () => {
     const parcalar = Array.from({ length: 11 }, (_, i) => ({ _id: `p${i}`, materyalId: "m", islemeId: "v", parcaIndex: i,
         icerik: `Yığın işlem${i} elemanları saklar.` }));
     parcalar.push({ _id: "yanlis", materyalId: "m", islemeId: "v", parcaIndex: 99, icerik: "Fotosentez ışık enerjisini kullanır." });
@@ -109,7 +102,7 @@ test("hybrid mevcut kaynak kimliği/sürümünü doğrular; yüksek skorlu başk
         return { sonuclar: [parcalar[10], parcalar[11]].map(p => ({ ...p, metinParcasiId: p._id, skor: 0.99 })) };
     } });
     assert.equal(sonuc.retrievalYontemi, "hybrid"); assert.ok(sonuc.kaynaklar.some(k => k.parcaIndex === 10));
-    assert.ok(sonuc.kaynaklar.every(k => k.parcaIndex !== 99));
+    assert.ok(sonuc.kaynaklar.some(k => k.parcaIndex === 99));
     const hata = await konuKartHybridKaynaklariniSec(g, { semanticArama: async () => { throw Object.assign(new Error("503"), { kod: "EMBEDDING_SERVIS_HATASI" }); } });
     assert.equal(hata.retrievalYontemi, "keyword_fallback"); assert.equal(hata.retrievalHataKodu, "EMBEDDING_SERVIS_HATASI");
     assert.ok(hata.kaynaklar.length);

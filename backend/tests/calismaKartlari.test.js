@@ -6,7 +6,7 @@ import KartCalismaDurumu from "../models/KartCalismaDurumu.js";
 import KartDegerlendirmesi from "../models/KartDegerlendirmesi.js";
 import { geminiIleCalismaKartlariUret, geminiIleKartBatchiUret } from "../services/geminiService.js";
 import { kartGirdisiniDogrula } from "../controllers/calismaKartlariController.js";
-import { calismaKartlariniGetir, calismaKartlariniOlustur, kartDurumunuGuncelle, kartiDegerlendir, kartKonulariniGetir, konuKartKaynaklariniSec } from "../services/calismaKartlariService.js";
+import { calismaKartlariniGetir, calismaKartlariniOlustur, kartDurumunuGuncelle, kartiDegerlendir, kartKonulariniGetir, konuKartKaynaklariniSec, kartUretimIsleriniDevamEttir, kartIsiBeklemesiniGetir } from "../services/calismaKartlariService.js";
 import { kartHataTanilamasiniOlustur } from "../utils/calismaKartiTanilama.js";
 
 const id = () => String(new mongoose.Types.ObjectId());
@@ -14,14 +14,16 @@ const kopya = v => v == null ? v : JSON.parse(JSON.stringify(v));
 const deger = (d, yol) => yol.split(".").reduce((o, k) => Array.isArray(o) ? o.flatMap(a => a?.[k]) : o?.[k], d);
 const eslesir = (d, f) => Object.entries(f).every(([k, v]) => {
     if (k === "$or") return v.some(a => eslesir(d, a));
+    if (k === "$and") return v.every(a => eslesir(d, a));
     const x = deger(d, k);
     if (v && typeof v === "object") {
         if ("$ne" in v) return String(x) !== String(v.$ne);
         if ("$in" in v) return v.$in.some(a => String(a) === String(x));
+        if ("$lte" in v) return x != null && new Date(x).getTime() <= new Date(v.$lte).getTime();
     }
     return Array.isArray(x) ? x.map(String).includes(String(v)) : v == null ? x == null : String(x) === String(v);
 });
-const zincir = veri => ({ select() { return this; }, sort() { return this; }, session() { return this; }, async lean() { return kopya(veri); } });
+const zincir = veri => ({ select() { return this; }, sort() { return this; }, limit() { return this; }, session() { return this; }, async lean() { return kopya(veri); } });
 
 const duzenek = () => {
     const kullaniciId = id(), dersId = id(), materyalId = id(), islemeId = id();
@@ -57,7 +59,7 @@ const duzenek = () => {
         };
         return {
             findOne(f) { sorgular.push({ ad, f: kopya(f) }); return zincir(db[ad].find(d => eslesir(d, f)) || null); },
-            find(f) { sorgular.push({ ad, f: kopya(f) }); return zincir(db[ad].filter(d => eslesir(d, f))); },
+            find(f) { if (ad === "parca") for (const p of db.parca) p._id ||= id(); sorgular.push({ ad, f: kopya(f) }); return zincir(db[ad].filter(d => eslesir(d, f))); },
             async create(docs) {
                 const sonuc = docs.map(d => {
                     const doc = modeller[ad] ? new modeller[ad](d) : { _id: id(), ...d };
@@ -117,32 +119,55 @@ const batchSdkAyarla = (d, degistir = kartlar => kartlar) => {
     d.deps.kartBatchUret = g => geminiIleKartBatchiUret(g, { maxDeneme: 1, bekle: async () => {},
         istemci: { models: { async generateContent(istek) {
             const p = JSON.parse(istek.contents); istekler.push(p);
-            const kartlar = p.konular.flatMap(k => k.kanitlar.map(e => ({ konuId: k.konuId, kanitReferansi: e.kimlik,
-                cevapIndex: e.soruCevapIndex >= 0 ? e.soruCevapIndex : 0, tur: e.soruCevapIndex >= 0 ? "soru_cevap" : "bosluk_doldurma" })));
-            return { text: JSON.stringify({ kartlar: degistir(kartlar, istekler.length) }) };
+            const adaylar = p.konular.map(k => k.kaynaklar.flatMap(e => e.metin.split(/(?<=\.)\s+|\n/u).filter(m => m.endsWith(".")).map(m => {
+                const kavram = m.includes(":") ? m.split(":")[0] : m.split(" ")[0];
+                return { konuId: k.konuId, metinParcasiId: e.metinParcasiId, kavram,
+                    soru: m.includes(":") ? `${kavram} neyi ifade eder?` : `${kavram} hangi ilkeyle çalışır?`, cevap: m, kanit: m };
+            })).filter(c => !k.oncekiKavramlar.includes(c.kavram)));
+            // Test modeli de tek yanıtın taşıma sınırına uyar; sonraki kavramlar kalır.
+            const secimler = adaylar.map(() => []); let kalan = 4;
+            for (let i = 0; kalan && adaylar.some((a, j) => a.length > secimler[j].length); i = (i + 1) % adaylar.length) {
+                if (adaylar[i].length > secimler[i].length) { secimler[i].push(adaylar[i][secimler[i].length]); kalan--; }
+            }
+            const degisen = degistir(secimler.flat(), istekler.length);
+            return { text: JSON.stringify({ konular: p.konular.map((k, i) => ({ konuId: k.konuId,
+                tamamlandi: adaylar[i].length === secimler[i].length,
+                bosNedeni: adaylar[i].length ? "" : k.oncekiKavramlar.length ? "kavramlar_zaten_kapsandi" : "ogrenilebilir_kavram_yok",
+                kartlar: degisen.filter(c => c.konuId === k.konuId) })) }) };
         } } } });
     return istekler;
 };
 
-test("V2+ çok konulu batch kısmi checkpoint ve yalnız eksik kavramdan devam", async () => {
+test("tek tıkla doğal çok konulu batch: sekiz kavram, kısmi checkpoint, otomatik devam ve öğrenci kaydı", async () => {
     const d = duzenek();
-    d.db.parca[0].icerik = Array.from({ length: 8 }, (_, i) => `Yığın terim${i}: Eleman${i} için tanımlanan sentetik öğrenme bilgisidir.`).join("\n");
-    const c = batchSdkAyarla(d, (kartlar, n) => kartlar.map((k, i) => n === 1 && i === 1 ? { ...k, kanitReferansi: "sahte" } : k));
+    d.db.parca[0].icerik = ["Yığın: Son giren elemanın ilk çıkarıldığı veri yapısıdır.",
+        "Yığın push: Tepeye yeni eleman ekleme işlemidir.", "Yığın pop: Tepedeki elemanı çıkarma işlemidir.",
+        "Yığın peek: Tepedeki elemanı çıkarmadan okuma işlemidir.", "Yığın taşması: Kapasitesi dolu yığına eleman ekleme girişimidir.",
+        "Yığın alt taşması: Boş yığından eleman çıkarma girişimidir.", "Yığın çağrı belleği: İşlevlerin dönüş bilgilerini saklar.",
+        "Yığın kapasitesi: Dizide ayrılan eleman sayısıyla sınırlıdır."].join("\n");
+    const c = batchSdkAyarla(d, (kartlar, n) => kartlar.map((k, i) => n === 1 && i === 1 ? { ...k, metinParcasiId: "sahte" } : k));
+    const eskiHarita = kopya(d.db.harita);
     await calismaKartlariniOlustur(d.girdi, d.deps); await d.tamamla();
     let r = await calismaKartlariniGetir(d.girdi, d.deps);
-    assert.equal(c.length, 1); assert.equal(c[0].konular.length, 2); assert.equal(r.durum, "kismi");
-    assert.equal(r.kartlar.length, 8); assert.equal(r.konular[0].kavramSayisi, 8);
+    assert.equal(c.length, 1); assert.equal(c[0].konular.length, 2); assert.equal(r.durum, "olusturuluyor");
+    assert.equal(r.kartlar.length, 3); assert.equal(r.konular[0].eksikKartSayisi, null);
     const ids = r.kartlar.map(k => k._id), kartId = ids[0];
     await kartDurumunuGuncelle({ ...d.girdi, kartId, goruldu: true, yildizli: true }, d.deps);
     await kartiDegerlendir({ ...d.girdi, kartId, degerlendirme: "kolay", istemciIstekId: "batch-devam-istek-01" }, d.deps);
-    await calismaKartlariniOlustur(d.girdi, d.deps); await d.tamamla();
+    for (let i = 0; i < 5 && d.db.deste[0].durum !== "hazir"; i++) {
+        await kartUretimIsleriniDevamEttir(d.deps); await d.tamamla();
+    }
     r = await calismaKartlariniGetir(d.girdi, d.deps);
     assert.equal(r.durum, "hazir"); assert.equal(r.kartlar.length, 9);
-    assert.equal(c.length, 2); assert.equal(c[1].konular.length, 1); assert.equal(c[1].konular[0].kanitlar.length, 1);
+    assert.equal(r.konular[0].kartSayisi, 8); assert.equal(c.length, 3);
+    assert.ok(c[1].konular.some(k => k.oncekiKavramlar.length));
+    assert.ok(c.every(p => p.konular.every(k => k.kaynaklar.length && !("kanitlar" in k))));
+    assert.ok(r.kartlar.every(k => k.tur === "soru_cevap" && k.soru.endsWith("?")));
     assert.ok(ids.every(k => r.kartlar.some(c => c._id === k))); assert.equal(r.kartlar[0].yildizli, true);
-    assert.equal(d.db.degerlendirme.length, 1); assert.equal(d.db.deste[0].ayrilanCagriSayisi, 2);
-    await calismaKartlariniGetir(d.girdi, d.deps); await calismaKartlariniOlustur(d.girdi, d.deps);
-    assert.equal(d.isler.length, 0); assert.equal(c.length, 2);
+    assert.equal(d.db.degerlendirme.length, 1); assert.equal(d.db.deste[0].uretimIsi.gercekSdkCagrisi, 3);
+    assert.deepEqual(d.db.harita, eskiHarita);
+    await calismaKartlariniGetir(d.girdi, d.deps); await kartUretimIsleriniDevamEttir(d.deps);
+    assert.equal(d.isler.length, 0); assert.equal(c.length, 3);
 });
 
 test("V2+ batch checkpoint yazım hatası ilk konunun kalıcı kartını ve kimliğini korur", async () => {
@@ -155,8 +180,8 @@ test("V2+ batch checkpoint yazım hatası ilk konunun kalıcı kartını ve kiml
     await calismaKartlariniOlustur(d.girdi, d.deps); await d.tamamla();
     assert.equal(d.db.deste[0].hataKodu, "KART_KAYIT_HATASI");
     const eskiId = d.db.deste[0].konular[0].kartlar[0]._id;
-    d.deps.DesteModel.findOneAndUpdate = kaydet;
-    await calismaKartlariniOlustur(d.girdi, d.deps); await d.tamamla();
+    d.deps.DesteModel.findOneAndUpdate = kaydet; d.zamaniIlerlet(61_000);
+    await kartUretimIsleriniDevamEttir(d.deps); await d.tamamla();
     assert.equal(d.db.deste[0].durum, "hazir"); assert.equal(d.db.deste[0].konular[0].kartlar[0]._id, eskiId);
     assert.equal(c[1].konular.length, 1); assert.equal(c[1].konular[0].konuId, "kuyruk");
 });
@@ -169,7 +194,7 @@ test("V2+ sıfır kavram konusu tamamlanır, kaynak hatalı konu tamamlandı say
     const [ilk, ikinci] = d.db.deste[0].konular;
     assert.equal(ilk.tamamlandi, true); assert.equal(ilk.sifirKartNedeni, "ogrenilebilir_kavram_yok");
     assert.equal(ikinci.tamamlandi, false); assert.equal(ikinci.sifirKartNedeni, "kaynak_yok");
-    assert.equal(d.db.deste[0].sonIslemSdkCagrisi, 0);
+    assert.equal(d.db.deste[0].sonIslemSdkCagrisi, 1);
 });
 
 test("V2+ kaynak değiştiğinde eski kartlar ve öğrenci kayıtları salt okunur sunulur", async () => {
@@ -207,8 +232,8 @@ test("üç geçerli kart atomik korunur; yalnızca dördüncü tamamlanır ve ç
     });
     await calismaKartlariniOlustur(d.girdi, d.deps); await d.tamamla();
     let sonuc = await calismaKartlariniGetir(d.girdi, d.deps);
-    assert.equal(sonuc.durum, "kismi"); assert.equal(sonuc.kartlar.length, 3);
-    assert.equal(sonuc.konular[0].eksikKartSayisi, 1); assert.equal(sonuc.ilerleme.tamamlananKonu, 0);
+    assert.equal(sonuc.durum, "olusturuluyor"); assert.equal(sonuc.kartlar.length, 3);
+    assert.equal(sonuc.konular[0].eksikKartSayisi, null); assert.equal(sonuc.ilerleme.tamamlananKonu, 0);
     const kimlikler = sonuc.kartlar.map(k => k._id), kartId = kimlikler[0];
     await kartDurumunuGuncelle({ ...d.girdi, kartId, goruldu: true, yildizli: true }, d.deps);
     await kartiDegerlendir({ ...d.girdi, kartId, degerlendirme: "zor", istemciIstekId: "kismi-v1-istek-01" }, d.deps);
@@ -218,10 +243,10 @@ test("üç geçerli kart atomik korunur; yalnızca dördüncü tamamlanır ve ç
         if (u.$set?.["konular.$.kartlar"]) throw new Error("sentetik-kayit-hatasi");
         return kaydet(f, u);
     };
-    await calismaKartlariniOlustur(d.girdi, d.deps); await d.tamamla();
+    await kartUretimIsleriniDevamEttir(d.deps); await d.tamamla();
     assert.deepEqual((await calismaKartlariniGetir(d.girdi, d.deps)).kartlar.map(k => k._id), kimlikler);
-    d.deps.DesteModel.findOneAndUpdate = kaydet;
-    await calismaKartlariniOlustur(d.girdi, d.deps); await d.tamamla();
+    d.deps.DesteModel.findOneAndUpdate = kaydet; d.zamaniIlerlet(61_000);
+    await kartUretimIsleriniDevamEttir(d.deps); await d.tamamla();
     sonuc = await calismaKartlariniGetir(d.girdi, d.deps);
     assert.equal(sonuc.durum, "hazir"); assert.equal(sonuc.kartlar.length, 4);
     assert.deepEqual(sonuc.kartlar.slice(0, 3).map(k => k._id), kimlikler);
@@ -235,11 +260,11 @@ test("ilk konunun doğrulama hatası ikinci konuya engel olmaz; yalnızca başar
     const cagrilar = sdkYanitiniAyarla(d, (g, p) => [{ konuId: g.konu.konuId, kanitReferansi: p.kanitlar[0].kimlik,
         cevapIndex: g.konu.konuId === "yigin" ? 99 : p.kanitlar[0].cevaplar.indexOf("FIFO") }]);
     await calismaKartlariniOlustur(d.girdi, d.deps); await d.tamamla();
-    assert.equal(d.db.deste[0].durum, "kismi");
+    assert.equal(d.db.deste[0].durum, "olusturuluyor");
     assert.equal(d.db.deste[0].konular[0].tamamlandi, false);
     assert.equal(d.db.deste[0].konular[1].tamamlandi, true);
     const eskiId = d.db.deste[0].konular[1].kartlar[0]._id;
-    await calismaKartlariniOlustur(d.girdi, d.deps); await d.tamamla();
+    await kartUretimIsleriniDevamEttir(d.deps); await d.tamamla();
     assert.deepEqual(cagrilar.map(c => c.g.konu.konuId), ["yigin", "kuyruk", "yigin"]);
     assert.equal(d.db.deste[0].konular[1].kartlar[0]._id, eskiId);
 });
@@ -265,20 +290,138 @@ const cokKonuluDuzenek = () => {
 };
 const cokKonuYanitla = (g, p) => [{ konuId: g.konu.konuId, kanitReferansi: p.kanitlar[0].kimlik, cevapIndex: p.kanitlar[0].cevaplar.indexOf(`Terim${g.konu.konuId.slice(4)}`) }];
 
+test("iki zamanlayıcı ve yinelenen POST yalnız bir devam turu başlatır; hazır kartlar beklerken okunur", async () => {
+    const d = cokKonuluDuzenek(); d.deps.cagriSinirlari = { islem: 1, ders: 10 };
+    const c = sdkYanitiniAyarla(d, cokKonuYanitla);
+    await kartUretimIsleriniDevamEttir(d.deps); assert.equal(d.isler.length, 0);
+    await calismaKartlariniOlustur(d.girdi, d.deps); await d.tamamla();
+    const ilkId = d.db.deste[0].konular[0].kartlar[0]._id;
+    assert.equal((await calismaKartlariniGetir(d.girdi, d.deps)).kartlar.length, 1);
+    await Promise.all([kartUretimIsleriniDevamEttir(d.deps), kartUretimIsleriniDevamEttir(d.deps), calismaKartlariniOlustur(d.girdi, d.deps)]);
+    assert.equal(d.isler.length, 1); await d.tamamla();
+    for (let i = 0; i < 2; i++) { await kartUretimIsleriniDevamEttir(d.deps); await d.tamamla(); }
+    assert.equal(c.length, 4); assert.equal(d.db.deste.length, 1); assert.equal(d.db.deste[0].durum, "hazir");
+    assert.equal(d.db.deste[0].konular[0].kartlar[0]._id, ilkId);
+});
+
+test("kalıcı kota beklemesi zamanı gelmeden POST veya restart ile atlanamaz; sonra otomatik devam eder", async () => {
+    for (const kod of ["GEMINI_YEREL_RPM", "GEMINI_YEREL_TPM", "GEMINI_YEREL_RPD", "GEMINI_GUNLUK_KOTA", "GEMINI_KOTA_ASIMI"]) {
+        const d = duzenek(), uret = d.deps.kartUret; let deneme = 0;
+        d.deps.kartUret = async g => { deneme++; if (deneme === 1) throw Object.assign(new Error("kota"), { kod, retryAfterMs: 70_000 }); return uret(g); };
+        await calismaKartlariniOlustur(d.girdi, d.deps); await d.tamamla();
+        assert.equal(d.db.deste[0].uretimIsi.durum, "bekliyor", kod);
+        const tarih = new Date(d.db.deste[0].uretimIsi.sonrakiDeneme).getTime();
+        await calismaKartlariniOlustur(d.girdi, d.deps);
+        await kartUretimIsleriniDevamEttir({ ...d.deps }); assert.equal(d.isler.length, 0);
+        d.zamaniIlerlet(tarih - d.deps.simdi().getTime() - 1);
+        await kartUretimIsleriniDevamEttir(d.deps); assert.equal(d.isler.length, 0);
+        d.zamaniIlerlet(1); await kartUretimIsleriniDevamEttir({ ...d.deps }); await d.tamamla();
+        assert.equal(d.db.deste[0].durum, "hazir", kod);
+    }
+});
+
+test("restart tamamlanmış kaynakları ve öğrenci kaydını korur; seçilmiş kaynaklar için yeniden embedding istemez", async () => {
+    const d = duzenek(); d.deps.cagriSinirlari = { islem: 1, ders: 12 }; let semantic = 0;
+    d.deps.semanticArama = async () => { semantic++; return { sonuclar: [] }; };
+    await calismaKartlariniOlustur(d.girdi, d.deps); await d.tamamla();
+    const kartId = d.db.deste[0].konular[0].kartlar[0]._id;
+    await kartDurumunuGuncelle({ ...d.girdi, kartId, goruldu: true, yildizli: true }, d.deps);
+    const once = semantic;
+    // Kuyruk belleği olmadan yeni worker yalnız DB checkpoint'inden devam eder.
+    d.isler.length = 0;
+    await kartUretimIsleriniDevamEttir({ ...d.deps }); await d.tamamla();
+    assert.equal(semantic, once); assert.equal(d.db.deste[0].durum, "hazir");
+    const r = await calismaKartlariniGetir(d.girdi, d.deps);
+    assert.equal(r.kartlar[0]._id, kartId); assert.equal(r.kartlar[0].yildizli, true); assert.equal(r.kartlar[0].goruldu, true);
+});
+
+test("izinli toplam tüketim sınırı gün, restart veya manuel istekle sıfırlanmaz", async () => {
+    const d = cokKonuluDuzenek(); d.deps.cagriSinirlari = { islem: 1, ders: 8, toplam: 2 };
+    const c = sdkYanitiniAyarla(d, cokKonuYanitla);
+    await calismaKartlariniOlustur(d.girdi, d.deps); await d.tamamla();
+    await kartUretimIsleriniDevamEttir(d.deps); await d.tamamla();
+    assert.equal(d.db.deste[0].uretimIsi.durum, "durduruldu");
+    assert.equal(d.db.deste[0].hataKodu, "KART_TOPLAM_CAGRI_SINIRI");
+    assert.equal((await calismaKartlariniGetir(d.girdi, d.deps)).olusturulabilir, false);
+    d.zamaniIlerlet(2 * 86400_000); await kartUretimIsleriniDevamEttir(d.deps);
+    await assert.rejects(calismaKartlariniOlustur(d.girdi, d.deps), { kod: "KART_TOPLAM_CAGRI_SINIRI" });
+    assert.equal(c.length, 2); assert.equal(d.isler.length, 0);
+});
+
+test("geçici 503 devamı sınırlıdır; kalıcı model hatası otomatik tekrar edilmez", async () => {
+    for (const kod of ["GEMINI_GECICI_HATA", "GEMINI_MODEL_BULUNAMADI"]) {
+        const d = duzenek(); let sayi = 0;
+        d.deps.kartUret = async () => { sayi++; throw Object.assign(new Error("sentetik"), { kod }); };
+        await calismaKartlariniOlustur(d.girdi, d.deps); await d.tamamla();
+        for (let i = 0; i < 6; i++) { d.zamaniIlerlet(500_000); await kartUretimIsleriniDevamEttir(d.deps); await d.tamamla(); }
+        assert.equal(sayi, kod === "GEMINI_GECICI_HATA" ? 4 : 1);
+        assert.equal(d.db.deste[0].uretimIsi.durum, "durduruldu");
+    }
+    assert.equal(kartIsiBeklemesiniGetir({ kod: "GEMINI_ISTEK_BOYUTU" }, Date.now()), null);
+});
+
+test("model ilerleme bildirmeden sürekli boş sonuç döndürürse otomatik üretim durur", async () => {
+    const d = duzenek(); let sayi = 0;
+    d.deps.kartBatchUret = async ({ isler }) => { sayi++; return { sonuclar: isler.map(i => ({ konuId: i.konu.konuId, kartlar: [], reddedilenler: [], kaynaklarTamamlandi: false })) }; };
+    await calismaKartlariniOlustur(d.girdi, d.deps); await d.tamamla();
+    for (let i = 0; i < 5; i++) { await kartUretimIsleriniDevamEttir(d.deps); await d.tamamla(); }
+    assert.equal(sayi, 6); assert.equal(d.db.deste[0].hataKodu, "KART_ILERLEME_YOK");
+    assert.equal(d.db.deste[0].uretimIsi.durum, "durduruldu");
+});
+
+test("tek çağrılık turda yalnız semantik kaynaklı konular sırayla seçilir; bütçe bitti diye elenmez", async () => {
+    const d = duzenek(); d.deps.cagriSinirlari = { islem: 1, ders: 8 };
+    const alt = d.db.harita[0].anaKonular[0].altKonular;
+    alt[0].baslik = "Son Gelen Önce Ayrılır"; alt[1].baslik = "İlk Gelen Önce Ayrılır";
+    let embedding = 0; const c = batchSdkAyarla(d);
+    d.deps.semanticArama = async ({ apiCagriButcesi: b, sorgu }) => {
+        if (b.kullanilan >= b.maksimum) throw Object.assign(new Error("Tur dolu"), { kod: "GEMINI_CAGRI_BUTCESI_ASILDI" });
+        b.kullanilan++; embedding++;
+        const p = d.db.parca[sorgu.startsWith("Son") ? 0 : 1];
+        return { sonuclar: [{ ...p, metinParcasiId: p._id, skor: 0.95 }] };
+    };
+    await calismaKartlariniOlustur(d.girdi, d.deps); await d.tamamla();
+    assert.equal(d.db.deste[0].uretimIsi.durum, "kuyrukta"); assert.equal(c.length, 0);
+    assert.ok(d.db.deste[0].konular.every(k => !k.uretimiDurduruldu));
+    for (let i = 0; i < 3; i++) { await kartUretimIsleriniDevamEttir(d.deps); await d.tamamla(); }
+    assert.equal(d.db.deste[0].durum, "hazir"); assert.equal(embedding, 2); assert.equal(c.length, 1);
+    assert.equal(d.db.deste[0].uretimIsi.gercekSdkCagrisi, 3);
+});
+
+test("embedding 503 ve RPM beklemesi lexical kaynağı olmayan konuyu kaynak yok diye kapatmaz", async () => {
+    for (const kod of ["EMBEDDING_SERVIS_HATASI", "GEMINI_YEREL_RPM"]) {
+        const d = duzenek(); d.db.harita[0].anaKonular[0].altKonular.length = 1;
+        d.db.harita[0].anaKonular[0].altKonular[0].baslik = "Son Gelen Önce Ayrılır";
+        batchSdkAyarla(d); const once = kopya(d.db.parca);
+        d.deps.semanticArama = async () => { throw Object.assign(new Error("Kesinti"), { kod, retryAfterMs: 90_000 }); };
+        await calismaKartlariniOlustur(d.girdi, d.deps); await d.tamamla();
+        assert.equal(d.db.deste[0].uretimIsi.durum, "bekliyor");
+        assert.equal(d.db.deste[0].konular[0].uretimiDurduruldu, false);
+        const fark = new Date(d.db.deste[0].uretimIsi.sonrakiDeneme).getTime() - d.deps.simdi().getTime();
+        assert.ok(fark >= 90_000);
+        d.deps.semanticArama = async () => ({ sonuclar: [{ ...d.db.parca[0], metinParcasiId: d.db.parca[0]._id, skor: 0.95 }] });
+        d.zamaniIlerlet(fark); await kartUretimIsleriniDevamEttir(d.deps); await d.tamamla();
+        assert.equal(d.db.deste[0].durum, "hazir");
+        assert.deepEqual(d.db.parca.map(({ _id, ...p }) => p), once.map(({ _id, ...p }) => p));
+    }
+});
+
 test("işlem ve ders çağrı bütçesi kalıcıdır; eşzamanlı POST çift hak ayırmaz, pencere dolunca devam eder", async () => {
-    const d = cokKonuluDuzenek(); d.deps.cagriSinirlari = { islem: 2, ders: 3 };
+    const d = cokKonuluDuzenek(); d.deps.cagriSinirlari = { islem: 2, ders: 3, toplam: 8 };
     const cagrilar = sdkYanitiniAyarla(d, cokKonuYanitla);
     await Promise.all([calismaKartlariniOlustur(d.girdi, d.deps), calismaKartlariniOlustur(d.girdi, d.deps)]);
     assert.equal(d.isler.length, 1); assert.equal(d.db.deste[0].ayrilanCagriSayisi, 2);
     await d.tamamla();
-    assert.equal(cagrilar.length, 2); assert.equal(d.db.deste[0].hataKodu, "KART_ISLEM_CAGRI_SINIRI");
+    assert.equal(cagrilar.length, 2); assert.equal(d.db.deste[0].uretimIsi.durum, "kuyrukta");
     const eskiId = d.db.deste[0].konular[0].kartlar[0]._id;
-    await calismaKartlariniOlustur(d.girdi, d.deps); await d.tamamla();
+    await kartUretimIsleriniDevamEttir(d.deps); await d.tamamla();
     assert.equal(cagrilar.length, 3); assert.equal(d.db.deste[0].ayrilanCagriSayisi, 3);
-    await assert.rejects(calismaKartlariniOlustur(d.girdi, d.deps), h => h.kod === "KART_DERS_CAGRI_SINIRI" && h.status === 429);
+    await kartUretimIsleriniDevamEttir(d.deps);
+    assert.equal(d.db.deste[0].uretimIsi.durum, "bekliyor");
+    assert.equal(d.db.deste[0].hataKodu, "KART_DERS_CAGRI_SINIRI");
     assert.equal(d.isler.length, 0); assert.equal(cagrilar.length, 3);
-    d.zamaniIlerlet(24 * 60 * 60_000 + 1);
-    await calismaKartlariniOlustur(d.girdi, d.deps); await d.tamamla();
+    d.zamaniIlerlet(24 * 60 * 60_000 + 1001);
+    await kartUretimIsleriniDevamEttir(d.deps); await d.tamamla();
     assert.equal(d.db.deste[0].durum, "hazir"); assert.equal(cagrilar.length, 4);
     assert.equal(d.db.deste[0].ayrilanCagriSayisi, 1); assert.equal(d.db.deste[0].konular[0].kartlar[0]._id, eskiId);
 });
@@ -287,7 +430,7 @@ test("doğrulamada sürekli başarısız ilk konu bütçe bitince hiç denenmemi
     const d = cokKonuluDuzenek(); d.deps.cagriSinirlari = { islem: 2, ders: 12 };
     const cagrilar = sdkYanitiniAyarla(d, (g, p) => g.konu.konuId === "konu0" ? [] : cokKonuYanitla(g, p));
     await calismaKartlariniOlustur(d.girdi, d.deps); await d.tamamla();
-    await calismaKartlariniOlustur(d.girdi, d.deps); await d.tamamla();
+    await kartUretimIsleriniDevamEttir(d.deps); await d.tamamla();
     assert.deepEqual(cagrilar.map(c => c.g.konu.konuId), ["konu0", "konu1", "konu2", "konu3"]);
     assert.equal(d.db.deste[0].konular.filter(k => k.tamamlandi).length, 3);
 });
@@ -297,9 +440,9 @@ test("sunucu kesintisinde bilinmeyen ayrılmış hak geri verilmez; yeniden baş
     const cagrilar = sdkYanitiniAyarla(d, cokKonuYanitla);
     await calismaKartlariniOlustur(d.girdi, d.deps); d.isler.length = 0;
     d.zamaniIlerlet(181000);
-    await calismaKartlariniOlustur(d.girdi, d.deps); await d.tamamla();
+    await kartUretimIsleriniDevamEttir(d.deps); await d.tamamla();
     assert.equal(cagrilar.length, 1); assert.equal(d.db.deste[0].ayrilanCagriSayisi, 3);
-    await assert.rejects(calismaKartlariniOlustur(d.girdi, d.deps), h => h.kod === "KART_DERS_CAGRI_SINIRI");
+    await assert.rejects(calismaKartlariniOlustur(d.girdi, d.deps), h => h.kod === "KART_TOPLAM_CAGRI_SINIRI");
 });
 
 test("konu başlığının birebir geçmesi gerekmez; açıklama ve Türkçe ekler kaynak eşleştirmesini korur", () => {
@@ -329,8 +472,8 @@ test("kart reddi konu bazında alt koduyla kaydedilir; GET tekrar üretmez", asy
         } } },
     });
     await calismaKartlariniOlustur(d.girdi, d.deps); await d.tamamla();
-    assert.equal(d.db.deste[0].durum, "hata");
-    assert.equal(d.db.deste[0].hataKodu, "KART_GECERSIZ_YANIT");
+    assert.equal(d.db.deste[0].durum, "olusturuluyor");
+    assert.equal(d.db.deste[0].konular[0].hataKodu, "KART_GECERSIZ_YANIT");
     assert.equal(d.db.deste[0].konular[0].reddedilenKartlar[0].konuId, "yigin");
     assert.equal(d.db.deste[0].konular[0].reddedilenKartlar[0].dogrulamaAltKodu, "CEVAP_ARALIGI_GECERSIZ");
     assert.equal(d.db.deste[0].konular.flatMap(k => k.kartlar).length, 0);
@@ -352,8 +495,8 @@ test("checkpoint yazımı başarısızsa başarı gösterilmez; kayıt aşaması
     assert.equal(d.db.deste[0].hataTanilama.asama, "VERITABANI_KAYDI");
     assert.equal(d.db.deste[0].konular.flatMap(k => k.kartlar).length, 0);
     assert.doesNotMatch(JSON.stringify(d.tanilamalar), /sentetik-gizli/);
-    d.deps.DesteModel.findOneAndUpdate = kaydet;
-    await calismaKartlariniOlustur(d.girdi, d.deps); await d.tamamla();
+    d.deps.DesteModel.findOneAndUpdate = kaydet; d.zamaniIlerlet(61_000);
+    await kartUretimIsleriniDevamEttir(d.deps); await d.tamamla();
     assert.equal(d.db.deste[0].durum, "hazir"); assert.equal(d.db.deste[0].hataTanilama, null);
 });
 
@@ -412,10 +555,10 @@ test("kısmi 503 hatasında ilk konu kalıcıdır; devam yalnızca eksik konuyu 
     };
     await calismaKartlariniOlustur(d.girdi, d.deps); await d.tamamla();
     const kismi = await calismaKartlariniGetir(d.girdi, d.deps);
-    assert.equal(kismi.durum, "kismi"); assert.equal(kismi.kartlar.length, 1);
+    assert.equal(kismi.durum, "olusturuluyor"); assert.equal(kismi.kartlar.length, 1);
     const eskiId = kismi.kartlar[0]._id;
-    d.deps.kartUret = uret;
-    await calismaKartlariniOlustur(d.girdi, d.deps); await d.tamamla();
+    d.deps.kartUret = uret; d.zamaniIlerlet(61_000);
+    await kartUretimIsleriniDevamEttir(d.deps); await d.tamamla();
     const tam = await calismaKartlariniGetir(d.girdi, d.deps);
     assert.equal(tam.durum, "hazir"); assert.equal(tam.kartlar[0]._id, eskiId);
     assert.equal(d.cagrilar.filter(c => c.konu.konuId === "yigin").length, 1);
@@ -427,8 +570,8 @@ test("sunucu kesintisi: aktif durum yenilemede görünür, eski kilit sonrası c
     const d = duzenek(); await calismaKartlariniOlustur(d.girdi, d.deps);
     assert.equal((await calismaKartlariniGetir(d.girdi, d.deps)).durum, "olusturuluyor");
     d.isler.length = 0; d.zamaniIlerlet(181000);
-    assert.equal((await calismaKartlariniGetir(d.girdi, d.deps)).durum, "hata");
-    await calismaKartlariniOlustur(d.girdi, d.deps); await d.tamamla();
+    assert.equal((await calismaKartlariniGetir(d.girdi, d.deps)).durum, "olusturuluyor");
+    await kartUretimIsleriniDevamEttir(d.deps); await d.tamamla();
     assert.equal((await calismaKartlariniGetir(d.girdi, d.deps)).durum, "hazir");
 });
 

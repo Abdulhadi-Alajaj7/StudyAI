@@ -8,6 +8,12 @@ export const sinirliGeminiDenemesi = (deger, varsayilan = 3) => {
 const pozitif = (v, d) => Number.isSafeInteger(Number(v)) && Number(v) > 0 ? Number(v) : d;
 export const tahminiGirdiTokeni = (...metinler) => Math.max(1, Math.ceil(metinler.reduce((n, m) => n + String(m || "").length, 0) / 3));
 const gun = simdi => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit" }).format(simdi);
+export const geminiGunSonunaKalanMs = (simdi = Date.now()) => {
+    const bugun = gun(simdi); let alt = simdi, ust = simdi + 26 * 60 * 60_000;
+    // DST dahil sonraki Pacific gününü bul; yerel 24 saat varsayma.
+    while (ust - alt > 1000) { const orta = Math.floor((alt + ust) / 2); if (gun(orta) === bugun) alt = orta; else ust = orta; }
+    return ust - simdi;
+};
 const yerelHata = (kod, kotaTuru = null, retryAfterMs = null) => Object.assign(new Error(kod), {
     kod, status: 429, yerelSinir: true, kotaTuru, retryAfterMs,
 });
@@ -33,13 +39,15 @@ export const geminiOrtakIstekYonetimiOlustur = ({ maksimum = null, simdi = Date.
             const limit = profil || varsayilan;
             const kota = Object.fromEntries(["rpm", "tpm", "rpd"].map(a => [a, Math.min(limit[a], sinirlar?.[a] ?? Infinity)]));
             if ([kota.rpm, kota.tpm, kota.rpd].some(v => v === 0)) throw yerelHata("GEMINI_MODEL_KAPALI");
-            if (k.gunlukDolu) throw yerelHata("GEMINI_GUNLUK_KOTA", "gunluk");
-            if (k.adet >= kota.rpd) throw yerelHata("GEMINI_YEREL_RPD", "gunluk");
+            if (k.gunlukDolu) throw yerelHata("GEMINI_GUNLUK_KOTA", "gunluk", geminiGunSonunaKalanMs(zaman));
+            if (k.adet >= kota.rpd) throw yerelHata("GEMINI_YEREL_RPD", "gunluk", geminiGunSonunaKalanMs(zaman));
             if (k.engelli > zaman) throw yerelHata("GEMINI_YEREL_KOTA", k.kotaTuru, k.engelli - zaman);
             const bekleme = Math.max(1, (k.dakika[0]?.zaman ?? zaman) + 60_000 - zaman);
             if (k.dakika.length >= kota.rpm) throw yerelHata("GEMINI_YEREL_RPM", "rpm", bekleme);
             const token = Math.max(1, Math.ceil(tahminiToken));
-            if (!Number.isFinite(token) || k.dakika.reduce((n, r) => n + r.token, 0) + token > kota.tpm) throw yerelHata("GEMINI_YEREL_TPM", "tpm", bekleme);
+            // Tek istek pencere boşken de sığmıyorsa beklemek sorunu çözmez.
+            if (!Number.isFinite(token) || token > kota.tpm) throw yerelHata("GEMINI_ISTEK_BOYUTU", "tpm");
+            if (k.dakika.reduce((n, r) => n + r.token, 0) + token > kota.tpm) throw yerelHata("GEMINI_YEREL_TPM", "tpm", bekleme);
             if (k.aktif >= Math.min(20, pozitif(maksimum ?? process.env.GEMINI_ORTAK_MAKS_ESZAMANLI_ISTEK, 2))) throw yerelHata("GEMINI_ISTEK_YOGUNLUGU");
             const kayit = { zaman, token, tahminiToken: token, gercekToken: null };
             k.dakika.push(kayit); k.adet++; k.aktif++;

@@ -1,6 +1,6 @@
 import { ortakGeminiIstekYonetimi, sinirliGeminiDenemesi, geminiIsteginiYurut, tahminiGirdiTokeni } from "../utils/geminiOrtakIstekYonetimi.js";
-import { kartKanitlariniOlustur, kartPartisiniDogrula, kartKanitiKonuyaUygunMu } from "../utils/calismaKartiKanit.js";
-import { kartBatchAyarlari, kartBatchIsteginiHazirla } from "../utils/calismaKartiPlanlama.js";
+import { kartKanitlariniOlustur, kartPartisiniDogrula, kartKanitiKonuyaUygunMu, dogalKartPartisiniDogrula } from "../utils/calismaKartiKanit.js";
+import { kartBatchAyarlari, kartBatchIsteginiHazirla, dogalKartBatchIsteginiHazirla } from "../utils/calismaKartiPlanlama.js";
 import { geminiHazirlamaHatasiniSiniflandir, geminiTanilamasiniLogla } from "../utils/geminiHazirlamaHatasi.js";
 import { haritaIstekAyarlari } from "../utils/geminiHaritaSiniri.js";
 import { sureOlc } from "../utils/islemSuresi.js";
@@ -2480,7 +2480,7 @@ Olumsuz/koşullu ifadeleri değiştirme. Aynı kanıtı veya önceki kartlarla a
         tanilama: { ...tanilama, beklenenKartSayisi: kartSayisi, uretilenKartSayisi: Array.isArray(veri?.kartlar) ? veri.kartlar.length : 0 } };
 };
 
-export const geminiIleKartBatchiUret = async ({ isler, oncekiKartlar = [], apiCagriButcesi, sahipligiDogrula, signal }, bagimliliklar = {}) => {
+const geminiIleV2KartBatchiUret = async ({ isler, oncekiKartlar = [], apiCagriButcesi, sahipligiDogrula, signal }, bagimliliklar = {}) => {
     const ayar = bagimliliklar.batchAyarlari || kartBatchAyarlari();
     const adet = isler.reduce((n, i) => n + i.kavramlar.length, 0);
     if (!adet || adet > ayar.kart || isler.length > ayar.konu) throw new GeminiSohbetHatasi("Kart batch sınırı aşıldı.", { status: 422, kod: "KART_BATCH_SINIRI" });
@@ -2511,6 +2511,55 @@ export const geminiIleKartBatchiUret = async ({ isler, oncekiKartlar = [], apiCa
         gecerli.push(...sonuc.kartlar);
         return { konuId: is.konu.konuId, ...sonuc, tanilama: { ...tanilama, beklenenKartSayisi: is.kavramlar.length,
             uretilenKartSayisi: secimler?.length || 0, gecerliKartSayisi: sonuc.kartlar.length, reddedilenKartSayisi: sonuc.reddedilenler.length } };
+    });
+    return { sonuclar, tanilama };
+};
+
+export const geminiIleKartBatchiUret = async (girdi, bagimliliklar = {}) => {
+    // Eski tanı/karşılaştırma istemcileri için sürüm uyumluluğu. Kalıcı üretim
+    // işi kavram/cevapIndex hazırlamaz; aşağıdaki doğal protokolü kullanır.
+    if (girdi.isler?.length && girdi.isler.every(i => Array.isArray(i.kavramlar))) return geminiIleV2KartBatchiUret(girdi, bagimliliklar);
+    const { isler, oncekiKartlar = [], kaynakBaglami, apiCagriButcesi, sahipligiDogrula, signal } = girdi;
+    const ayar = { ...kartBatchAyarlari(), ...bagimliliklar.batchAyarlari };
+    if (!isler?.length || isler.length > ayar.konu || ayar.ciktiToken < 800 ||
+        new Set(isler.map(i => i.konu.konuId)).size !== isler.length ||
+        isler.some(i => !i.kaynaklar?.length || i.kaynaklar.some(k => !k.metinParcasiId)) ||
+        new Set(isler.flatMap(i => i.kaynaklar.map(k => String(k.materyalId)))).size > ayar.materyal) {
+        throw new GeminiSohbetHatasi("Doğal kart kaynak batch'i doğrulanamadı.", { status: 422, kod: "KART_BATCH_SINIRI" });
+    }
+    const { prompt, systemInstruction, responseJsonSchema, maksimumKart } = dogalKartBatchIsteginiHazirla(isler, oncekiKartlar, ayar);
+    if (tahminiGirdiTokeni(prompt, systemInstruction, JSON.stringify(responseJsonSchema)) > ayar.girdiToken) {
+        throw new GeminiSohbetHatasi("Kart kaynakları girdi bütçesini aşıyor.", { status: 422, kod: "KART_BATCH_SINIRI" });
+    }
+    const { veri, tanilama } = await yapilandirilmisGeminiCagrisi({ gorev: "kart",
+        modelAdi: process.env.GEMINI_KART_MODELI || VARSAYILAN_GEMINI_MODELI,
+        istemci: bagimliliklar.istemci, istekYonetimi: bagimliliklar.istekYonetimi || ortakGeminiIstekYonetimi,
+        timeoutMs: bagimliliklar.timeoutMs || 60_000, maxDeneme: bagimliliklar.maxDeneme ?? process.env.GEMINI_KART_MAKS_DENEME,
+        maxOutputTokens: ayar.ciktiToken, bekle: bagimliliklar.bekle, rastgele: bagimliliklar.rastgele,
+        prompt, systemInstruction, responseJsonSchema, apiCagriButcesi, sahipligiDogrula, signal, env: bagimliliklar.env,
+    });
+    if (!Array.isArray(veri?.konular) || Object.keys(veri).some(k => k !== "konular") ||
+        veri.konular.some(k => !isler.some(is => is.konu.konuId === k?.konuId))) {
+        throw new GeminiSohbetHatasi("Kart yanıt şeması doğrulanamadı.", { status: 502, kod: "KART_GECERSIZ_YANIT", tanilama });
+    }
+    const gecerli = [...oncekiKartlar]; let kalan = maksimumKart;
+    const sonuclar = isler.map(is => {
+        const adaylar = veri.konular.filter(k => k?.konuId === is.konu.konuId);
+        const yanit = adaylar.length === 1 ? adaylar[0] : null;
+        const sonuc = dogalKartPartisiniDogrula(yanit?.kartlar, { konu: is.konu, kaynaklar: is.kaynaklar,
+            kaynakBaglami, oncekiKartlar: gecerli, maksimumKart: Math.max(0, kalan) });
+        kalan -= Math.min(kalan, yanit?.kartlar?.length || 0);
+        const metaGecerli = yanit && typeof yanit.tamamlandi === "boolean" &&
+            Object.keys(yanit).every(k => ["konuId", "tamamlandi", "bosNedeni", "kartlar"].includes(k)) &&
+            (yanit.bosNedeni !== "kavramlar_zaten_kapsandi" || oncekiKartlar.some(k => k.konuId === is.konu.konuId ||
+                is.kaynaklar.some(s => String(s.metinParcasiId) === String(k.kaynak?.metinParcasiId)))) &&
+            (yanit.kartlar?.length ? yanit.bosNedeni === "" : !yanit.tamamlandi ? yanit.bosNedeni === "" :
+                ["ogrenilebilir_kavram_yok", "kavramlar_zaten_kapsandi"].includes(yanit.bosNedeni));
+        if (!metaGecerli) sonuc.reddedilenler.push({ kartIndex: null, dogrulamaAltKodu: "KART_ALANLARI" });
+        gecerli.push(...sonuc.kartlar);
+        return { konuId: is.konu.konuId, ...sonuc, kaynaklarTamamlandi: Boolean(metaGecerli && yanit.tamamlandi && !sonuc.reddedilenler.length),
+            sifirKartNedeni: metaGecerli ? yanit.bosNedeni : "", tanilama: { ...tanilama, uretilenKartSayisi: yanit?.kartlar?.length || 0,
+                gecerliKartSayisi: sonuc.kartlar.length, reddedilenKartSayisi: sonuc.reddedilenler.length } };
     });
     return { sonuclar, tanilama };
 };

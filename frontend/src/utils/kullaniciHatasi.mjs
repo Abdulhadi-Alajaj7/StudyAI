@@ -14,6 +14,8 @@ const guvenliKodMesajlari = new Map([
     ["GEMINI_MODEL_KAPALI", "Yapay zekâ modelinin kullanım bütçesi kapalı. Lütfen yöneticiye bildirin."],
     ["GEMINI_ISLEM_SURESI", "İşlem süresi doldu. Kaydedilen kartlar korunuyor; daha sonra devam edebilirsiniz."],
     ["KART_BATCH_SINIRI", "Kart kaynakları üretim sınırını aşıyor. Lütfen yöneticiye bildirin."],
+    ["KART_TOPLAM_CAGRI_SINIRI", "Bu üretim için izin verilen toplam kullanım sınırına ulaşıldı. Hazır kartlar korundu. Devam etmek için yöneticinizin kullanım sınırını incelemesi gerekiyor."],
+    ["KART_ILERLEME_YOK", "Yeni ve doğrulanabilir kart üretilemediği için işlem durduruldu. Kaydedilen kartlar korundu; ders kaynaklarını kontrol edin."],
     ["KART_GECERSIZ_YANIT", "Üretilen kartlar kaynaklarıyla doğrulanamadı. Eksik konuları yeniden deneyebilirsiniz."],
     ["KART_ISLEM_CAGRI_SINIRI", "Bu işlemin güvenli çağrı sınırına ulaşıldı. Kaydedilen kartlar korundu; eksik konulara devam edebilirsiniz."],
     ["KART_DERS_CAGRI_SINIRI", "Bu dersin günlük kart üretim sınırına ulaşıldı. Kaydedilen kartlar korunuyor; daha sonra devam edebilirsiniz."],

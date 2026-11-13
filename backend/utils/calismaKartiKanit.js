@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { kartKelimeleri, kartMetniniNormalizeEt, kartlarBenzerMi } from "./calismaKartiDogrulama.js";
 
 // Yalnız açık tanım kalıpları soru-cevaba çevrilir. Serbest model sorusu veya
@@ -103,6 +104,63 @@ export const kartPartisiniDogrula = (veri, { konuId, konu, kartSayisi, kaynaklar
             (k.kaynak?.alinti && kartMetniniNormalizeEt(k.kaynak.alinti) === kartMetniniNormalizeEt(yeni.kaynak.alinti)))) {
             reddet(index, "TEKRAR_KART"); continue;
         }
+        kartlar.push(yeni);
+    }
+    return { kartlar, reddedilenler };
+};
+
+// V3: kavramı ve soruyu model yazar. Cevap serbest açıklama değildir: tam kaynak
+// cümlesi veya bu cümledeki açık tanımın TAM cevabı olmalıdır. Böylece bir sözcük
+// eşleşmesi, kesilmiş olumsuzluk veya doğru parça kimliği tek başına kanıt olmaz.
+export const dogalKartPartisiniDogrula = (kartAdaylari, { konu, kaynaklar, kaynakBaglami, oncekiKartlar = [], maksimumKart = 12 }) => {
+    const kartlar = [], reddedilenler = [];
+    const reddet = (kartIndex, dogrulamaAltKodu) => reddedilenler.push({ kartIndex, dogrulamaAltKodu });
+    if (!Array.isArray(kartAdaylari)) return { kartlar, reddedilenler: [{ kartIndex: null, dogrulamaAltKodu: "KART_ALANLARI" }] };
+    if (kartAdaylari.length > maksimumKart) reddet(null, "KART_SAYISI");
+    for (const [index, kart] of kartAdaylari.slice(0, maksimumKart).entries()) {
+        if (!kart || kart.konuId !== konu.konuId) { reddet(index, "KONU_KIMLIGI"); continue; }
+        if (Object.keys(kart).some(k => !["konuId", "metinParcasiId", "kavram", "soru", "cevap", "kanit"].includes(k)) ||
+            !["metinParcasiId", "kavram", "soru", "cevap", "kanit"].every(k => typeof kart[k] === "string" && kart[k].trim())) {
+            reddet(index, "KART_ALANLARI"); continue;
+        }
+        const kaynak = kaynaklar.find(k => String(k.metinParcasiId) === kart.metinParcasiId);
+        if (!kaynak || !kaynakBaglami?.kullaniciId || !kaynakBaglami?.dersId || !kaynak.islemeId ||
+            !Array.isArray(kaynakBaglami.materyaller) || String(kaynak.kullaniciId) !== String(kaynakBaglami.kullaniciId) ||
+            String(kaynak.dersId) !== String(kaynakBaglami.dersId) || !konu.kaynakIds.includes(String(kaynak.materyalId)) ||
+            !kaynakBaglami.materyaller.some(m => String(m._id) === String(kaynak.materyalId) && String(m.aktifIslemeId) === String(kaynak.islemeId))) {
+            reddet(index, "KAYNAK_REFERANSI"); continue;
+        }
+        const soru = kart.soru.trim(), cevap = kart.cevap.trim(), kanit = kart.kanit.trim(), kavram = kart.kavram.trim();
+        if (soru.length < 10 || soru.length > 240 || !soru.endsWith("?") || (soru.match(/\?/g) || []).length !== 1 || /[\r\n]|\[\.\.\.\]|boşluğu tamamla/iu.test(soru)) {
+            reddet(index, "SORU_UZUNLUGU"); continue;
+        }
+        if (cevap.length < 5 || cevap.length > 600 || kavram.length > 120) { reddet(index, "CEVAP_UZUNLUGU"); continue; }
+        if (kanit.length < 10 || kanit.length > 700) { reddet(index, "ALINTI_UZUNLUGU"); continue; }
+        const baslangic = kaynak.icerik.indexOf(kanit);
+        if (baslangic < 0) { reddet(index, "ALINTI_KAYNAKTA_YOK"); continue; }
+        // Alıntı tüm bir cümle/satır olmalı; "... değildir" içinden "...dir"
+        // veya koşullu bir cümleden koşulsuz sonuç kesilemez.
+        const cumleler = [...kaynak.icerik.matchAll(/[^\r\n]+/gu)].flatMap(s => [...new Intl.Segmenter("tr", { granularity: "sentence" }).segment(s[0])].map(c => c.segment.trim()));
+        if (!cumleler.includes(kanit)) { reddet(index, "CEVAP_ARALIGI_GECERSIZ"); continue; }
+        const tanim = dogalKartSeceneginiOlustur(kanit);
+        if (cevap !== kanit && cevap !== tanim?.metin) { reddet(index, "CEVAP_KANITTA_YOK"); continue; }
+        const odak = kartMetniniNormalizeEt(kavram), soruMetni = kartMetniniNormalizeEt(soru), kanitMetni = kartMetniniNormalizeEt(kanit);
+        if (odak.length < 2 || !(` ${kanitMetni} `).includes(` ${odak} `) || !soruMetni.includes(odak)) {
+            reddet(index, "SORU_KAYNAK_ILISKISI"); continue;
+        }
+        // Sayısal ve özel teknik iddialar soruya da kaynaksız eklenemez.
+        const baglam = kartMetniniNormalizeEt(`${kanit} ${konu.baslik} ${konu.aciklama || ""}`);
+        const yeniIddia = (soru.match(/\d+(?:[.,]\d+)*|\b[A-Z]{2,}\b/gu) || []).some(t => !(` ${baglam} `).includes(` ${kartMetniniNormalizeEt(t)} `));
+        if (yeniIddia) { reddet(index, "SORU_KAYNAK_ILISKISI"); continue; }
+        const kavramId = createHash("sha256").update(`${konu.konuId}\0${odak}`).digest("hex").slice(0, 24);
+        const cevapBaslangic = baslangic + kanit.indexOf(cevap);
+        const yeni = { konuId: konu.konuId, kavram, kavramId, kavramTuru: "model_secimi", soru, cevap, tur: "soru_cevap", kaynak: {
+            materyalId: kaynak.materyalId, islemeId: kaynak.islemeId, metinParcasiId: kaynak.metinParcasiId,
+            parcaIndex: kaynak.parcaIndex, dosyaAdi: kaynak.dosyaAdi, alinti: kanit,
+            kanitBaslangic: baslangic, kanitBitis: baslangic + kanit.length, cevapBaslangic, cevapBitis: cevapBaslangic + cevap.length,
+        } };
+        if ([...oncekiKartlar, ...kartlar].some(k => k.kavramId === kavramId || kartlarBenzerMi(k, yeni) ||
+            kartMetniniNormalizeEt(k.kaynak?.alinti) === kanitMetni)) { reddet(index, "TEKRAR_KART"); continue; }
         kartlar.push(yeni);
     }
     return { kartlar, reddedilenler };

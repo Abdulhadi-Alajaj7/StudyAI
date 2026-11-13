@@ -7,17 +7,22 @@ import { pathToFileURL } from "node:url";
 import { kartKonulariniGetir, konuKartKaynaklariniSec } from "../services/calismaKartlariService.js";
 import { geminiIleKartBatchiUret, getGeminiClient } from "../services/geminiService.js";
 import { kartHataTanilamasiniOlustur } from "../utils/calismaKartiTanilama.js";
-import { kartKavramPlaniniOlustur, kartBatchleriniPlanla, kartBatchAyarlari } from "../utils/calismaKartiPlanlama.js";
+import { kartKaynakBatchleriniPlanla, kartKaynakAnahtari, kartBatchAyarlari } from "../utils/calismaKartiPlanlama.js";
 
 // Saf hazırlık: testte sentetik snapshot ile kullanılır; ağ/DB erişimi yapmaz.
 export const ilkEksikKartBatchiniHazirla = ({ konular, parcalar, materyaller, deste }, ayar = kartBatchAyarlari()) => {
     const konu = konular.find(k => !deste?.konular?.find(eski => eski.konuId === k.konuId)?.tamamlandi);
     if (!konu) return null;
     const oncekiKartlar = (deste?.konular || []).flatMap(k => k.kartlar || []);
-    const kaynaklar = konuKartKaynaklariniSec(konu, parcalar, materyaller).map(k => ({ ...k, anahtar: `${konu.konuId}:${k.anahtar}` }));
-    const plan = kartKavramPlaniniOlustur(konu, kaynaklar, oncekiKartlar);
-    const partiler = kartBatchleriniPlanla([{ konu, kaynaklar, kavramlar: plan.kavramlar }], { ...ayar, konu: 1 });
-    return { konu, plan, parti: partiler[0] || [], oncekiKartlar };
+    const checkpoint = deste?.konular?.find(k => k.konuId === konu.konuId);
+    const sabitIds = checkpoint?.kaynakParcaIds?.map(String);
+    const adaylar = sabitIds?.length ? parcalar.filter(p => sabitIds.includes(String(p._id))) : parcalar;
+    // Salt okunur tanı embedding çağırmaz; kaydedilmiş seçimi veya keyword'ü kullanır.
+    const kaynaklar = konuKartKaynaklariniSec(konu, adaylar, materyaller, sabitIds?.length
+        ? adaylar.map(p => ({ ...p, metinParcasiId: p._id, skor: 1 })) : [])
+        .filter(k => !(checkpoint?.incelenenKaynaklar || []).includes(kartKaynakAnahtari(k)));
+    const partiler = kartKaynakBatchleriniPlanla([{ konu, kaynaklar }], oncekiKartlar, { ...ayar, konu: 1 });
+    return { konu, parti: partiler[0] || [], oncekiKartlar, kalanKaynakSayisi: kaynaklar.length };
 };
 
 const taniyiCalistir = async () => {
@@ -49,38 +54,37 @@ if (!dersArg || !/^[a-f\d]{24}$/i.test(dersArg.slice(10)) || args.some(a => a !=
         if (!materyaller.length) throw Object.assign(new Error(), { kod: "KART_KAYNAK_YETERSIZ" });
         const parcalar = await col("MetinParcasi").find({ ...f,
             $or: materyaller.map(m => ({ materyalId: m._id, islemeId: m.aktifIslemeId })),
-        }, { ...opts, projection: { materyalId: 1, islemeId: 1, parcaIndex: 1, icerik: 1 } })
+        }, { ...opts, projection: { kullaniciId: 1, dersId: 1, materyalId: 1, islemeId: 1, parcaIndex: 1, icerik: 1 } })
             .sort({ materyalId: 1, parcaIndex: 1 }).toArray();
         const imza = createHash("sha256").update(JSON.stringify({ konular,
             surumler: materyaller.map(m => [String(m._id), String(m.aktifIslemeId)]).sort(),
         })).digest("hex");
         const hazirlik = ilkEksikKartBatchiniHazirla({ konular, parcalar, materyaller, deste });
         konuId = hazirlik?.konu.konuId;
-        const kartSayisi = hazirlik?.parti.reduce((n, is) => n + is.kavramlar.length, 0) || 0;
+        const kaynakSayisi = hazirlik?.parti.reduce((n, is) => n + is.kaynaklar.length, 0) || 0;
         console.log(JSON.stringify({ saltOkunur: true,
             dersHazirlamaDurumu: ["bekliyor", "isleniyor", "hata", "tamamlandi"].includes(ders.hazirlamaDurumu) ? ders.hazirlamaDurumu : "bilinmiyor",
             hazirMateryal: materyaller.length, aktifParca: parcalar.length,
-            konu: konular.length, ilkEksikKonununKavramSayisi: hazirlik?.plan.kavramlar.length || 0,
-            kalanKavramSayisi: hazirlik?.plan.kavramlar.filter(k => !k.tamamlandi).length || 0,
-            sifirKartNedeni: hazirlik?.plan.sifirKartNedeni || "", retrievalYontemi: "keyword",
+            konu: konular.length, kalanKaynakSayisi: hazirlik?.kalanKaynakSayisi || 0,
+            retrievalYontemi: "checkpoint_veya_keyword", protokolSurumu: 3,
             desteDurumu: deste?.durum || "yok", hataKodu: deste?.hataKodu || "", hataTanilamaVar: Boolean(deste?.hataTanilama),
-            kaynakImzasiGuncel: !deste || deste.kaynakImzasi === imza, konuId, kartSayisi, sdkCagrisi }));
+            kaynakImzasiGuncel: !deste || deste.kaynakImzasi === imza, konuId, kaynakSayisi, sdkCagrisi }));
         if (args.includes("--gemini")) {
-            if (deste?.aktifIslemToken || (deste && deste.kaynakImzasi !== imza) || !kartSayisi) {
+            if (deste?.aktifIslemToken || ["kuyrukta", "calisiyor", "bekliyor"].includes(deste?.uretimIsi?.durum) || (deste && deste.kaynakImzasi !== imza) || !kaynakSayisi) {
                 throw Object.assign(new Error(), { kod: "CANLI_TANI_UYGUN_DEGIL" });
             }
             asama = "GEMINI_ISTEGI";
             const istemci = getGeminiClient();
             const sonuc = await geminiIleKartBatchiUret({ isler: hazirlik.parti, oncekiKartlar: hazirlik.oncekiKartlar,
-                apiCagriButcesi: { maksimum: 1, kullanilan: 0 } },
+                kaynakBaglami: { ...f, materyaller }, apiCagriButcesi: { maksimum: 1, kullanilan: 0 } },
             { maxDeneme: 1, env: { ...process.env, GEMINI_MODEL_ROUTING_AKTIF: "false" }, istemci: { models: { generateContent: g => {
                 if (sdkCagrisi >= 1) throw Object.assign(new Error(), { kod: "CANLI_TANI_CAGRI_SINIRI" });
                 sdkCagrisi++; return istemci.models.generateContent(g);
             } } } });
             const kartlar = sonuc.sonuclar.flatMap(s => s.kartlar), reddedilenler = sonuc.sonuclar.flatMap(s => s.reddedilenler);
-            console.log(JSON.stringify({ sonuc: !kartlar.length ? "dogrulanamadi" : kartlar.length < kartSayisi ? "kismi_dogrulandi" : "dogrulandi",
+            console.log(JSON.stringify({ sonuc: reddedilenler.length ? "kismi_dogrulandi" : sonuc.sonuclar.every(s => s.kaynaklarTamamlandi) ? "dogrulandi" : "devam_gerekli",
                 kartSayisi: kartlar.length, reddedilenler, model: sonuc.tanilama.model, sdkCagrisi, embeddingCagrisi: 0, veritabaninaYazildi: false }));
-            if (!kartlar.length) process.exitCode = 1;
+            if (reddedilenler.length) process.exitCode = 1;
         }
     } catch (hata) {
         // Ham SDK/Mongo hata metinleri URI, anahtar veya materyal içerebilir.

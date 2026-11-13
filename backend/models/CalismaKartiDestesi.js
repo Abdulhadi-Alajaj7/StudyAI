@@ -28,6 +28,7 @@ const kartSchema = new mongoose.Schema({
     kaynak: { type: kaynakSchema, required: true },
     tur: { type: String, enum: ["soru_cevap", "bosluk_doldurma"] },
     kavramId: { type: String, maxlength: 24 },
+    kavram: { type: String, maxlength: 120 },
     kavramTuru: { type: String, maxlength: 40 },
 });
 const konuSchema = new mongoose.Schema({
@@ -42,6 +43,10 @@ const konuSchema = new mongoose.Schema({
     retrievalHataKodu: { type: String, maxlength: 80 },
     kullanilanModel: { type: String, maxlength: 120 },
     planSurumu: Number,
+    kaynakParcaIds: { type: [mongoose.Schema.Types.ObjectId], default: undefined },
+    incelenenKaynaklar: { type: [String], default: undefined },
+    gecersizDenemeSayisi: { type: Number, default: 0 },
+    uretimiDurduruldu: { type: Boolean, default: false },
     tamamlandi: { type: Boolean, default: false },
     kartlar: { type: [kartSchema], default: [] },
     denemeSayisi: { type: Number, default: 0, min: 0 },
@@ -68,6 +73,19 @@ const schema = new mongoose.Schema({
     aktifCagriLimiti: { type: Number, default: 0, min: 0 },
     sonIslemSdkCagrisi: { type: Number, default: 0, min: 0 },
     kullanilanModel: { type: String, default: "", maxlength: 120 },
+    // Aynı deste aynı zamanda kalıcı iş kaydıdır; eski destelerde bu alan yoktur.
+    uretimIsi: { type: new mongoose.Schema({
+        protokolSurumu: { type: Number, default: 3 },
+        durum: { type: String, enum: ["kuyrukta", "calisiyor", "bekliyor", "tamamlandi", "durduruldu"], required: true },
+        baslangic: Date, sonrakiDeneme: Date,
+        toplamCagriLimiti: { type: Number, required: true, min: 1, max: 200 },
+        ayrilanToplamCagri: { type: Number, default: 0, min: 0 },
+        gercekSdkCagrisi: { type: Number, default: 0, min: 0 },
+        geciciHataSayisi: { type: Number, default: 0, min: 0 },
+        ilerlemesizTurSayisi: { type: Number, default: 0, min: 0 },
+        beklemeNedeni: { type: String, default: "", maxlength: 80 },
+    }, { _id: false }), default: undefined },
 }, { timestamps: true });
 schema.index({ kullaniciId: 1, dersId: 1 }, { unique: true });
+schema.index({ "uretimIsi.durum": 1, "uretimIsi.sonrakiDeneme": 1, sonYenileme: 1 });
 export default mongoose.model("CalismaKartiDestesi", schema);

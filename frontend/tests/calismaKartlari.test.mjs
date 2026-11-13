@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { calismaKartlariApiOlustur } from "../src/services/calismaKartlariApi.mjs";
-import { acikKartiKoru, kartlariFiltrele, kartDurumunuUygula, kartKonulariniGrupla, kartGorunumleri, kartKonuDurumMesaji } from "../src/utils/calismaKartlariYardimcilari.mjs";
+import { acikKartiKoru, kartlariFiltrele, kartDurumunuUygula, kartKonulariniGrupla, kartGorunumleri, kartKonuDurumMesaji, kartUretimDurumMesaji } from "../src/utils/calismaKartlariYardimcilari.mjs";
 import { kullaniciHataMesaji } from "../src/utils/kullaniciHatasi.mjs";
 const kartlar = [
     { _id: "1", konuId: "a", goruldu: false, yildizli: true },
@@ -64,4 +64,19 @@ test("kart hataları teknik gövdeden bağımsız sabit Türkçe mesaj gösterir
     } } });
     assert.match(baglantiMesaji, /kaynak bağlantısı doğrulanamadı/);
     assert.doesNotMatch(baglantiMesaji, /yeterli kaynak|sentetik-gizli/);
+});
+
+
+test("kalıcı iş beklemesi otomatik devamı açıklar; bilinmeyen kart sayısı sabit hedef gibi sunulmaz", () => {
+    const r = kartUretimDurumMesaji({ uretimIsi: { durum: "bekliyor", sonrakiDeneme: "2026-11-14T09:00:00Z" } });
+    assert.match(r.baslik, /otomatik devam/); assert.match(r.aciklama, /yeniden denenecek/);
+    assert.match(r.aciklama, /açık tutmanız gerekmez/);
+    assert.doesNotMatch(kartUretimDurumMesaji({ uretimIsi: { durum: "bekliyor", sonrakiDeneme: "bozuk" } }).aciklama, /Invalid/);
+    assert.match(kartKonuDurumMesaji({ kartSayisi: 6, eksikKartSayisi: null }), /6 kart hazır; kaynaklar inceleniyor/);
+});
+
+test("toplam tüketim ve ilerleme durması öğrenciyi sürekli yeniden denemeye yönlendirmez", () => {
+    const mesaj = kod => kullaniciHataMesaji({ response: { status: 429, data: { kod } } });
+    assert.match(mesaj("KART_TOPLAM_CAGRI_SINIRI"), /toplam kullanım sınırına/);
+    assert.match(mesaj("KART_ILERLEME_YOK"), /durduruldu/);
 });

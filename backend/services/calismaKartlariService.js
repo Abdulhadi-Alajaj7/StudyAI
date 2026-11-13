@@ -9,7 +9,8 @@ import KartCalismaDurumu from "../models/KartCalismaDurumu.js";
 import KartDegerlendirmesi from "../models/KartDegerlendirmesi.js";
 import { geminiIleCalismaKartlariUret, geminiIleKartBatchiUret, VARSAYILAN_GEMINI_MODELI } from "./geminiService.js";
 import { semanticAramaYap } from "./semanticAramaService.js";
-import { kartKavramPlaniniOlustur, kartBatchleriniPlanla, kartBatchAyarlari } from "../utils/calismaKartiPlanlama.js";
+import { kartKavramPlaniniOlustur, kartKaynakBatchleriniPlanla, kartKaynakAnahtari, kartBatchAyarlari } from "../utils/calismaKartiPlanlama.js";
+import { geminiGunSonunaKalanMs } from "../utils/geminiOrtakIstekYonetimi.js";
 import { kartKelimeleri } from "../utils/calismaKartiDogrulama.js";
 import { kartHataTanilamasiniOlustur } from "../utils/calismaKartiTanilama.js";
 
@@ -17,18 +18,24 @@ const KILIT_MS = 3 * 60_000;
 const BUTCE_PENCERESI_MS = 24 * 60 * 60_000;
 export const kartCagriSinirlariniGetir = (ayar = {}) => {
     const sinirla = (v, varsayilan, ust) => Number.isInteger(Number(v)) && Number(v) > 0 ? Math.min(ust, Number(v)) : varsayilan;
-    return { islem: sinirla(ayar.islem ?? process.env.GEMINI_KART_ISLEM_CAGRI_BUTCESI, 4, 12),
-        ders: sinirla(ayar.ders ?? process.env.GEMINI_KART_DERS_GUNLUK_CAGRI_BUTCESI, 48, 200) };
+    const ders = sinirla(ayar.ders ?? process.env.GEMINI_KART_DERS_GUNLUK_CAGRI_BUTCESI, 48, 200);
+    return { islem: sinirla(ayar.islem ?? process.env.GEMINI_KART_ISLEM_CAGRI_BUTCESI, 4, 12), ders,
+        toplam: sinirla(ayar.toplam ?? process.env.GEMINI_KART_TOPLAM_CAGRI_BUTCESI, ders, 200) };
 };
 const cagriHakkiniAyir = (deste, deps) => {
     const sinir = kartCagriSinirlariniGetir(deps.cagriSinirlari);
     const baslangic = new Date(deste?.cagriPenceresiBaslangici || 0).getTime();
     const guncel = Boolean(deste?.cagriPenceresiBaslangici) && baslangic > deps.simdi().getTime() - BUTCE_PENCERESI_MS;
     const kullanilan = guncel ? (deste.ayrilanCagriSayisi || 0) : 0;
-    const limit = Math.min(sinir.islem, sinir.ders - kullanilan);
+    const is = deste?.uretimIsi || { protokolSurumu: 3, toplamCagriLimiti: sinir.toplam, ayrilanToplamCagri: 0,
+        gercekSdkCagrisi: 0, geciciHataSayisi: 0, ilerlemesizTurSayisi: 0, baslangic: deps.simdi() };
+    const toplamKalan = is.toplamCagriLimiti - is.ayrilanToplamCagri;
+    if (toplamKalan <= 0) throw new CalismaKartiHatasi("Onaylı toplam kart üretim sınırına ulaşıldı. Kaydedilen kartlar korunuyor.", "KART_TOPLAM_CAGRI_SINIRI", 429);
+    const limit = Math.min(sinir.islem, sinir.ders - kullanilan, toplamKalan);
     if (limit <= 0) throw new CalismaKartiHatasi("Bu dersin günlük kart üretim sınırına ulaşıldı. Kaydedilen kartlar korunuyor; daha sonra devam edebilirsiniz.", "KART_DERS_CAGRI_SINIRI", 429);
     return { cagriPenceresiBaslangici: guncel ? deste.cagriPenceresiBaslangici : deps.simdi(),
-        ayrilanCagriSayisi: kullanilan + limit, aktifCagriLimiti: limit, sonIslemSdkCagrisi: 0 };
+        ayrilanCagriSayisi: kullanilan + limit, aktifCagriLimiti: limit, sonIslemSdkCagrisi: 0,
+        uretimIsi: { ...is, durum: "calisiyor", sonrakiDeneme: deps.simdi(), beklemeNedeni: "", ayrilanToplamCagri: is.ayrilanToplamCagri + limit } };
 };
 const kimlik = deger => String(deger ?? "");
 const nesne = belge => belge?.toObject ? belge.toObject() : belge;
@@ -47,7 +54,7 @@ const depsGetir = (d = {}) => ({
     kartBatchUret: d.kartUret && !d.kartBatchUret ? async ({ isler, ...ortak }) => {
         const sonuclar = [];
         for (const is of isler) sonuclar.push({ konuId: is.konu.konuId, ...await d.kartUret({ ...ortak,
-            konu: is.konu, kaynaklar: is.kaynaklar, kartSayisi: is.kavramlar.length }) });
+            konu: is.konu, kaynaklar: is.kaynaklar, kartSayisi: kartKavramPlaniniOlustur(is.konu, is.kaynaklar, ortak.oncekiKartlar).kavramlar.filter(k => !k.tamamlandi).length }), kaynaklarTamamlandi: true });
         return { sonuclar };
     } : geminiIleKartBatchiUret,
     tanilamaLogla: veri => console.error("[CalismaKartlari]", veri),
@@ -130,10 +137,10 @@ export const konuKartKaynaklariniSec = (konu, parcalar, materyaller, semanticSon
         const skor = [...kelimeler].filter(k => [...metin].some(m => m === k || (Math.min(m.length, k.length) >= 5 && (m.startsWith(k) || k.startsWith(m))))).length;
         const semantic = semanticSonuclar.find(s => kimlik(s.metinParcasiId) === kimlik(parca._id) &&
             kimlik(s.materyalId) === kimlik(parca.materyalId) && kimlik(s.islemeId) === kimlik(parca.islemeId) && s.icerik === parca.icerik);
-        return { parca, skor, birlesik: skor / Math.max(1, kelimeler.size) + (Number.isFinite(semantic?.skor) ? Math.max(0, semantic.skor) : 0) };
-    }).filter(a => a.skor > 0).sort((a, b) => b.birlesik - a.birlesik || a.parca.parcaIndex - b.parca.parcaIndex);
-    // Önce her materyalin en ilgili parçası, sonra ortak sıralama. Semantik skor
-    // konu ilişkisini ve aktif kaynak denetimini aşamaz; özgün parça kesilmez.
+        return { parca, skor, semanticSkor: semantic?.skor || 0, birlesik: skor / Math.max(1, kelimeler.size) + (Number.isFinite(semantic?.skor) ? Math.max(0, semantic.skor) : 0) };
+    }).filter(a => a.skor > 0 || a.semanticSkor >= 0.65).sort((a, b) => b.birlesik - a.birlesik || a.parca.parcaIndex - b.parca.parcaIndex);
+    // Önce her materyalin en ilgili parçası, sonra ortak sıralama. Güçlü semantik
+    // eşleşme kelime örtüşmesi gerektirmez; aktif kaynak denetimi hep uygulanır.
     const secim = [], gorulen = new Set(), materyalGoruldu = new Set();
     for (const a of adaylar) if (!materyalGoruldu.has(kimlik(a.parca.materyalId))) {
         secim.push(a.parca); gorulen.add(a.parca); materyalGoruldu.add(kimlik(a.parca.materyalId));
@@ -141,16 +148,20 @@ export const konuKartKaynaklariniSec = (konu, parcalar, materyaller, semanticSon
     for (const a of adaylar) if (!gorulen.has(a.parca)) secim.push(a.parca);
     let uzunluk = 0;
     const secilen = secim.filter(p => { if (uzunluk + p.icerik.length > 12_000) return false; uzunluk += p.icerik.length; return true; }).slice(0, 10);
+    return kaynaklariSun(secilen, materyaller);
+};
+const kaynaklariSun = (parcalar, materyaller) => {
     const harita = new Map(materyaller.map(m => [kimlik(m._id), m]));
-    return secilen.map((p, i) => ({
+    return parcalar.map((p, i) => ({
         anahtar: `K${i + 1}`, materyalId: p.materyalId, islemeId: p.islemeId,
+        kullaniciId: p.kullaniciId, dersId: p.dersId,
         metinParcasiId: p._id,
         parcaIndex: p.parcaIndex, icerik: p.icerik,
         dosyaAdi: harita.get(kimlik(p.materyalId))?.orijinalDosyaAdi || harita.get(kimlik(p.materyalId))?.dosyaAdi || "Materyal",
     }));
 };
 export const konuKartHybridKaynaklariniSec = async ({ girdi, konu, parcalar, materyaller, apiCagriButcesi, sahipligiDogrula }, deps) => {
-    let sonuclar = [], retrievalYontemi = "keyword", retrievalHataKodu = "";
+    let sonuclar = [], retrievalYontemi = "keyword", retrievalHataKodu = "", retrievalHatasi = null;
     if (process.env.GEMINI_KART_HYBRID_AKTIF !== "false") {
         try {
             const semantic = await deps.semanticArama({ ...girdi, materyalIds: konu.kaynakIds,
@@ -161,17 +172,24 @@ export const konuKartHybridKaynaklariniSec = async ({ girdi, konu, parcalar, mat
         } catch (hata) {
             if (hata?.sahiplikHatasi || (hata?.kod && /KILIT|SAHIP|IPTAL|DERS_BULUNAMADI/.test(hata.kod))) throw hata;
             retrievalYontemi = "keyword_fallback";
-            retrievalHataKodu = ["EMBEDDING_SERVIS_HATASI", "EMBEDDING_GUNLUK_LIMIT", "EMBEDDING_KOTA_ASIMI", "GEMINI_CAGRI_BUTCESI_ASILDI"].includes(hata?.kod) ? hata.kod : "KART_SEMANTIC_HATASI";
+            const kod = { EMBEDDING_SERVIS_HATASI: "GEMINI_GECICI_HATA", EMBEDDING_GUNLUK_LIMIT: "GEMINI_GUNLUK_KOTA",
+                EMBEDDING_KOTA_ASIMI: "GEMINI_KOTA_ASIMI", EMBEDDING_YETKISIZ: "GEMINI_YAPILANDIRMA",
+                EMBEDDING_MODEL_BULUNAMADI: "GEMINI_MODEL_BULUNAMADI", GEMINI_503: "GEMINI_GECICI_HATA" }[hata?.kod] || guvenliKod(hata?.kod);
+            retrievalHataKodu = ["EMBEDDING_SERVIS_HATASI", "EMBEDDING_GUNLUK_LIMIT", "EMBEDDING_KOTA_ASIMI", "EMBEDDING_YETKISIZ", "EMBEDDING_MODEL_BULUNAMADI", "GEMINI_CAGRI_BUTCESI_ASILDI"].includes(hata?.kod)
+                ? hata.kod : kod === "KART_URETIM_HATASI" ? "KART_SEMANTIC_HATASI" : kod;
+            retrievalHatasi = { kod: kod === "KART_URETIM_HATASI" ? "GEMINI_GECICI_HATA" : kod,
+                retryAfterMs: Number.isFinite(hata.retryAfterMs) ? hata.retryAfterMs : 0 };
         }
     }
-    return { kaynaklar: konuKartKaynaklariniSec(konu, parcalar, materyaller, sonuclar), retrievalYontemi, retrievalHataKodu };
+    return { kaynaklar: konuKartKaynaklariniSec(konu, parcalar, materyaller, sonuclar), retrievalYontemi, retrievalHataKodu, retrievalHatasi };
 };
 const parcalariGetir = (girdi, baglam, deps) => deps.MetinParcasiModel.find({
     ...filtre(girdi), $or: baglam.materyaller.map(m => ({ materyalId: m._id, islemeId: m.aktifIslemeId })),
-}).select("_id materyalId islemeId parcaIndex icerik").sort({ materyalId: 1, parcaIndex: 1 }).lean();
+}).select("_id kullaniciId dersId materyalId islemeId parcaIndex icerik").sort({ materyalId: 1, parcaIndex: 1 }).lean();
 
 const kartlariGetir = deste => (deste?.konular || []).flatMap(k => k.kartlar || []);
 const guvenliKod = kod => new Set([
+    "KART_TOPLAM_CAGRI_SINIRI", "KART_ILERLEME_YOK",
     "GEMINI_YEREL_RPM", "GEMINI_YEREL_TPM", "GEMINI_YEREL_RPD", "GEMINI_YEREL_KOTA", "GEMINI_MODEL_KAPALI", "GEMINI_ISLEM_SURESI", "KART_BATCH_SINIRI",
     "KART_GECERSIZ_YANIT", "KART_KAYIT_HATASI", "KART_KANIT_YETERSIZ", "KART_ISLEM_CAGRI_SINIRI", "KART_DERS_CAGRI_SINIRI", "KART_KAYNAK_YETERSIZ", "KART_KAYNAK_BAGLANTISI_EKSIK", "KART_KAYNAK_DEGISTI", "KART_KILIT_KAYBI",
     "GEMINI_GECICI_HATA", "GEMINI_KOTA_ASIMI", "GEMINI_GUNLUK_KOTA", "GEMINI_ZAMAN_ASIMI",
@@ -183,6 +201,8 @@ const tanilamayiLogla = (deps, veri) => {
 };
 
 const eskiKilidiKapat = async (girdi, deste, deps) => {
+    // Kalıcı işler GET ile kapatılmaz; zamanlayıcı lease süresi dolunca devralır.
+    if (deste?.uretimIsi) return deste;
     if (!deste?.aktifIslemToken || new Date(deste.sonYenileme || 0).getTime() > deps.simdi().getTime() - KILIT_MS) return deste;
     await deps.DesteModel.updateOne({ ...filtre(girdi), _id: deste._id, aktifIslemToken: deste.aktifIslemToken,
         sonYenileme: deste.sonYenileme }, { $set: {
@@ -201,11 +221,13 @@ export const kartDestesiniSun = (deste, durumlar = []) => {
     const gorulen = kartlar.filter(k => k.goruldu).length;
     return {
         durum: deste?.durum || "yok", desteId: deste ? kimlik(deste._id) : null,
-        olusturulabilir: true, hataKodu: deste?.hataKodu || "", kartlar,
+        olusturulabilir: deste?.hataKodu !== "KART_TOPLAM_CAGRI_SINIRI", hataKodu: deste?.hataKodu || "", kartlar,
+        uretimIsi: deste?.uretimIsi ? { durum: deste.uretimIsi.durum, sonrakiDeneme: deste.uretimIsi.sonrakiDeneme,
+            beklemeNedeni: deste.uretimIsi.beklemeNedeni } : null,
         ilerleme: { tamamlananKonu: deste?.konular.filter(k => k.tamamlandi).length || 0, toplamKonu: deste?.konular.length || 0 },
         istatistikler: { toplam: kartlar.length, gorulen, gorulmeyen: kartlar.length - gorulen, yildizli: kartlar.filter(k => k.yildizli).length },
         konular: (deste?.konular || []).map(k => ({ konuId: k.konuId, anaKonuId: k.anaKonuId, baslik: k.baslik, anaBaslik: k.anaBaslik,
-            tamamlandi: k.tamamlandi, kartSayisi: k.kartlar.length, eksikKartSayisi: Math.max(0, k.hedefKartSayisi - k.kartlar.length), hataKodu: k.hataKodu || "",
+            tamamlandi: k.tamamlandi, kartSayisi: k.kartlar.length, eksikKartSayisi: k.planSurumu === 3 && !k.tamamlandi ? null : Math.max(0, k.hedefKartSayisi - k.kartlar.length), hataKodu: k.hataKodu || "",
             kavramSayisi: k.kavramSayisi, sifirKartNedeni: k.sifirKartNedeni || "", retrievalYontemi: k.retrievalYontemi || "keyword" })),
     };
 };
@@ -226,23 +248,29 @@ export const calismaKartlariniGetir = async (girdi, bagimliliklar = {}) => {
     return sun(girdi, await eskiKilidiKapat(girdi, deste, deps), deps);
 };
 
+export const kartIsiBeklemesiniGetir = (hata, simdi, hataSayisi = 0) => {
+    const kod = hata?.kod;
+    if (["GEMINI_GUNLUK_KOTA", "GEMINI_YEREL_RPD"].includes(kod)) return Math.max(geminiGunSonunaKalanMs(simdi), hata.retryAfterMs || 0) + 1000;
+    if (["GEMINI_YEREL_RPM", "GEMINI_YEREL_TPM", "GEMINI_YEREL_KOTA", "GEMINI_KOTA_ASIMI", "GEMINI_429", "GEMINI_ISTEK_YOGUNLUGU"].includes(kod)) {
+        return Math.max(10_000, hata.retryAfterMs || hata.tanilama?.retryAfterMs || 60_000);
+    }
+    if (hataSayisi < 3 && ["GEMINI_GECICI_HATA", "GEMINI_503", "GEMINI_SUNUCU_HATASI", "GEMINI_AG_HATASI", "GEMINI_ZAMAN_ASIMI", "KART_KAYIT_HATASI"].includes(kod)) {
+        return Math.max(hata.retryAfterMs || 0, 60_000 * 2 ** hataSayisi);
+    }
+    return null;
+};
+
 const desteyiUret = async (girdi, ilkDeste, token, deps) => {
-    let yenileme = null, kilitHatasi = null;
-    let asama = "KAYNAK_SECIMI", konuId, sonHataKodu = "", sonTanilama = null;
+    let yenileme = null, kilitHatasi = null, asama = "KAYNAK_SECIMI", konuId, ilerledi = false;
     const konular = ilkDeste.konular.map(k => ({ ...k, kartlar: [...k.kartlar] }));
-    const oncekiKartlar = kartlariGetir(ilkDeste);
+    const oncekiKartlar = kartlariGetir(ilkDeste), is = { ...ilkDeste.uretimIsi };
     const apiCagriButcesi = { kullanilan: 0, maksimum: ilkDeste.aktifCagriLimiti };
-    const butceSonucu = () => ({
-        ayrilanCagriSayisi: Math.max(0, ilkDeste.ayrilanCagriSayisi - (apiCagriButcesi.maksimum - apiCagriButcesi.kullanilan)),
-        aktifCagriLimiti: 0, sonIslemSdkCagrisi: apiCagriButcesi.kullanilan,
-    });
-    const logla = veri => tanilamayiLogla(deps, veri);
     const yenile = () => {
         if (kilitHatasi) return Promise.reject(kilitHatasi);
         if (yenileme) return yenileme;
         yenileme = deps.DesteModel.updateOne({ ...filtre(girdi), _id: ilkDeste._id, aktifIslemToken: token },
             { $currentDate: { sonYenileme: true } }, { timestamps: false })
-            .then(s => { if (s.matchedCount !== 1) throw new CalismaKartiHatasi("Kart üretim işleminin sahipliği değişti.", "KART_KILIT_KAYBI"); })
+            .then(s => { if (s.matchedCount !== 1) throw new CalismaKartiHatasi("Üretim sahipliği değişti.", "KART_KILIT_KAYBI"); })
             .catch(hata => { kilitHatasi = hata; throw hata; }).finally(() => { yenileme = null; });
         return yenileme;
     };
@@ -250,163 +278,242 @@ const desteyiUret = async (girdi, ilkDeste, token, deps) => {
         asama = "VERITABANI_KAYDI";
         await atomikDersIslemi(girdi, async session => {
             imzayiDogrula(ilkDeste, await baglamiGetir(girdi, deps, session));
-            const set = Object.fromEntries(Object.entries(alanlar).map(([k, v]) => [`konular.$.${k}`, v]));
             const kayit = await deps.DesteModel.findOneAndUpdate({ ...filtre(girdi), _id: ilkDeste._id,
-                aktifIslemToken: token, "konular.konuId": konu.konuId }, { $set: set }, { new: true, session, runValidators: true });
-            if (!kayit) throw new CalismaKartiHatasi("Kart üretim işleminin sahipliği değişti.", "KART_KILIT_KAYBI");
+                aktifIslemToken: token, "konular.konuId": konu.konuId },
+            { $set: Object.fromEntries(Object.entries(alanlar).map(([k, v]) => [`konular.$.${k}`, v])) }, { new: true, session, runValidators: true });
+            if (!kayit) throw new CalismaKartiHatasi("Üretim sahipliği değişti.", "KART_KILIT_KAYBI");
         }, deps);
-        // Yalnızca kalıcı checkpoint başarılıysa yerel plan ilerler.
         Object.assign(konu, alanlar);
     };
-    const timer = setInterval(() => { void yenile().catch(() => {}); }, deps.heartbeatMs);
-    timer.unref?.();
+    const bitir = async (durum, kod = "", beklemeMs = 0, tani = null) => {
+        const iade = apiCagriButcesi.maksimum - apiCagriButcesi.kullanilan;
+        const ayrilanToplamCagri = Math.max(0, is.ayrilanToplamCagri - iade);
+        if (durum !== "tamamlandi" && ayrilanToplamCagri >= is.toplamCagriLimiti) { durum = "durduruldu"; kod = "KART_TOPLAM_CAGRI_SINIRI"; }
+        const aktif = ["kuyrukta", "bekliyor"].includes(durum);
+        await atomikDersIslemi(girdi, async session => {
+            if (durum === "tamamlandi" || aktif) imzayiDogrula(ilkDeste, await baglamiGetir(girdi, deps, session));
+            const sonuc = await deps.DesteModel.updateOne({ ...filtre(girdi), _id: ilkDeste._id, aktifIslemToken: token }, { $set: {
+            durum: durum === "tamamlandi" ? "hazir" : aktif ? "olusturuluyor" : oncekiKartlar.length ? "kismi" : "hata",
+            aktifIslemToken: null, aktifCagriLimiti: 0, sonIslemSdkCagrisi: apiCagriButcesi.kullanilan,
+            ayrilanCagriSayisi: Math.max(0, ilkDeste.ayrilanCagriSayisi - iade), hataKodu: kod, hataTanilama: tani,
+            uretimIsi: { ...is, durum, ayrilanToplamCagri, gercekSdkCagrisi: (is.gercekSdkCagrisi || 0) + apiCagriButcesi.kullanilan,
+                sonrakiDeneme: aktif ? new Date(deps.simdi().getTime() + beklemeMs) : null, beklemeNedeni: aktif ? kod : "" },
+            } }, { session });
+            if (sonuc.matchedCount !== 1) throw new CalismaKartiHatasi("Üretim sahipliği değişti.", "KART_KILIT_KAYBI");
+        }, deps);
+    };
+    const timer = setInterval(() => { void yenile().catch(() => {}); }, deps.heartbeatMs); timer.unref?.();
     try {
-        const baglam = await baglamiGetir(girdi, deps);
-        imzayiDogrula(ilkDeste, baglam);
-        if (!baglam.materyaller.length) throw new CalismaKartiHatasi("Kart üretmek için hazır materyal bulunamadı.", "KART_KAYNAK_YETERSIZ", 422);
+        const baglam = await baglamiGetir(girdi, deps); imzayiDogrula(ilkDeste, baglam);
+        if (!baglam.materyaller.length) throw new CalismaKartiHatasi("Hazır kaynak bulunamadı.", "KART_KAYNAK_YETERSIZ", 422);
         const parcalar = await parcalariGetir(girdi, baglam, deps);
-        // Hiç denenmemiş konular, sürekli başarısız bir konunun arkasında kalmaz.
-        const bekleyenler = konular.filter(k => !k.tamamlandi).sort((a, b) => (a.denemeSayisi || 0) - (b.denemeSayisi || 0));
-        const isler = [];
-        // Sorgu embedding'leri de aynı gerçek SDK bütçesinden düşer; üretime bir
-        // deneme bırakılır. Cache/keyword için bir sağlayıcı çağrısı yapılmaz.
-        const retrievalButcesi = { maksimum: Math.max(0, apiCagriButcesi.maksimum - 1),
-            get kullanilan() { return apiCagriButcesi.kullanilan; },
-            set kullanilan(v) { apiCagriButcesi.kullanilan = v; } };
-        let semanticDurdu = false;
-        for (const konu of bekleyenler) {
-            konuId = konu.konuId; asama = "KAYNAK_SECIMI";
-            await yenile();
+        const isler = [], tumKaynaklar = new Map();
+        let kaynakBeklemesi = null, kaynakIlerledi = false, uretimDenendi = false;
+        // Tek çağrılık turda semantik kaynak seçimi ayrı tur olabilir; checkpoint
+        // sonraki turda aynı embedding'i yeniden istemeyi önler.
+        const retrievalButcesi = { maksimum: Math.max(1, apiCagriButcesi.maksimum - 1),
+            get kullanilan() { return apiCagriButcesi.kullanilan; }, set kullanilan(v) { apiCagriButcesi.kullanilan = v; } };
+        let semanticDurdu = null;
+        for (const konu of konular.filter(k => !k.tamamlandi && !k.uretimiDurduruldu).sort((a, b) => (a.denemeSayisi || 0) - (b.denemeSayisi || 0))) {
+            konuId = konu.konuId; asama = "KAYNAK_SECIMI"; await yenile();
+            const kaynakKonusu = baglam.konular.find(k => k.konuId === konu.konuId);
             try {
-                const kaynakKonusu = baglam.konular.find(k => k.konuId === konu.konuId);
-                const retrieval = await konuKartHybridKaynaklariniSec({ girdi, konu: kaynakKonusu, parcalar,
-                    materyaller: baglam.materyaller, apiCagriButcesi: retrievalButcesi, sahipligiDogrula: yenile },
-                    semanticDurdu ? { ...deps, semanticArama: async () => { throw Object.assign(new Error("Bekleme"), { kod: "KART_SEMANTIC_HATASI" }); } } : deps);
-                if (retrieval.retrievalYontemi === "keyword_fallback") semanticDurdu = true;
-                const kaynaklar = retrieval.kaynaklar.map(k => ({ ...k, anahtar: `${konu.konuId}:${k.anahtar}` }));
-                const plan = kartKavramPlaniniOlustur(kaynakKonusu, kaynaklar, oncekiKartlar);
-                const eksik = plan.kavramlar.filter(k => !k.tamamlandi);
-                if (["kaynak_yok", "kanit_yetersiz"].includes(plan.sifirKartNedeni)) {
-                    await kaydetKonu(konu, { sifirKartNedeni: plan.sifirKartNedeni, retrievalYontemi: retrieval.retrievalYontemi, retrievalHataKodu: retrieval.retrievalHataKodu });
-                    throw new CalismaKartiHatasi("Bu konu için doğrulanabilir kaynak kanıtı bulunamadı.", plan.sifirKartNedeni === "kaynak_yok" ? "KART_KAYNAK_YETERSIZ" : "KART_KANIT_YETERSIZ", 422);
+                let kaynaklar;
+                if (konu.kaynakParcaIds?.length) {
+                    // İlk seçim kalıcıdır: restart/sonraki batch yeniden embedding
+                    // harcamaz; aynı aktif snapshot ve sahiplik filtreleri uygulanır.
+                    const ids = konu.kaynakParcaIds.map(kimlik);
+                    const secilen = ids.map(id => parcalar.find(p => kimlik(p._id) === id));
+                    if (secilen.some(p => !p || !kaynakKonusu.kaynakIds.includes(kimlik(p.materyalId)))) throw new CalismaKartiHatasi("Kaynak parçası değişti.", "KART_KAYNAK_DEGISTI");
+                    kaynaklar = kaynaklariSun(secilen, baglam.materyaller);
+                } else {
+                    const retrieval = semanticDurdu
+                        ? { ...semanticDurdu, kaynaklar: konuKartKaynaklariniSec(kaynakKonusu, parcalar, baglam.materyaller) }
+                        : await konuKartHybridKaynaklariniSec({ girdi, konu: kaynakKonusu, parcalar, materyaller: baglam.materyaller,
+                            apiCagriButcesi: retrievalButcesi, sahipligiDogrula: yenile }, deps);
+                    if (retrieval.retrievalYontemi === "keyword_fallback") semanticDurdu = retrieval;
+                    kaynaklar = retrieval.kaynaklar;
+                    // Bütçe/kesinti yüzünden henüz aranamadıysa "kaynak yok"
+                    // sayılmaz. Lexical sonucu olan diğer konular ilerleyebilir.
+                    if (!kaynaklar.length && retrieval.retrievalHataKodu) {
+                        const kod = retrieval.retrievalHataKodu;
+                        if (kod !== "GEMINI_CAGRI_BUTCESI_ASILDI") kaynakBeklemesi = retrieval.retrievalHatasi;
+                        continue;
+                    }
+                    await kaydetKonu(konu, { kaynakParcaIds: kaynaklar.map(k => k.metinParcasiId), planSurumu: 3,
+                        retrievalYontemi: retrieval.retrievalYontemi, retrievalHataKodu: retrieval.retrievalHataKodu });
+                    if (kaynaklar.length) kaynakIlerledi = true;
                 }
-                await kaydetKonu(konu, { hedefKartSayisi: konu.kartlar.length + eksik.length, kavramSayisi: plan.kavramlar.length,
-                    sifirKartNedeni: plan.sifirKartNedeni || (!konu.kartlar.length && !eksik.length ? "kavramlar_zaten_kapsandi" : ""),
-                    tamamlandi: !eksik.length, planSurumu: 2, hataKodu: "", retrievalYontemi: retrieval.retrievalYontemi, retrievalHataKodu: retrieval.retrievalHataKodu });
-                if (eksik.length) isler.push({ konu: { ...kaynakKonusu, ...konu }, kaynaklar, kavramlar: eksik });
+                if (!kaynaklar.length) throw new CalismaKartiHatasi("Konu için kaynak bulunamadı.", "KART_KAYNAK_YETERSIZ", 422);
+                tumKaynaklar.set(konuId, kaynaklar);
+                const eksikler = kaynaklar.filter(k => !(konu.incelenenKaynaklar || []).includes(kartKaynakAnahtari(k)));
+                if (eksikler.length) isler.push({ konu: kaynakKonusu, kaynaklar: eksikler });
+                else { await kaydetKonu(konu, { tamamlandi: true, hataKodu: "" }); ilerledi = true; }
             } catch (hata) {
                 if (!["KART_KAYNAK_YETERSIZ", "KART_KANIT_YETERSIZ", "KART_KAYNAK_BAGLANTISI_EKSIK"].includes(hata?.kod)) throw hata;
-                const tani = kartHataTanilamasiniOlustur(hata, { asama: "KAYNAK_SECIMI", konuId });
-                sonHataKodu = hata.kod; sonTanilama = tani;
-                await kaydetKonu(konu, { hataKodu: hata.kod, tamamlandi: false, reddedilenKartlar: [tani],
-                    denemeSayisi: (konu.denemeSayisi || 0) + 1 });
+                await kaydetKonu(konu, { tamamlandi: false, uretimiDurduruldu: true, sifirKartNedeni: "kaynak_yok", hataKodu: hata.kod });
             }
         }
-        const ayar = { ...kartBatchAyarlari(), ...(deps.batchAyarlari || {}) };
-        const partiler = kartBatchleriniPlanla(isler, ayar);
-        for (const isler of partiler) {
-            if (apiCagriButcesi.kullanilan >= apiCagriButcesi.maksimum) {
-                sonHataKodu = "KART_ISLEM_CAGRI_SINIRI"; sonTanilama = null; break;
-            }
-            await yenile(); asama = "GEMINI_ISTEGI"; konuId = isler[0].konu.konuId;
-            const ilkSdkSayisi = apiCagriButcesi.kullanilan;
-            const sdkSayilari = konu => ({ sdkCagriSayisi: (konu.sdkCagriSayisi || 0) + apiCagriButcesi.kullanilan - ilkSdkSayisi,
-                sonDenemeSdkCagrisi: apiCagriButcesi.kullanilan - ilkSdkSayisi });
+        const ayar = { ...kartBatchAyarlari(), ...deps.batchAyarlari };
+        const partiler = kartKaynakBatchleriniPlanla(isler, oncekiKartlar, ayar);
+        for (const partiIsleri of partiler) {
+            if (apiCagriButcesi.kullanilan >= apiCagriButcesi.maksimum) break;
+            uretimDenendi = true;
+            await yenile(); asama = "GEMINI_ISTEGI"; konuId = partiIsleri[0].konu.konuId;
+            const sayac = apiCagriButcesi.kullanilan;
             let batch;
             try {
-                batch = await deps.kartBatchUret({ isler, oncekiKartlar, apiCagriButcesi, sahipligiDogrula: yenile });
-                await yenile();
+                batch = await deps.kartBatchUret({ isler: partiIsleri, oncekiKartlar, apiCagriButcesi,
+                    kaynakBaglami: { ...girdi, materyaller: baglam.materyaller }, sahipligiDogrula: yenile }, { batchAyarlari: ayar });
             } catch (hata) {
-                if (hata?.kod === "KART_KILIT_KAYBI") throw hata;
-                for (const is of isler) {
-                    const konu = konular.find(k => k.konuId === is.konu.konuId);
-                    const tani = kartHataTanilamasiniOlustur(hata, { asama: "GEMINI_ISTEGI", konuId: konu.konuId });
-                    await kaydetKonu(konu, { hataKodu: guvenliKod(hata?.kod), sifirKartNedeni: konu.kartlar.length ? "" : "uretim_basarisiz",
-                        denemeSayisi: (konu.denemeSayisi || 0) + 1, reddedilenKartlar: [tani], ...sdkSayilari(konu) });
+                for (const parcaIs of partiIsleri) {
+                    const konu = konular.find(k => k.konuId === parcaIs.konu.konuId);
+                    await kaydetKonu(konu, { denemeSayisi: (konu.denemeSayisi || 0) + 1,
+                        sdkCagriSayisi: (konu.sdkCagriSayisi || 0) + apiCagriButcesi.kullanilan - sayac,
+                        sonDenemeSdkCagrisi: apiCagriButcesi.kullanilan - sayac, hataKodu: guvenliKod(hata.kod),
+                        reddedilenKartlar: [kartHataTanilamasiniOlustur(hata, { konuId: konu.konuId, asama: "GEMINI_ISTEGI" })] });
                 }
-                asama = "GEMINI_ISTEGI"; throw hata;
+                asama = "GEMINI_ISTEGI";
+                throw hata;
             }
-            for (const is of isler) {
-                const konu = konular.find(k => k.konuId === is.konu.konuId);
-                konuId = konu.konuId;
-                const parti = batch.sonuclar.find(p => p.konuId === konuId) || { kartlar: [], reddedilenler: [{ dogrulamaAltKodu: "KART_SAYISI" }] };
-                const yeniKartlar = parti.kartlar.map(k => ({ ...k, _id: new mongoose.Types.ObjectId() }));
-                const kartlar = [...konu.kartlar, ...yeniKartlar];
-                const tamamlandi = kartlar.length >= konu.hedefKartSayisi;
-                const reddedilenKartlar = parti.reddedilenler.map(r => kartHataTanilamasiniOlustur({ tanilama: {
-                    ...parti.tanilama, ...r, asama: "KART_DOGRULAMA",
-                } }, { konuId }));
-                for (const tani of reddedilenKartlar) logla({ kod: "KART_GECERSIZ_YANIT", ...tani });
-                const hataKodu = tamamlandi || !reddedilenKartlar.length ? "" : "KART_GECERSIZ_YANIT";
-                await kaydetKonu(konu, { kartlar, tamamlandi, hataKodu,
-                    sifirKartNedeni: !kartlar.length && reddedilenKartlar.length ? "dogrulama_basarisiz" : "",
-                    ...(parti.tanilama?.model ? { kullanilanModel: parti.tanilama.model } : {}),
-                    denemeSayisi: (konu.denemeSayisi || 0) + 1, reddedilenKartlar, ...sdkSayilari(konu) });
-                oncekiKartlar.push(...yeniKartlar);
-                if (hataKodu) { sonHataKodu = hataKodu; sonTanilama = reddedilenKartlar[0] || null; }
+            await yenile();
+            for (const parcaIs of partiIsleri) {
+                const konu = konular.find(k => k.konuId === parcaIs.konu.konuId); konuId = konu.konuId;
+                const sonuc = batch.sonuclar.find(r => r.konuId === konuId) || { kartlar: [], reddedilenler: [{ dogrulamaAltKodu: "KONU_KIMLIGI" }] };
+                const yeni = sonuc.kartlar.map(k => ({ ...k, _id: new mongoose.Types.ObjectId() }));
+                const reddedilenler = sonuc.reddedilenler || [];
+                const incelenen = [...new Set([...(konu.incelenenKaynaklar || []),
+                    ...(sonuc.kaynaklarTamamlandi && !reddedilenler.length ? parcaIs.kaynaklar.map(kartKaynakAnahtari) : [])])];
+                const tamamlandi = tumKaynaklar.get(konuId).every(k => incelenen.includes(kartKaynakAnahtari(k)));
+                const gecersizDenemeSayisi = reddedilenler.length ? (konu.gecersizDenemeSayisi || 0) + 1 : 0;
+                const kartlar = [...konu.kartlar, ...yeni];
+                const retler = reddedilenler.map(r => kartHataTanilamasiniOlustur({ tanilama: { ...sonuc.tanilama, ...r, asama: "KART_DOGRULAMA" } }, { konuId }));
+                await kaydetKonu(konu, { kartlar, tamamlandi, incelenenKaynaklar: incelenen,
+                    hedefKartSayisi: kartlar.length, kavramSayisi: kartlar.length, gecersizDenemeSayisi,
+                    uretimiDurduruldu: gecersizDenemeSayisi >= 3, hataKodu: retler.length ? "KART_GECERSIZ_YANIT" : "",
+                    sifirKartNedeni: kartlar.length ? "" : retler.length ? "dogrulama_basarisiz" : sonuc.sifirKartNedeni || "",
+                    reddedilenKartlar: retler, denemeSayisi: (konu.denemeSayisi || 0) + 1,
+                    sdkCagriSayisi: (konu.sdkCagriSayisi || 0) + apiCagriButcesi.kullanilan - sayac,
+                    sonDenemeSdkCagrisi: apiCagriButcesi.kullanilan - sayac,
+                    ...(sonuc.tanilama?.model ? { kullanilanModel: sonuc.tanilama.model } : {}),
+                });
+                oncekiKartlar.push(...yeni);
+                if (yeni.length || (sonuc.kaynaklarTamamlandi && !retler.length)) ilerledi = true;
+                for (const tani of retler) tanilamayiLogla(deps, { kod: "KART_GECERSIZ_YANIT", ...tani });
             }
         }
-        await yenile(); clearInterval(timer); if (yenileme) await yenileme;
-        asama = "VERITABANI_KAYDI";
-        const hazir = konular.every(k => k.tamamlandi);
-        await atomikDersIslemi(girdi, async session => {
-            imzayiDogrula(ilkDeste, await baglamiGetir(girdi, deps, session));
-            const sonuc = await deps.DesteModel.updateOne({ ...filtre(girdi), _id: ilkDeste._id, aktifIslemToken: token }, { $set: {
-                durum: hazir ? "hazir" : oncekiKartlar.length ? "kismi" : "hata", aktifIslemToken: null,
-                hataKodu: hazir ? "" : sonHataKodu, hataTanilama: hazir ? null : sonTanilama, ...butceSonucu(),
-            } }, { session });
-            if (sonuc.matchedCount !== 1) throw new CalismaKartiHatasi("Kart üretim işleminin sahipliği değişti.", "KART_KILIT_KAYBI");
-        }, deps);
+        await yenile(); imzayiDogrula(ilkDeste, await baglamiGetir(girdi, deps));
+        if (!uretimDenendi && kaynakIlerledi) ilerledi = true;
+        if (kaynakBeklemesi) {
+            const bekleme = kartIsiBeklemesiniGetir(kaynakBeklemesi, deps.simdi().getTime(), is.geciciHataSayisi || 0);
+            is.geciciHataSayisi = (is.geciciHataSayisi || 0) + 1;
+            await bitir(bekleme == null ? "durduruldu" : "bekliyor", kaynakBeklemesi.kod, bekleme || 0);
+            return;
+        }
+        is.geciciHataSayisi = 0;
+        is.ilerlemesizTurSayisi = ilerledi ? 0 : (is.ilerlemesizTurSayisi || 0) + 1;
+        if (konular.every(k => k.tamamlandi)) await bitir("tamamlandi");
+        else if (!konular.some(k => !k.tamamlandi && !k.uretimiDurduruldu)) await bitir("durduruldu", konular.find(k => k.hataKodu)?.hataKodu || "KART_GECERSIZ_YANIT");
+        else if (is.ilerlemesizTurSayisi >= 3) await bitir("durduruldu", "KART_ILERLEME_YOK");
+        else await bitir("kuyrukta");
     } catch (hata) {
-        const hataTanilama = kartHataTanilamasiniOlustur(hata, { asama, konuId });
-        let hataKodu = guvenliKod(hata?.kod);
-        if (hataKodu === "KART_URETIM_HATASI" && asama === "VERITABANI_KAYDI") hataKodu = "KART_KAYIT_HATASI";
-        logla({ kod: hataKodu, ...hataTanilama });
-        await deps.DesteModel.updateOne({ ...filtre(girdi), _id: ilkDeste._id, aktifIslemToken: token }, { $set: {
-            durum: oncekiKartlar.length ? "kismi" : "hata", aktifIslemToken: null, hataKodu, hataTanilama, ...butceSonucu(),
-        } }).catch(() => logla({ kod: "KART_KAYIT_HATASI", asama: "VERITABANI_KAYDI" }));
+        const tani = kartHataTanilamasiniOlustur(hata, { asama, konuId });
+        const kod = asama === "VERITABANI_KAYDI" && !hata.kod ? "KART_KAYIT_HATASI" : guvenliKod(hata.kod);
+        tanilamayiLogla(deps, { kod, ...tani });
+        const bekleme = kartIsiBeklemesiniGetir({ ...hata, kod }, deps.simdi().getTime(), is.geciciHataSayisi || 0);
+        if (bekleme != null) is.geciciHataSayisi = (is.geciciHataSayisi || 0) + 1;
+        await bitir(bekleme == null ? "durduruldu" : "bekliyor", kod, bekleme || 0, tani)
+            .catch(() => tanilamayiLogla(deps, { kod: "KART_KAYIT_HATASI", asama: "VERITABANI_KAYDI" }));
     } finally { clearInterval(timer); if (yenileme) await yenileme.catch(() => {}); }
 };
 
+const aktifKartIsi = deste => ["kuyrukta", "calisiyor", "bekliyor"].includes(deste?.uretimIsi?.durum);
+const leaseGuncel = (deste, simdi) => deste?.aktifIslemToken && new Date(deste.sonYenileme || 0).getTime() > simdi - KILIT_MS;
+
 export const calismaKartlariniOlustur = async (girdi, bagimliliklar = {}) => {
-    const deps = depsGetir(bagimliliklar);
-    const baglam = await baglamiGetir(girdi, deps);
-    let mevcut = await deps.DesteModel.findOne(filtre(girdi)).lean();
-    if (mevcut) imzayiDogrula(mevcut, baglam);
-    if (mevcut?.durum === "hazir" || (mevcut?.aktifIslemToken && new Date(mevcut.sonYenileme).getTime() > deps.simdi().getTime() - KILIT_MS)) return sun(girdi, mevcut, deps);
-    let plan = null;
-    if (!mevcut) {
-        if (!baglam.materyaller.length) throw new CalismaKartiHatasi("Kart üretmek için hazır materyal bulunamadı.", "KART_KAYNAK_YETERSIZ", 422);
-        plan = baglam.konular.map(konu => ({ konuId: konu.konuId, anaKonuId: konu.anaKonuId, baslik: konu.baslik,
-            anaBaslik: konu.anaBaslik, hedefKartSayisi: 0, tamamlandi: false, kartlar: [] }));
-    }
-    const token = new mongoose.Types.ObjectId();
-    let baslat = false;
+    const deps = depsGetir(bagimliliklar), otomatik = bagimliliklar.otomatikDevam === true;
+    const token = new mongoose.Types.ObjectId(); let baslat = false, mevcut;
     try {
         mevcut = await atomikDersIslemi(girdi, async session => {
             baslat = false;
             const kayit = await deps.DesteModel.findOne(filtre(girdi)).session(session).lean();
-            if (kayit) {
-                imzayiDogrula(kayit, baglam);
-                if (kayit.durum === "hazir" || (kayit.aktifIslemToken && new Date(kayit.sonYenileme).getTime() > deps.simdi().getTime() - KILIT_MS)) return kayit;
-                baslat = true;
-                return nesne(await deps.DesteModel.findOneAndUpdate({ ...filtre(girdi), _id: kayit._id, aktifIslemToken: kayit.aktifIslemToken },
-                    { $set: { durum: "olusturuluyor", aktifIslemToken: token, sonYenileme: deps.simdi(), hataKodu: "", hataTanilama: null, ...cagriHakkiniAyir(kayit, deps) } }, { new: true, session }));
+            const simdi = deps.simdi().getTime();
+            if (otomatik && (!aktifKartIsi(kayit) || new Date(kayit.uretimIsi.sonrakiDeneme).getTime() > simdi)) return kayit;
+            const baglam = await baglamiGetir(girdi, deps, session);
+            if (kayit) imzayiDogrula(kayit, baglam);
+            if (kayit?.durum === "hazir" || leaseGuncel(kayit, simdi) || (!otomatik && aktifKartIsi(kayit))) return kayit;
+            if (!baglam.materyaller.length) throw new CalismaKartiHatasi("Kart üretmek için hazır materyal bulunamadı.", "KART_KAYNAK_YETERSIZ", 422);
+            const temel = kayit && !otomatik && kayit.uretimIsi ? { ...kayit, uretimIsi: { ...kayit.uretimIsi, geciciHataSayisi: 0, ilerlemesizTurSayisi: 0 } } : kayit;
+            let hak;
+            try { hak = cagriHakkiniAyir(temel, deps); }
+            catch (hata) {
+                if (hata.kod !== "KART_DERS_CAGRI_SINIRI" || !kayit) throw hata;
+                const yeniIs = kayit.uretimIsi || { protokolSurumu: 3, baslangic: deps.simdi(), toplamCagriLimiti: kartCagriSinirlariniGetir(deps.cagriSinirlari).toplam,
+                    ayrilanToplamCagri: 0, gercekSdkCagrisi: 0, geciciHataSayisi: 0, ilerlemesizTurSayisi: 0 };
+                return nesne(await deps.DesteModel.findOneAndUpdate({ ...filtre(girdi), _id: kayit._id, aktifIslemToken: kayit.aktifIslemToken }, { $set: {
+                    durum: "olusturuluyor", aktifIslemToken: null, aktifCagriLimiti: 0, hataKodu: hata.kod,
+                    uretimIsi: { ...yeniIs, durum: "bekliyor", beklemeNedeni: hata.kod,
+                        sonrakiDeneme: new Date(new Date(kayit.cagriPenceresiBaslangici).getTime() + BUTCE_PENCERESI_MS + 1000) },
+                } }, { new: true, session }));
             }
             baslat = true;
-            const [yeni] = await deps.DesteModel.create([{ ...filtre(girdi), kaynakImzasi: baglam.imza, konular: plan,
-                durum: "olusturuluyor", aktifIslemToken: token, sonYenileme: deps.simdi(), ...cagriHakkiniAyir(null, deps), kullanilanModel: process.env.GEMINI_KART_MODELI || VARSAYILAN_GEMINI_MODELI }], { session });
+            if (kayit) return nesne(await deps.DesteModel.findOneAndUpdate({ ...filtre(girdi), _id: kayit._id, aktifIslemToken: kayit.aktifIslemToken }, { $set: {
+                durum: "olusturuluyor", aktifIslemToken: token, sonYenileme: deps.simdi(), hataKodu: "", hataTanilama: null, ...hak,
+                ...(!otomatik ? { konular: kayit.konular.map(k => k.tamamlandi ? k : { ...k, uretimiDurduruldu: false, gecersizDenemeSayisi: 0 }) } : {}),
+            } }, { new: true, session }));
+            const plan = baglam.konular.map(k => ({ konuId: k.konuId, anaKonuId: k.anaKonuId, baslik: k.baslik, anaBaslik: k.anaBaslik,
+                hedefKartSayisi: 0, tamamlandi: false, planSurumu: 3, kartlar: [] }));
+            const [yeni] = await deps.DesteModel.create([{ ...filtre(girdi), kaynakImzasi: baglam.imza, konular: plan, ...hak,
+                durum: "olusturuluyor", aktifIslemToken: token, sonYenileme: deps.simdi(), kullanilanModel: process.env.GEMINI_KART_MODELI || VARSAYILAN_GEMINI_MODELI }], { session });
             return nesne(yeni);
         }, deps);
     } catch (hata) {
         if (hata?.code !== 11000) throw hata;
-        baslat = false;
-        mevcut = await deps.DesteModel.findOne(filtre(girdi)).lean();
+        baslat = false; mevcut = await deps.DesteModel.findOne(filtre(girdi)).lean();
         if (!mevcut) throw hata;
-        imzayiDogrula(mevcut, baglam);
+        imzayiDogrula(mevcut, await baglamiGetir(girdi, deps));
     }
-    if (baslat) deps.arkaPlandaBaslat(() => desteyiUret(girdi, mevcut, token, deps));
+    if (baslat && mevcut) deps.arkaPlandaBaslat(() => desteyiUret(girdi, mevcut, token, deps));
     return sun(girdi, mevcut, deps);
+};
+
+// Tıklama, tarayıcı ve Node belleğinden bağımsız: yalnız daha önce kullanıcı
+// tarafından başlatılan, zamanı gelen işleri DB lease'iyle devralır.
+export const kartUretimIsleriniDevamEttir = async (bagimliliklar = {}) => {
+    const deps = depsGetir(bagimliliklar), simdi = deps.simdi();
+    const adaylar = await deps.DesteModel.find({ "uretimIsi.durum": { $in: ["kuyrukta", "bekliyor", "calisiyor"] },
+        "uretimIsi.sonrakiDeneme": { $lte: simdi },
+        $or: [{ aktifIslemToken: null }, { sonYenileme: { $lte: new Date(simdi.getTime() - KILIT_MS) } }],
+    }).sort({ "uretimIsi.sonrakiDeneme": 1, _id: 1 }).limit(10).lean();
+    for (const aday of adaylar) {
+        const girdi = { kullaniciId: aday.kullaniciId, dersId: aday.dersId };
+        try { await calismaKartlariniOlustur(girdi, { ...deps, otomatikDevam: true }); }
+        catch (hata) {
+            // Yalnız incelenen snapshot hâlâ aynıysa durdur. Başka instance'ın
+            // az önce aldığı lease veya kaydettiği checkpoint ezilemez.
+            const kalici = ["KART_TOPLAM_CAGRI_SINIRI", "KART_KAYNAK_DEGISTI", "DERS_BULUNAMADI", "KART_DERS_HAZIR_DEGIL", "KART_HARITA_HAZIR_DEGIL", "KART_KONU_HATASI", "KART_KAYNAK_YETERSIZ"].includes(hata.kod);
+            if (kalici) await deps.DesteModel.updateOne({ ...filtre(girdi), _id: aday._id, aktifIslemToken: aday.aktifIslemToken,
+                "uretimIsi.durum": aday.uretimIsi.durum, "uretimIsi.sonrakiDeneme": aday.uretimIsi.sonrakiDeneme }, { $set: {
+                durum: kartlariGetir(aday).length ? "kismi" : "hata", aktifIslemToken: null, hataKodu: guvenliKod(hata.kod),
+                uretimIsi: { ...aday.uretimIsi, durum: "durduruldu", sonrakiDeneme: null, beklemeNedeni: "" },
+            } });
+            tanilamayiLogla(deps, { kod: guvenliKod(hata.kod), asama: "VERITABANI_KAYDI" });
+        }
+    }
+};
+
+export const kartUretimZamanlayicisiniBaslat = (bagimliliklar = {}) => {
+    let calisiyor = false, kapali = false;
+    const tara = async () => {
+        if (calisiyor || kapali) return;
+        calisiyor = true;
+        try { await kartUretimIsleriniDevamEttir(bagimliliklar); }
+        catch { /* DB kesintisinde kalıcı iş kalır; sonraki tarama yeniden dener. */ }
+        finally { calisiyor = false; }
+    };
+    void tara();
+    const timer = setInterval(() => { void tara(); }, 15_000); timer.unref?.();
+    return () => { kapali = true; clearInterval(timer); };
 };
 
 const kartiDogrula = async (girdi, deps, session) => {

@@ -37,5 +37,15 @@ export const kartKonuDurumMesaji = konu => {
     if (konu.sifirKartNedeni === "uretim_basarisiz") return "Üretim tamamlanamadı; yeniden denenebilir.";
     if (konu.sifirKartNedeni === "dogrulama_basarisiz") return "Üretilen kartların kaynak doğrulaması başarısız oldu.";
     if (konu.tamamlandi) return `${konu.kartSayisi} kart hazır.`;
+    if (konu.eksikKartSayisi === null) return `${konu.kartSayisi || 0} kart hazır; kaynaklar inceleniyor.`;
     return `${konu.kartSayisi || 0} kart hazır${konu.eksikKartSayisi ? `; ${konu.eksikKartSayisi} kavram bekliyor` : "; konu işlenmeyi bekliyor"}.`;
+};
+
+export const kartUretimDurumMesaji = veri => {
+    if (veri?.uretimIsi?.durum === "bekliyor") {
+        const zaman = new Date(veri.uretimIsi.sonrakiDeneme);
+        const tarih = Number.isNaN(zaman.getTime()) ? "" : ` ${zaman.toLocaleString("tr-TR", { dateStyle: "short", timeStyle: "short" })} sonrasında yeniden denenecek.`;
+        return { baslik: "Kart üretimi otomatik devam edecek", aciklama: `Geçici bir sınır veya kesinti nedeniyle bekleniyor.${tarih} Hazır kartlarla çalışabilirsiniz; bu sayfayı açık tutmanız gerekmez.` };
+    }
+    return { baslik: "Çalışma kartları oluşturuluyor...", aciklama: "Bütün konular sırayla işleniyor. Hazır kartlarla çalışabilir, sayfayı kapatıp daha sonra dönebilirsiniz." };
 };

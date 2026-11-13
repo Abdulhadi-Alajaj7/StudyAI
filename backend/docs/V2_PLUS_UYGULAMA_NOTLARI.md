@@ -1,6 +1,10 @@
 # V2+ uygulama kaydı — 12–13 Kasım 2026
 
-**Son durum (13 Kasım): KOD_VE_MOCK_HAZIR / CANLI_TEST_IZNI_BEKLENIYOR.**
+> Bu belge önceki V2+ uygulamasının tarihsel kaydıdır. 462/462 ve 108/108
+> sonuçları yeni otomatik üretim protokolünün kanıtı değildir. Güncel çalışma:
+> [Konu Bazlı Otomatik + Akıllı Batch](KART_OTOMATIK_URETIM.md).
+
+**Bu tarihsel çalışmanın son durumu (13 Kasım): KOD_VE_MOCK_HAZIR / CANLI_TEST_IZNI_BEKLENIYOR.**
 Backend 462/462, frontend 108/108; tarayıcı, lint, build, sözdizimi ve diff kontrolü başarılı.
 Gerçek Gemini: 0; gerçek embedding: 0; gerçek MongoDB yazımı/silme/migration: 0.
 
