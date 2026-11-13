@@ -1,10 +1,8 @@
 
-import React, { useState } from "react";
+import KonuHaritasiListesi from "./KonuHaritasiListesi.jsx";
 import {
     SparklesIcon,
     ArrowPathIcon,
-    ChevronDownIcon,
-    ChevronRightIcon,
     ExclamationTriangleIcon,
     BookOpenIcon
 } from "@heroicons/react/24/outline";
@@ -35,29 +33,18 @@ function KonuHaritasiBolumu({
     onOlustur,
     saltOkunur = false
 }) {
-    // Açık/kapalı ana konular state'i (tümü başlangıçta açık olsun)
-    const [acikKonular, setAcikKonular] = useState({});
-
-    const toggleKonu = (konuId) => {
-        setAcikKonular(prev => ({
-            ...prev,
-            [konuId]: prev[konuId] === undefined ? false : !prev[konuId]
-        }));
-    };
-
     const cardBg = isDark ? "bg-[#162137] border-[#26334A]" : "bg-white border-[#E7E5EF]";
     const textPrimary = isDark ? "text-[#F8FAFC]" : "text-[#0F172A]";
     const textSecondary = isDark ? "text-[#A7B0C2]" : "text-[#64748B]";
-    const itemBg = isDark ? "bg-[#0B1120]/60 border-[#26334A]" : "bg-[#F8F7FC] border-[#E7E5EF]";
 
     const anaKonular = konuHaritasi?.anaKonular || [];
 
     return (
-        <div className={`p-6 rounded-2xl border ${cardBg} transition-all`}>
+        <div className={`ders-konu-sayfasi p-6 rounded-2xl border ${cardBg} transition-all`} data-tema={isDark ? "koyu" : "acik"}>
             {/* Başlık ve Eylem Alanı */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
                 <div>
-                    <div className="flex items-center gap-2 mb-1">
+                    <div className="flex flex-wrap items-center gap-2 mb-1">
                         <SparklesIcon className="w-5 h-5 text-[#4F46E5]" />
                         <h3 className={`text-[18px] font-bold ${textPrimary}`}>Ders Konu Haritası</h3>
                         {konuHaritasi?.durum === "hazir" && (
@@ -197,9 +184,9 @@ function KonuHaritasiBolumu({
             ) : (
                 /* BAŞARILI KONU LİSTESİ */
                 <div className="space-y-3">
-                    <div className="flex items-center justify-between text-[12px] px-1 mb-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-[12px] px-1 mb-2">
                         <span className={`${textSecondary}`}>
-                            Toplam <strong>{anaKonular.length}</strong> Ana Konu, <strong>{konuHaritasi?.toplamAltKonuSayisi || 0}</strong> Alt Konu
+                            Toplam <strong>{anaKonular.length}</strong> Ana Konu, <strong>{anaKonular.reduce((toplam, ana) => toplam + (ana.altKonular?.length || 0), 0)}</strong> Alt Konu
                         </span>
                         {konuHaritasi?.sonOlusturmaTarihi && (
                             <span className={`${textSecondary}`}>
@@ -208,85 +195,10 @@ function KonuHaritasiBolumu({
                         )}
                     </div>
 
-                    {anaKonular.map((ana, index) => {
-                        const isAcik = acikKonular[ana.konuId] !== false;
-                        const altSayisi = ana.altKonular?.length || 0;
-
-                        return (
-                            <div
-                                key={ana.konuId || index}
-                                className={`rounded-xl border overflow-hidden transition-all ${itemBg}`}
-                            >
-                                {/* Ana Konu Başlığı */}
-                                <div
-                                    onClick={() => toggleKonu(ana.konuId)}
-                                    className="p-4 flex items-center justify-between cursor-pointer hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
-                                >
-                                    <div className="flex items-center gap-3">
-                                        <div className="w-8 h-8 rounded-lg bg-[#4F46E5]/10 flex items-center justify-center text-[#4F46E5] font-bold text-[13px] shrink-0">
-                                            {ana.sira || index + 1}
-                                        </div>
-                                        <div>
-                                            <div className="flex items-center gap-2">
-                                                <h4 className={`text-[15px] font-bold ${textPrimary}`}>{ana.baslik}</h4>
-                                                <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${
-                                                    isDark ? "bg-[#1E293B] text-[#94A3B8]" : "bg-[#E2E8F0] text-[#64748B]"
-                                                }`}>
-                                                    {altSayisi} Alt Konu
-                                                </span>
-                                            </div>
-                                            {ana.aciklama && (
-                                                <p className={`text-[12px] ${textSecondary} mt-0.5 line-clamp-1`}>
-                                                    {ana.aciklama}
-                                                </p>
-                                            )}
-                                        </div>
-                                    </div>
-
-                                    <div className="flex items-center gap-2 text-gray-400">
-                                        {isAcik ? (
-                                            <ChevronDownIcon className="w-4 h-4" />
-                                        ) : (
-                                            <ChevronRightIcon className="w-4 h-4" />
-                                        )}
-                                    </div>
-                                </div>
-
-                                {/* Alt Konular */}
-                                {isAcik && altSayisi > 0 && (
-                                    <div className={`px-4 pb-3 pt-1 border-t space-y-2 ${
-                                        isDark ? "border-[#26334A]/60 bg-[#0B1120]/40" : "border-[#E7E5EF]/60 bg-white"
-                                    }`}>
-                                        {ana.altKonular.map((alt, sIndex) => (
-                                            <div
-                                                key={alt.konuId || sIndex}
-                                                className={`p-2.5 rounded-lg border flex items-start gap-2.5 transition-colors ${
-                                                    isDark ? "bg-[#162137]/60 border-[#26334A]/80" : "bg-[#F8F7FC] border-[#E7E5EF]"
-                                                }`}
-                                            >
-                                                <div className="w-1.5 h-1.5 rounded-full bg-[#4F46E5] mt-1.5 shrink-0"></div>
-                                                <div className="flex-1 min-w-0">
-                                                    <div className="flex items-center justify-between">
-                                                        <p className={`text-[13px] font-medium ${textPrimary}`}>
-                                                            {alt.baslik}
-                                                        </p>
-                                                        <span className="text-[10px] font-mono text-gray-400">
-                                                            {alt.konuId}
-                                                        </span>
-                                                    </div>
-                                                    {alt.aciklama && (
-                                                        <p className={`text-[11px] ${textSecondary} mt-0.5`}>
-                                                            {alt.aciklama}
-                                                        </p>
-                                                    )}
-                                                </div>
-                                            </div>
-                                        ))}
-                                    </div>
-                                )}
-                            </div>
-                        );
-                    })}
+                    <div className="konu-harita-karti">
+                        <div className="konu-harita-doku" aria-hidden="true" />
+                        <KonuHaritasiListesi anaKonular={anaKonular} />
+                    </div>
                 </div>
             )}
         </div>

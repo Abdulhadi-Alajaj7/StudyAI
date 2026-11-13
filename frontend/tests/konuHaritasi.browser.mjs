@@ -10,8 +10,9 @@ const root = resolve(process.cwd()), alan = await mkdtemp(join(root, ".konu-brow
 let browser, vite, ws, kapali = false, senaryo = "normal";
 const istekler = [];
 const dersId = "111111111111111111111111", digerId = "666666666666666666666666";
-const ders = { _id: dersId, dersAdi: "Algoritma Çözümleme", dersKodu: "ALG 204", donem: "Güz", renk: "mor", simge: "kitap" };
-const harita = { durum: "hazir", anaKonular: [
+const ders = { _id: dersId, dersAdi: "Algoritma Çözümleme", dersKodu: "ALG 204", donem: "Güz", renk: "mor", simge: "kitap", materyallerOnaylandi: true };
+// Eski özet alanı yanlış olsa bile sayaçlar görünen konu dizisinden hesaplanmalı.
+const harita = { durum: "hazir", toplamAltKonuSayisi: 999, anaKonular: [
     { konuId: "buyume", baslik: "Büyüme Analizi", aciklama: "Girdi büyüklüğü ile kaynak tüketimi arasındaki ilişkiler.", altKonular: [
         { konuId: "asimptotik", baslik: "Asimptotik sınırlar", aciklama: "Algoritmaların büyüme hızlarını karşılaştırma." },
         { konuId: "karmasiklik", baslik: "Zaman ve alan karmaşıklığı" }] },
@@ -21,7 +22,7 @@ const harita = { durum: "hazir", anaKonular: [
 ] };
 const materyaller = ["pdf", "doc", "docx", "ppt", "pptx", "txt"].map((uzanti, i) => ({
     _id: String(i), orijinalDosyaAdi: `Algoritma notları ${i + 1}.${uzanti}`, dosyaAdi: `sunucu-${i}.${uzanti}`,
-    dosyaTuru: uzanti, ...(i === 1 ? {} : { dosyaBoyutu: 1024 * (i + 1) })
+    dosyaTuru: uzanti, durum: "hazir", ...(i === 1 ? {} : { dosyaBoyutu: 1024 * (i + 1) })
 }));
 const kullanici = { id: "111111111111111111111111", kullaniciAdi: "Ahmet Yılmaz", email: "ahmet@example.test" };
 const hatalar = [], gecik = ms => new Promise(r => setTimeout(r, ms));
@@ -71,7 +72,7 @@ const q=new URLSearchParams(location.search);localStorage.setItem('studyai-theme
                         konuId: `ana-${i}`, baslik: `Uzun ana konu ${i} ` + "KonuBaşlığı".repeat(18),
                         altKonular: Array.from({ length: 8 }, (_, j) => ({ konuId: `alt-${i}-${j}`, baslik: "AltBaşlık".repeat(18) }))
                     })) } };
-                    else data = { harita };
+                    else data = { harita, guncelMi: true };
                 } else if (u.pathname === `/materyaller/ders/${dersId}` || u.pathname === `/materyaller/ders/${digerId}`) {
                     if (senaryo === "materyal-hatasi") { status = 503; data = { hata: "Materyaller yüklenemedi." }; }
                     else data = { materyaller: senaryo === "bos" || u.pathname.includes(digerId) ? [] : senaryo === "uzun" ? [{ ...materyaller[0], orijinalDosyaAdi: "UzunDosyaAdı".repeat(24) + ".pdf" }] : materyaller };
@@ -92,11 +93,14 @@ const q=new URLSearchParams(location.search);localStorage.setItem('studyai-theme
     const ac = (path, theme = "dark") => cdp("Page.navigate", { url: `${origin}/${basename(alan)}/fixture.html?path=${encodeURIComponent(path)}&theme=${theme}` });
     const sayfa = `/dersler/${dersId}/konular`;
     const hazir = () => bekle("document.querySelectorAll('.konu-dali').length===3 && document.querySelectorAll('.konu-materyal').length===6");
+    const sayilariDogrula = async (ana, alt) => assert.deepEqual(await evaluate("[...document.querySelectorAll('.konu-sayilari dd')].map(e=>Number(e.textContent))"), [ana, alt]);
     // Mevcut sidebar'ın 300 ms margin geçişi bitmeden dar ara kareyi ölçme.
     const yerlesti = () => bekle("document.querySelector('.ders-konu-sayfasi')?.getBoundingClientRect().width>innerWidth-(innerWidth>=1024?341:innerWidth>=640?49:33)");
     const tasmiyor = async () => assert.ok(await evaluate("document.documentElement.scrollWidth<=innerWidth"), "Sayfa yatay taşmamalı");
     await cdp("Emulation.setDeviceMetricsOverride", { width: 1440, height: 1350, deviceScaleFactor: 1, mobile: false });
     await ac(sayfa); await hazir();
+    await sayilariDogrula(3, 4);
+    const konuStili = await evaluate("(()=>{const e=document.querySelector('.konu-ana');return {zemin:getComputedStyle(e).backgroundColor,kenar:getComputedStyle(e).borderColor,baslik:getComputedStyle(document.querySelector('.konu-ana-baslik')).fontSize}})()");
     assert.equal(await evaluate("document.querySelector('.konu-ders-koku h3').textContent"), ders.dersAdi);
     assert.deepEqual(await evaluate("[...document.querySelectorAll('.konu-dosya-adi')].map(e=>e.textContent)"), materyaller.map(m => m.orijinalDosyaAdi));
     assert.equal(await evaluate("document.querySelectorAll('.konu-materyal-paneli button,.konu-materyal-paneli a,.konu-materyal-paneli input').length"), 0, "Materyal paneli tamamen salt okunur");
@@ -112,6 +116,7 @@ const q=new URLSearchParams(location.search);localStorage.setItem('studyai-theme
     await evaluate("document.querySelector('.konu-dal-ac').click()");
     await bekle("document.querySelector('.konu-dal-ac').getAttribute('aria-expanded')==='false'");
     assert.ok(await evaluate("document.querySelector('.konu-altlar').hidden"));
+    await sayilariDogrula(3, 4); // Kapalı dallar toplamdan düşmemeli.
     // Native butonun klavye davranışı da çalışmalı.
     await evaluate("document.querySelector('.konu-dal-ac').focus()");
     await cdp("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", text: "\r", windowsVirtualKeyCode: 13 });
@@ -131,12 +136,15 @@ const q=new URLSearchParams(location.search);localStorage.setItem('studyai-theme
     await ac(sayfa, "light"); await hazir(); await tasmiyor();
     assert.equal(await evaluate("document.querySelector('.ders-konu-sayfasi').dataset.tema"), "acik");
     senaryo = "uzun"; await ac(sayfa); await bekle("document.querySelectorAll('.konu-alt').length===120"); await tasmiyor();
+    await sayilariDogrula(15, 120);
     assert.ok(await evaluate("[...document.querySelectorAll('.konu-alt,.konu-ana-sec,.konu-materyal')].every(e=>e.scrollWidth<=e.clientWidth+1)"), "Uzun başlıklar ve dosya adları kendi kartında kırılmalı");
     await cdp("Emulation.setDeviceMetricsOverride", { width: 360, height: 844, deviceScaleFactor: 1, mobile: true }); await yerlesti(); await tasmiyor();
     await cdp("Emulation.setDeviceMetricsOverride", { width: 1280, height: 1000, deviceScaleFactor: 1, mobile: false }); await yerlesti(); await tasmiyor();
     senaryo = "bos"; await ac(sayfa); await bekle("document.querySelector('.konu-materyal-bos')");
+    await sayilariDogrula(0, 0);
     assert.ok(await evaluate("document.querySelector('.konu-harita-karti').textContent.includes('henüz bir konu haritası bulunmuyor')"));
     senaryo = "harita-hatasi"; await ac(sayfa); await bekle("document.querySelector('.konu-harita-karti [role=alert]')");
+    assert.equal(await evaluate("document.querySelector('.konu-sayilari')"), null, "API hatasında sahte sıfırlar gösterilmemeli");
     assert.equal(await evaluate("document.querySelectorAll('.konu-materyal').length"), 6, "Harita hatası materyalleri engellememeli");
     senaryo = "materyal-hatasi"; await ac(sayfa); await bekle("document.querySelector('.konu-materyal-paneli [role=alert]')");
     assert.equal(await evaluate("document.querySelectorAll('.konu-dali').length"), 3);
@@ -144,11 +152,38 @@ const q=new URLSearchParams(location.search);localStorage.setItem('studyai-theme
     senaryo = "normal"; await ac(`/dersler/${digerId}/konular`); await bekle("document.querySelector('.konu-ana-baslik')?.textContent==='Kök bulma'");
     assert.equal(await evaluate("document.querySelector('.konu-ders-koku h3').textContent"), "Sayısal Yöntemler");
     assert.equal(await evaluate("document.querySelectorAll('.konu-alt,.konu-materyal,[aria-pressed=true]').length"), 0, "Önceki dersin verisi veya seçimi kalmamalı");
+    await sayilariDogrula(1, 0);
+    // Hazır sayfasının yalnızca harita listesi yenilenmeli; diğer bölümler ve gezinme korunmalı.
+    await ac(`/panel/dersler/${dersId}/hazir`);
+    await bekle("document.querySelectorAll('.konu-dali').length===3");
+    assert.deepEqual(await evaluate("(()=>{const e=document.querySelector('.konu-ana');return {zemin:getComputedStyle(e).backgroundColor,kenar:getComputedStyle(e).borderColor,baslik:getComputedStyle(document.querySelector('.konu-ana-baslik')).fontSize}})()"), konuStili, "İki sayfanın kart stili aynı olmalı");
+    assert.equal(await evaluate("document.querySelectorAll('.konu-alt').length"), 4);
+    assert.ok(await evaluate("document.querySelector('.ders-konu-sayfasi').textContent.includes('3 Ana Konu, 4 Alt Konu')"));
+    for (const metin of ["Dersin Hazır!", "Ders Kurulum Özeti", "Artık Neler Yapabilirsin?", "Sonraki Adım"]) {
+        assert.ok(await evaluate(`document.body.innerText.toLocaleLowerCase('tr-TR').includes(${JSON.stringify(metin)}.toLocaleLowerCase('tr-TR'))`), metin);
+    }
+    assert.ok(await evaluate("[...document.querySelectorAll('button')].some(e=>e.textContent.includes('Derse Git')&&!e.disabled)"));
+    assert.equal(await evaluate("document.querySelectorAll('.ders-konu-sayfasi button:not(.konu-ana-sec):not(.konu-alt):not(.konu-dal-ac)').length"), 0, "Salt okunur haritada üretim işlemi olmamalı");
+    await evaluate("document.querySelector('.konu-dal-ac').click()");
+    await bekle("document.querySelector('.konu-altlar').hidden");
+    await evaluate("document.querySelector('.konu-dal-ac').click()");
+    await bekle("!document.querySelector('.konu-altlar').hidden");
+    await tasmiyor();
+    await evaluate("window.scrollTo(0,document.querySelector('.ders-konu-sayfasi').getBoundingClientRect().top+scrollY-100)");
+    const hazirMasaustu = join(tmpdir(), "studyai-hazir-harita-desktop.png");
+    await writeFile(hazirMasaustu, Buffer.from((await cdp("Page.captureScreenshot", { format: "png" })).data, "base64"));
+    await cdp("Emulation.setDeviceMetricsOverride", { width: 390, height: 900, deviceScaleFactor: 1, mobile: true });
+    await yerlesti(); await tasmiyor();
+    assert.ok(await evaluate("[...document.querySelectorAll('.konu-ana,.konu-alt')].every(e=>e.scrollWidth<=e.clientWidth+1)"));
+    senaryo = "uzun"; await ac(`/panel/dersler/${dersId}/hazir`, "light");
+    await bekle("document.querySelectorAll('.konu-alt').length===120"); await tasmiyor();
+    assert.ok(await evaluate("[...document.querySelectorAll('.konu-ana,.konu-alt')].every(e=>e.scrollWidth<=e.clientWidth+1)"));
+    assert.equal(await evaluate("document.querySelector('.ders-konu-sayfasi').dataset.tema"), "acik");
     assert.ok(istekler.some(i => i.path === `/dersler/${dersId}/konu-haritasi`));
     assert.ok(istekler.some(i => i.path === `/materyaller/ders/${dersId}`));
     assert.ok(istekler.every(i => i.method === "GET"));
     assert.deepEqual(hatalar, []);
-    console.log(JSON.stringify({ sonuc: "başarılı", senaryolar: ["gerçek API şeması", "salt okunur materyaller", "konu seçimi", "aç-kapat ve klavye", "masaüstü/mobil/açık tema", "uzun başlık ve 120 alt konu", "boş durum", "bağımsız API hataları", "ders değişimi"], istekSayisi: istekler.length, masaustu, mobil }));
+    console.log(JSON.stringify({ sonuc: "başarılı", senaryolar: ["gerçek API şeması", "salt okunur materyaller", "konu seçimi", "aç-kapat ve klavye", "masaüstü/mobil/açık tema", "uzun başlık ve 120 alt konu", "boş durum", "bağımsız API hataları", "ders değişimi", "dinamik konu sayaçları", "Hazır sayfasında ortak kartlar ve korunan bölümler", "Hazır sayfasında mobil ve uzun konu listesi"], istekSayisi: istekler.length, masaustu, mobil, hazirMasaustu }));
 } finally {
     kapali = true;
     if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ id: 999999, method: "Browser.close" }));
