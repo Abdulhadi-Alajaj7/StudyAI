@@ -156,12 +156,13 @@ export const kaynakMetnindenYedekKartOlustur = (konu, mevcutSorular = new Set())
             const cumle = parca.metin;
             if (cumle.length < 45 || cumle.length > 310 || parca.konum < 0) continue;
             if (/konya teknik|bilgisayar mühendisliği|doç\.?\s*dr\.?|https?:\/\//i.test(cumle)) continue;
-            if (kaynakKelimeleri(cumle).length < 7) continue;
+            if (kaynakKelimeleri(cumle).length < 5) continue;
             if (parca.cumle && !/[.!?]$/.test(cumle)) continue;
             const sozcukler = new Set(kaynakKelimeleri(cumle));
             const eslesenler = terimler.filter((kelime) =>
                 [...sozcukler].some((aday) => aday.startsWith(kelime.slice(0, Math.min(5, kelime.length)))));
-            const yakinlik = Math.min(...konumlar.map((konum) => Math.max(0, parca.konum - konum)), 99999);
+            const oncekiKonumlar = konumlar.filter((konum) => konum <= parca.konum);
+            const yakinlik = oncekiKonumlar.length ? Math.min(...oncekiKonumlar.map((konum) => parca.konum - konum)) : Infinity;
             // Başlığın hemen sonrasındaki açıklama da konuyu anabilir ama aynı kökü tekrar etmez.
             if (!eslesenler.length && !(yakinlik <= 280 && parca.konum > Math.min(...konumlar))) continue;
             const skor = eslesenler.length * 10 + (yakinlik <= 280 ? 3 : 0) +
