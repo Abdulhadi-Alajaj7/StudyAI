@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import mongoose from "mongoose";
+import CalismaKarti from "../models/CalismaKarti.js";
 import {
     konuListesiOlustur,
     makulKartSayisiniBelirle,
@@ -154,4 +156,15 @@ test("Kaynağı olmayan kart yalnızca açıkça genel bilgi olarak etiketlenirs
     assert.equal(sonuc.length, 1);
     assert.equal(sonuc[0].uretimYontemi, "genel");
     assert.deepEqual(sonuc[0].kaynaklar, []);
+});
+
+test("Mongoose genel bilgi kartını kaynaksız kabul eder, kaynak kartını reddeder", async () => {
+    const temel = {
+        kullaniciId: new mongoose.Types.ObjectId(),
+        dersId: new mongoose.Types.ObjectId(),
+        konuId: "k1", konuBasligi: "Stack",
+        soru: "LIFO nedir?", cevap: "Son giren ilk çıkar.", kaynaklar: [],
+    };
+    await new CalismaKarti({ ...temel, uretimYontemi: "genel" }).validate();
+    await assert.rejects(new CalismaKarti({ ...temel, uretimYontemi: "gemini" }).validate());
 });
