@@ -2548,7 +2548,7 @@ Yalnızca kaynaklarda desteklenen bilgileri kullan; tahmin, dış bilgi, uydurma
 Her kart tek, açık, önemli ve öğretici kavramı ölçsün. Gereksiz ayrıntı ve tekrar oluşturma.
 En fazla ${sayi} kart oluştur, içerik yetersizse daha az oluştur.
 Kaynak kodlarını yalnızca sunulan K kodlarından seç; kaynakta kanıtı olmayan kart üretme.
-        'Sadece JSON döndür: {"kartlar":[{"konuId":"...","soru":"...","cevap":"...","kaynakKodlari":["K1"]}]}.',
+Sadece JSON döndür: {"kartlar":[{"soru":"...","cevap":"...","kaynakKodlari":["K1"]}]}`;
     const prompt = `Ders: ${dersAdi}
 Konu: ${konuBasligi}
 Kart sınırı: ${sayi}
