@@ -187,6 +187,9 @@ mock.module("../models/DersOzeti.js", {
         }
     }
 });
+mock.module("../models/CalismaKarti.js", {
+    defaultExport: { async deleteMany() {} }
+});
 mock.module("../models/Test.js", {
     defaultExport: {
         async deleteMany() {}
