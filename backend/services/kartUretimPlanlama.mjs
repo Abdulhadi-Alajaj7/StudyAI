@@ -118,14 +118,17 @@ export const kartAdaylariniDogrula = ({ cevap, konular, mevcutSorular = new Set(
         const soru = typeof kart.soru === "string" ? kart.soru.trim().slice(0, 1000) : "";
         const cevapMetni = typeof kart.cevap === "string" ? kart.cevap.trim().slice(0, 2000) : "";
         const referanslar = kodlar.map((kod) => kayit.kodlar.get(String(kod))).filter(Boolean);
-        if (!soru || !cevapMetni || !referanslar.length) continue;
+        // Dosyada açıklama olmayan kavramlar için AI genel bilgisi üretilebilir;
+        // bu kartların dosya referansı kesinlikle uydurulmaz.
+        const genelBilgi = kart.bilgiTuru === "genel" && kodlar.length === 0;
+        if (!soru || !cevapMetni || (!referanslar.length && !genelBilgi)) continue;
         const anahtar = konuId + ":" + soru.toLocaleLowerCase("tr-TR");
         if (mevcutSorular.has(anahtar)) continue;
         mevcutSorular.add(anahtar);
         kayit.sayi += 1;
         sonuc.push({
             konuId, konuBasligi: kayit.konu.baslik, soru, cevap: cevapMetni,
-            uretimYontemi: "gemini",
+            uretimYontemi: genelBilgi ? "genel" : "gemini",
             kaynaklar: referanslar.map((kaynak) => ({
                 materyalId: kaynak.materyalId,
                 dosyaAdi: kaynak.dosyaAdi,
