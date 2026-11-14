@@ -128,18 +128,44 @@ export const kaynakMetnindenYedekKartOlustur = (konu, mevcutSorular = new Set())
     if (!terimler.length) return null;
     const adaylar = [];
     for (const kaynak of konu.kaynaklar || []) {
-        const cumleler = String(kaynak.icerik || "").replace(/\s+/g, " ").split(/(?<=[.!?])\s+/u);
-        for (const ham of cumleler) {
-            const cumle = ham.trim();
-            if (cumle.length < 45 || cumle.length > 310) continue;
+        const icerik = String(kaynak.icerik || "");
+        const metin = icerik.replace(/\s+/g, " ");
+        const dusuk = metin.toLocaleLowerCase("tr-TR");
+        const kokler = terimler.map((x) => x.slice(0, Math.min(5, x.length)));
+        const konumlar = kokler.flatMap((kok) => {
+            const yerler = [];
+            let baslangic = 0;
+            while (baslangic < dusuk.length) {
+                const indeks = dusuk.indexOf(kok, baslangic);
+                if (indeks < 0) break;
+                yerler.push(indeks);
+                baslangic = indeks + kok.length;
+                if (yerler.length >= 40) break;
+            }
+            return yerler;
+        });
+        if (!konumlar.length) continue;
+        // Noktalama içeren cümleleri veya PDF'de noktalamasız gelen tam satırları kullan.
+        const cumleler = [
+            ...[...metin.matchAll(/[^.!?]+[.!?]/g)].map((m) => ({ metin: m[0].trim(), konum: m.index, cumle: true })),
+            ...icerik.split(/\r?\n/).filter((l) => l.trim()).map((l) => ({
+                metin: l.trim(), konum: metin.indexOf(l.trim()), cumle: false,
+            })),
+        ];
+        for (const parca of cumleler) {
+            const cumle = parca.metin;
+            if (cumle.length < 45 || cumle.length > 310 || parca.konum < 0) continue;
             if (/konya teknik|bilgisayar mühendisliği|doç\.?\s*dr\.?|https?:\/\//i.test(cumle)) continue;
-            if (!/[.!?]$/.test(cumle) || !/[a-zçğıöşü]{3,}/i.test(cumle)) continue;
+            if (kaynakKelimeleri(cumle).length < 7) continue;
+            if (parca.cumle && !/[.!?]$/.test(cumle)) continue;
             const sozcukler = new Set(kaynakKelimeleri(cumle));
             const eslesenler = terimler.filter((kelime) =>
-                [...sozcukler].some((aday) =>
-                    aday.startsWith(kelime.slice(0, Math.min(5, kelime.length)))));
-            if (!eslesenler.length) continue;
-            const skor = eslesenler.length * 10 + (cumle.length >= 70 ? 2 : 0) - Math.max(0, cumle.length - 210) / 30;
+                [...sozcukler].some((aday) => aday.startsWith(kelime.slice(0, Math.min(5, kelime.length)))));
+            const yakinlik = Math.min(...konumlar.map((konum) => Math.max(0, parca.konum - konum)), 99999);
+            // Başlığın hemen sonrasındaki açıklama da konuyu anabilir ama aynı kökü tekrar etmez.
+            if (!eslesenler.length && !(yakinlik <= 280 && parca.konum > Math.min(...konumlar))) continue;
+            const skor = eslesenler.length * 10 + (yakinlik <= 280 ? 3 : 0) +
+                (parca.cumle ? 2 : 0) - Math.max(0, cumle.length - 210) / 30;
             adaylar.push({ cumle, kaynak, skor });
         }
     }
