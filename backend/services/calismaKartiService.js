@@ -25,7 +25,7 @@ export {
 } from "./kartUretimPlanlama.mjs";
 
 const PARTI_KONU_SAYISI = 3;
-const PARTI_KONU_KARAKTER_BUTCESI = 7000;
+const PARTI_KONU_KARAKTER_BUTCESI = 4500;
 
 export class CalismaKartiHatasi extends Error {
     constructor(message, status = 422, kod = "KART_HATASI") {
@@ -43,6 +43,7 @@ const deps = (d = {}) => ({
     KartModel: d.KartModel || CalismaKarti,
     uret: d.uret || geminiIleCalismaKartiPartisiUret,
     parcaSec: d.parcaSec || dengeliOzetParcalariniSec,
+    eslestir: d.eslestir || konuIcinParcalariSirala,
 });
 
 const dersGetir = async (kullaniciId, dersId, d) => {
@@ -127,7 +128,7 @@ const hazirKaynaklariGetir = async ({ kullaniciId, dersId }, x) => {
         throw new CalismaKartiHatasi("İşlenmiş materyal metni bulunamadı.");
     }
     const konular = konuListesiOlustur(harita).map((konu) => {
-        const eslesen = konuIcinParcalariSirala(parcalar, konu);
+        const eslesen = x.eslestir(parcalar, konu);
         return {
             ...konu,
             parcalar: eslesen,
@@ -156,7 +157,7 @@ const islemSahibiniDogrula = async (x, kullaniciId, dersId, token) => {
     }
 };
 
-export const calismaKartlariniOlustur = async ({ kullaniciId, dersId, azamiKonuSayisi = 3 }, d = {}) => {
+export const calismaKartlariniOlustur = async ({ kullaniciId, dersId, azamiKonuSayisi = 3, yalnizcaKaynak = false }, d = {}) => {
     const x = deps(d);
     const ders = await dersGetir(kullaniciId, dersId, x);
     if (!ders.materyallerOnaylandi) {
@@ -244,7 +245,7 @@ export const calismaKartlariniOlustur = async ({ kullaniciId, dersId, azamiKonuS
         // Geçersiz Gemini JSON'u veya eksik kart listesi sonsuz retry döngüsüne neden
         // olmamalı. Yalnızca aynı kaynakta geçen açıklayıcı cümleden yedek kart oluştur.
         let yanit = { kartlar: [] };
-        if (kaynakliKonular.length) {
+        if (kaynakliKonular.length && !yalnizcaKaynak) {
             try {
                 yanit = await x.uret({ dersAdi: kilitliDers.dersAdi, konular: kaynakliKonular });
             } catch (hata) {
