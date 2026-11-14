@@ -6,6 +6,7 @@ import {
     konuKotalariniBelirle,
     partiKaynaklariniOlustur,
     kartAdaylariniDogrula,
+    kaynakMetnindenYedekKartOlustur,
 } from "../services/kartUretimPlanlama.mjs";
 
 test("Alt konu kimlikleri korunur", () => {
@@ -64,4 +65,44 @@ test("Yanıtla istenen sayı aşılsa bile konu sınırı korunur", () => {
         konuId: "a", soru: "Soru " + i, cevap: "Cevap " + i, kaynakKodlari: ["K1"],
     })) };
     assert.equal(kartAdaylariniDogrula({ konular, cevap }).length, 2);
+});
+
+test("KonuId eksik ama tek doğru kaynak kodu varsa Gemini kartı güvenle kurtarılır", () => {
+    const konular = [{
+        konuId: "alt-1", baslik: "Eksik Veri", adet: 3,
+        kaynaklar: [{ kod: "K7", materyalId: "m1", dosyaAdi: "hafta3.pdf", parcaIndex: 4 }],
+    }];
+    const kartlar = kartAdaylariniDogrula({
+        konular,
+        cevap: { kartlar: [{ soru: "Eksik veri nedir?", cevap: "Gözlemdeki boş değer.", kaynakKodlari: ["K7"] }] },
+    });
+    assert.equal(kartlar.length, 1);
+    assert.equal(kartlar[0].konuId, "alt-1");
+    assert.equal(kartlar[0].uretimYontemi, "gemini");
+});
+
+test("Ders slaytındaki başlığın ardından gelen açıklama yedek kart olur", () => {
+    const konu = {
+        konuId: "sub-siniflandirma", baslik: "Sınıflandırma", adet: 4,
+        kaynaklar: [{
+            kod: "K1", materyalId: "m1", dosyaAdi: "hafta5.pdf", parcaIndex: 2,
+            icerik: "Sınıflandırma Nedir?\nVeri kümesinde her örneğin bir sınıf etiketi vardır.\nAmaç yeni veya bilinmeyen örneğin sınıfını tahmin etmektir.",
+        }],
+    };
+    const kart = kaynakMetnindenYedekKartOlustur(konu);
+    assert.ok(kart);
+    assert.equal(kart.uretimYontemi, "kaynak");
+    assert.match(kart.cevap, /sınıf etiketi/);
+    assert.equal(kart.kaynaklar[0].dosyaAdi, "hafta5.pdf");
+});
+
+test("Kaynakta konuya dair sözcük veya yakın açıklama yoksa uydurma kart üretilmez", () => {
+    const konu = {
+        konuId: "c", baslik: "Naive Bayes", adet: 2,
+        kaynaklar: [{
+            kod: "K9", materyalId: "m1", dosyaAdi: "not.pdf", parcaIndex: 4,
+            icerik: "Yazılım mühendisliğinde tasarım farklı aşamalardan oluşur. Planlama ekip içinde dikkatli bir şekilde sürdürülür.",
+        }],
+    };
+    assert.equal(kaynakMetnindenYedekKartOlustur(konu), null);
 });
