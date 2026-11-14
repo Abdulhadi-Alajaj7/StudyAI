@@ -2614,7 +2614,9 @@ export const geminiIleCalismaKartiPartisiUret = async ({
         systemInstruction: sistem,
         timeoutMs: 60_000,
         maxDeneme: 1, // 429 bekleme süresini HTTP isteği içinde tüketme; istemci işlemi devam ettirebilir.
-        maxOutputTokens: 6000,
+        // Uzun JSON yanıtları kesilmesin; tek konu için gereksiz çıktı kotası isteme.
+        maxOutputTokens: Math.min(8192, Math.max(3200,
+            konular.reduce((toplam, konu) => toplam + Math.min(8, konu.adet), 0) * 360)),
         bekle: bagimliliklar.bekle || ((ms) => new Promise((resolve) => setTimeout(resolve, ms))),
         istekYonetimi: bagimliliklar.istekYonetimi || ortakGeminiIstekYonetimi,
     });
