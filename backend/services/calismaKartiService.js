@@ -399,11 +399,11 @@ export const calismaKartlariniHizliOlustur = async ({ kullaniciId, dersId }, d =
         let apiBasarili = false;
         let aiKartiSayisi = 0;
         const adaylar = [];
-        // 60 konuyu aşan derslerde model çağrıları paralel çalışır;
-        // her bölüm için K kodları kendi cevap kümesinde değerlendirilir.
+        // Ön yüzde tek HTTP isteği, içeride en çok 20 konuluk paralel
+        // çağrılar: kısa yanıtlar ile gecikme ve JSON kesilmesi azaltılır.
         const parcalar = [];
-        for (let i = 0; i < kaynakliKonular.length; i += 60) {
-            parcalar.push(kaynakliKonular.slice(i, i + 60));
+        for (let i = 0; i < kaynakliKonular.length; i += 20) {
+            parcalar.push(kaynakliKonular.slice(i, i + 20));
         }
         const cevaplar = await Promise.allSettled(parcalar.map((parca) =>
             x.hizliUret({ dersAdi: guncelDers.dersAdi, konular: parca })
