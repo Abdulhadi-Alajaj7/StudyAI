@@ -41,23 +41,32 @@ export const konuKotalariniBelirle = (konular, hedef) => {
  * Aynı kaynağı birden fazla konuya gönderirken konuya ait benzersiz K kodları
  * tanımlar. İçeriği konu başına dengeli ve küçük tutmak TPM tüketimini azaltır.
  */
-export const partiKaynaklariniOlustur = (konular, materyalAdlari, parcalariSec, karakterButcesi = 7000) => {
+export const partiKaynaklariniOlustur = (konular, materyalAdlari, parcalariSec, karakterButcesi = 4500) => {
     let kaynakNo = 0;
     return konular.map((konu) => {
-        const secilenler = parcalariSec(konu.parcalar, karakterButcesi).slice(0, 12);
-        const kaynaklar = secilenler.map((parca) => ({
-            kod: "K" + (++kaynakNo),
-            materyalId: parca.materyalId,
-            parcaIndex: parca.parcaIndex,
-            dosyaAdi: materyalAdlari.get(String(parca.materyalId)) || "Materyal",
-            icerik: String(parca.icerik || "").slice(0, 4500),
-        }));
-        return {
-            konuId: konu.konuId,
-            baslik: konu.baslik,
-            adet: konu.adet,
-            kaynaklar,
-        };
+        // Eşleşme puanına göre ilk iki parça mutlaka değerlendirilir;
+        // kalan boşluk farklı materyal bölümlerinden dengeli tamamlanır.
+        const sirali = [...konu.parcalar.slice(0, 2), ...parcalariSec(konu.parcalar, karakterButcesi)];
+        const gorulen = new Set();
+        let kalan = karakterButcesi;
+        const kaynaklar = [];
+        for (const parca of sirali) {
+            if (kaynaklar.length >= 8 || kalan < 90) break;
+            const anahtar = String(parca.materyalId) + ":" + String(parca.parcaIndex);
+            if (gorulen.has(anahtar)) continue;
+            gorulen.add(anahtar);
+            const icerik = String(parca.icerik || "").trim().slice(0, Math.min(2400, kalan));
+            if (icerik.length < 70) continue;
+            kalan -= icerik.length;
+            kaynaklar.push({
+                kod: "K" + (++kaynakNo),
+                materyalId: parca.materyalId,
+                parcaIndex: parca.parcaIndex,
+                dosyaAdi: materyalAdlari.get(String(parca.materyalId)) || "Materyal",
+                icerik,
+            });
+        }
+        return { konuId: konu.konuId, baslik: konu.baslik, adet: konu.adet, kaynaklar };
     }).filter((konu) => konu.kaynaklar.length > 0);
 };
 
@@ -126,7 +135,9 @@ export const kaynakMetnindenYedekKartOlustur = (konu, mevcutSorular = new Set())
             if (/konya teknik|bilgisayar mühendisliği|doç\.?\s*dr\.?|https?:\/\//i.test(cumle)) continue;
             if (!/[.!?]$/.test(cumle) || !/[a-zçğıöşü]{3,}/i.test(cumle)) continue;
             const sozcukler = new Set(kaynakKelimeleri(cumle));
-            const eslesenler = terimler.filter((kelime) => sozcukler.has(kelime));
+            const eslesenler = terimler.filter((kelime) =>
+                [...sozcukler].some((aday) =>
+                    aday.startsWith(kelime.slice(0, Math.min(5, kelime.length)))));
             if (!eslesenler.length) continue;
             const skor = eslesenler.length * 10 + (cumle.length >= 70 ? 2 : 0) - Math.max(0, cumle.length - 210) / 30;
             adaylar.push({ cumle, kaynak, skor });
