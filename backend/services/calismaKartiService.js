@@ -152,7 +152,7 @@ const islemSahibiniDogrula = async (x, kullaniciId, dersId, token) => {
     }
 };
 
-export const calismaKartlariniOlustur = async ({ kullaniciId, dersId }, d = {}) => {
+export const calismaKartlariniOlustur = async ({ kullaniciId, dersId, azamiKonuSayisi = 3 }, d = {}) => {
     const x = deps(d);
     const ders = await dersGetir(kullaniciId, dersId, x);
     if (!ders.materyallerOnaylandi) {
@@ -215,7 +215,10 @@ export const calismaKartlariniOlustur = async ({ kullaniciId, dersId }, d = {}) 
         const kalanKonular = hedefIds.filter((id) => !tamamlananSeti.has(id))
             .map((id) => kotalarMap.get(id))
             .filter(Boolean);
-        const parti = kalanKonular.slice(0, PARTI_KONU_SAYISI);
+        const partiBoyutu = Number.isInteger(azamiKonuSayisi)
+            ? Math.max(1, Math.min(PARTI_KONU_SAYISI, azamiKonuSayisi))
+            : PARTI_KONU_SAYISI;
+        const parti = kalanKonular.slice(0, partiBoyutu);
         if (!parti.length) {
             throw new CalismaKartiHatasi(
                 "Konu haritası değişmiş. Önceden üretilen kartlar korundu.",
@@ -275,7 +278,9 @@ export const calismaKartlariniOlustur = async ({ kullaniciId, dersId }, d = {}) 
             };
         }), { ordered: false });
 
-        const partiIds = parti.map((konu) => String(konu.konuId));
+        // Gemini bazen partideki tüm konular için kart dönmeyebilir.
+        // Sadece en az bir doğrulanmış kart üretilen konuları tamamlandı say.
+        const partiIds = [...new Set(adaylar.map((kart) => String(kart.konuId)))];
         const yenile = await x.DersModel.updateOne({
             _id: dersId, kullaniciId, kartUretimToken: token,
             temizleniyor: { $ne: true },
