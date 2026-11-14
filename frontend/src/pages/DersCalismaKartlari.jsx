@@ -22,6 +22,9 @@ function DersCalismaKartlari() {
   const [kartlar, setKartlar] = useState([]);
   const [yukleniyor, setYukleniyor] = useState(true);
   const [olusturuluyor, setOlusturuluyor] = useState(false);
+  const [uretim, setUretim] = useState({ tamamlandi: false, toplamKonuSayisi: 0, tamamlananKonuSayisi: 0 });
+  const [uretimMesaji, setUretimMesaji] = useState("");
+  const uretimControllerRef = useRef(null);
   const [hata, setHata] = useState("");
   const [filtre, setFiltre] = useState("tum");
   const [index, setIndex] = useState(0);
@@ -32,19 +35,32 @@ function DersCalismaKartlari() {
   const metin = isDark ? "text-[#F8FAFC]" : "text-[#0F172A]";
   const ikincil = isDark ? "text-[#92A7C5]" : "text-[#64748B]";
 
+  const bekle = (ms, signal) => new Promise((resolve) => {
+    if (signal.aborted) return resolve();
+    const zamanlayici = setTimeout(tamamla, ms);
+    function tamamla() {
+      clearTimeout(zamanlayici);
+      signal.removeEventListener("abort", tamamla);
+      resolve();
+    }
+    signal.addEventListener("abort", tamamla, { once: true });
+  });
+
   useEffect(() => {
     const controller = new AbortController();
     setYukleniyor(true);
     setHata("");
     setKartlar([]);
+    setUretim({ tamamlandi: false, toplamKonuSayisi: 0, tamamlananKonuSayisi: 0 });
+    setUretimMesaji("");
     setIndex(0);
     setCevapAcik(false);
     setFiltre("tum");
     api.listele(dersId, controller.signal)
-      .then(r => setKartlar(r.data.kartlar || []))
+      .then(r => { setKartlar(r.data.kartlar || []); setUretim(r.data); })
       .catch(e => { if (!controller.signal.aborted) setHata(kullaniciHataMesaji(e, "Kartlar yüklenemedi.")); })
       .finally(() => { if (!controller.signal.aborted) setYukleniyor(false); });
-    return () => controller.abort();
+    return () => { controller.abort(); uretimControllerRef.current?.abort(); };
   }, [dersId]);
 
   const sayilar = useMemo(() => ({
@@ -75,18 +91,50 @@ function DersCalismaKartlari() {
   const olustur = async () => {
     if (islemRef.current) return;
     islemRef.current = true;
+    const controller = new AbortController();
+    uretimControllerRef.current = controller;
     setOlusturuluyor(true);
     setHata("");
+    setUretimMesaji("Konulara göre çalışma kartları hazırlanıyor...");
+    let kotaDenemesi = 0;
     try {
-      const r = await api.olustur(dersId);
-      setKartlar(r.data.kartlar || []);
-      setIndex(0);
-      setCevapAcik(false);
+      // Her HTTP çağrısı birkaç konu üretir, başarılı sonuçlar anında MongoDB'de saklanır.
+      // Sayfa kapanırsa sonraki girişte kalan konulardan devam edilebilir.
+      for (let adim = 0; adim < 500 && !controller.signal.aborted; adim += 1) {
+        try {
+          const r = await api.olustur(dersId, controller.signal);
+          if (controller.signal.aborted) break;
+          setKartlar(r.data.kartlar || []);
+          setUretim(r.data);
+          setUretimMesaji(r.data.tamamlandi ? "" : "Kartlar kaydediliyor, sıradaki konular hazırlanacak...");
+          kotaDenemesi = 0;
+          if (r.data.tamamlandi) break;
+          // Aynı kullanıcıdan dakikada çok sayıda SDK isteği çıkmasını engelle.
+          await bekle(15000, controller.signal);
+        } catch (e) {
+          if (controller.signal.aborted || e.code === "ERR_CANCELED") break;
+          const durum = e.response?.status;
+          const data = e.response?.data || {};
+          if (durum === 429 && data.kotaTuru !== "gunluk" && kotaDenemesi < 2) {
+            kotaDenemesi += 1;
+            const sure = Math.max(60000, Math.min(120000, Number(data.retryAfterMs) || 60000));
+            setUretimMesaji("Gemini geçici istek sınırına ulaştı. Daha önce üretilen kartlar kayıtlı; yeniden denenecek.");
+            await bekle(sure, controller.signal);
+            continue;
+          }
+          throw e;
+        }
+      }
     } catch (e) {
-      setHata(kullaniciHataMesaji(e, "Kart oluşturulamadı."));
+      if (!controller.signal.aborted) {
+        setHata(kullaniciHataMesaji(e, "Kart üretimine devam edilemedi. Mevcut kartlar kaydedildi."));
+        setUretimMesaji("");
+      }
     } finally {
       islemRef.current = false;
+      if (uretimControllerRef.current === controller) uretimControllerRef.current = null;
       setOlusturuluyor(false);
+      setUretimMesaji("");
     }
   };
   const durum = async (kart, degisiklik) => {
@@ -146,6 +194,20 @@ function DersCalismaKartlari() {
         <p className="mt-2 text-3xl font-bold">{sayilar[id]}</p>
       </button>)}
     </div>
+    {(olusturuluyor || (uretim.toplamKonuSayisi > 0 && !uretim.tamamlandi)) && (
+      <div role="status" aria-live="polite" className={`flex flex-wrap items-center justify-between gap-3 rounded-xl border border-violet-400/30 bg-violet-500/10 px-4 py-3 text-sm ${metin}`}>
+        <div className="flex items-center gap-2">
+          {olusturuluyor && <ArrowPathIcon className="h-5 w-5 animate-spin text-violet-400" />}
+          <span>{uretimMesaji || "Kart üretimi henüz tamamlanmadı. Kaldığınız yerden devam edebilirsiniz."}</span>
+        </div>
+        {uretim.toplamKonuSayisi > 0 && <span className="text-xs font-semibold text-violet-400">
+          {uretim.tamamlananKonuSayisi} / {uretim.toplamKonuSayisi} konu
+        </span>}
+        {!olusturuluyor && <button type="button" onClick={olustur} className="rounded-lg border border-violet-400/50 px-3 py-2 font-semibold text-violet-400 hover:bg-violet-500/10">
+          Üretime Devam Et
+        </button>}
+      </div>
+    )}
     {hata && <p role="alert" className="rounded-xl border border-rose-400/40 bg-rose-500/10 p-4 text-sm text-rose-400">{hata}</p>}
     {yukleniyor ? <div role="status" className="py-14 text-center">Kartlar yükleniyor...</div> : !kartlar.length ?
       <div className={`flex min-h-[380px] flex-col items-center justify-center rounded-2xl border p-8 text-center ${panel}`}>
@@ -154,7 +216,7 @@ function DersCalismaKartlari() {
         <p className={`mt-3 max-w-lg text-sm leading-6 ${ikincil}`}>Onaylanmış konu haritanız ve ders materyallerinizden her konuya uygun soru ve cevap kartları hazırlayalım.</p>
         <button type="button" disabled={olusturuluyor} onClick={olustur} className="mt-7 inline-flex items-center gap-2 rounded-xl bg-[#705CF5] px-6 py-3 font-semibold text-white hover:bg-[#6250DE] disabled:opacity-50">
           {olusturuluyor ? <ArrowPathIcon className="h-5 w-5 animate-spin" /> : <SparklesIcon className="h-5 w-5" />}
-          {olusturuluyor ? "Kartlar hazırlanıyor..." : "Kartları Oluştur"}
+          {olusturuluyor ? "Kartlar hazırlanıyor..." : uretim.toplamKonuSayisi > 0 ? "Üretime Devam Et" : "Kartları Oluştur"}
         </button>
       </div> : !aktif ?
       <div className={`rounded-2xl border p-14 text-center ${panel}`}>
