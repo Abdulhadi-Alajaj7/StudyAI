@@ -324,6 +324,8 @@ export const calismaKartlariniOlustur = async ({ kullaniciId, dersId, azamiKonuS
             toplamKonuSayisi: hedefIds.length,
             tamamlananKonuSayisi: hedefIds.filter((id) => tamamlananYeni.has(id)).length,
             atlananKonuSayisi: new Set([...atlananIds, ...atlananPartiIds]).size,
+            partiGeminiKartiSayisi: adaylar.filter((kart) => kart.uretimYontemi === "gemini").length,
+            partiKaynakKartiSayisi: adaylar.filter((kart) => kart.uretimYontemi === "kaynak").length,
         };
     } finally {
         await kartKilidiniBirak(x.DersModel, kullaniciId, dersId, token);
