@@ -76,6 +76,7 @@ const dersSchema = new mongoose.Schema(
         kartTamamlananKonuIds: { type: [String], default: [] },
         kartAtlananKonuIds: { type: [String], default: [] },
         kartKaynakSurumImzasi: { type: String, default: "" },
+        kartHizliUretimSurumImzasi: { type: String, default: "" },
         kartUretimToken: { type: mongoose.Schema.Types.ObjectId, default: null },
         kartUretimSonYenileme: { type: Date, default: null },
         temizleniyor: {
