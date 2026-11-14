@@ -47,14 +47,17 @@ export const kartlariOlustur = async (req, res) => {
         return res.status(400).json({ hata: "Geçersiz ders kimliği." });
     }
     const azamiKonuSayisi = req.body?.azamiKonuSayisi ?? 3;
-    if (!Number.isInteger(azamiKonuSayisi) || azamiKonuSayisi < 1 || azamiKonuSayisi > 3) {
-        return res.status(400).json({ hata: "Geçersiz parti boyutu." });
+    const yalnizcaKaynak = req.body?.yalnizcaKaynak ?? false;
+    if (!Number.isInteger(azamiKonuSayisi) || azamiKonuSayisi < 1 || azamiKonuSayisi > 3 ||
+        typeof yalnizcaKaynak !== "boolean") {
+        return res.status(400).json({ hata: "Geçersiz kart üretim ayarı." });
     }
     try {
         const sonuc = await calismaKartlariniOlustur({
             kullaniciId: req.user._id,
             dersId: req.params.dersId,
             azamiKonuSayisi,
+            yalnizcaKaynak,
         });
         return res.status(sonuc.tamamlandi ? 201 : 202).json(sonuc);
     } catch (hata) {
