@@ -2538,7 +2538,7 @@ export function semaDogrulaVeNormalizeEt(data) {
 /** Konu bazlı, kaynak kodlu ve sınırlı sayıdaki çalışma kartlarını üretir. */
 export const geminiIleCalismaKartlariUret = async ({
     dersAdi, konuBasligi, adet, kaynaklar,
-    modelAdi = process.env.GEMINI_KART_MODELI || VARSAYILAN_GEMINI_MODELI,
+    modelAdi = process.env.GEMINI_KART_MODELI || process.env.GEMINI_TEST_MODELI || VARSAYILAN_GEMINI_MODELI,
 }, bagimliliklar = {}) => {
     const izinli = new Set(kaynaklar.map(k => k.kod));
     const sayi = Math.max(1, Math.min(8, Math.floor(adet)));
@@ -2580,7 +2580,7 @@ ${kaynaklar.map(k => `[${k.kod}] ${k.dosyaAdi}, parça ${k.parcaIndex}:\n${k.ice
 export const geminiIleCalismaKartiPartisiUret = async ({
     dersAdi,
     konular,
-    modelAdi = process.env.GEMINI_KART_MODELI || VARSAYILAN_GEMINI_MODELI,
+    modelAdi = process.env.GEMINI_KART_MODELI || process.env.GEMINI_TEST_MODELI || VARSAYILAN_GEMINI_MODELI,
 }, bagimliliklar = {}) => {
     if (!Array.isArray(konular) || konular.length < 1 || konular.length > 3) {
         throw new Error("Kart partisi 1-3 konu içermelidir.");
