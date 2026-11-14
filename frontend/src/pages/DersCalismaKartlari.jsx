@@ -97,17 +97,20 @@ function DersCalismaKartlari() {
     setHata("");
     setUretimMesaji("Konulara göre çalışma kartları hazırlanıyor...");
     let kotaDenemesi = 0;
+    let partiBoyutu = 3;
+    let yanitDenemesi = 0;
     try {
       // Her HTTP çağrısı birkaç konu üretir, başarılı sonuçlar anında MongoDB'de saklanır.
       // Sayfa kapanırsa sonraki girişte kalan konulardan devam edilebilir.
       for (let adim = 0; adim < 500 && !controller.signal.aborted; adim += 1) {
         try {
-          const r = await api.olustur(dersId, controller.signal);
+          const r = await api.olustur(dersId, controller.signal, partiBoyutu);
           if (controller.signal.aborted) break;
           setKartlar(r.data.kartlar || []);
           setUretim(r.data);
           setUretimMesaji(r.data.tamamlandi ? "" : "Kartlar kaydediliyor, sıradaki konular hazırlanacak...");
           kotaDenemesi = 0;
+          yanitDenemesi = 0;
           if (r.data.tamamlandi) break;
           // Aynı kullanıcıdan dakikada çok sayıda SDK isteği çıkmasını engelle.
           await bekle(15000, controller.signal);
@@ -115,8 +118,24 @@ function DersCalismaKartlari() {
           if (controller.signal.aborted || e.code === "ERR_CANCELED") break;
           const durum = e.response?.status;
           const data = e.response?.data || {};
+          // Çok konulu Gemini yanıtı hatalıysa daha küçük grupta dene.
+          // Önceden kaydedilmiş kartları veya ilerleme bilgisini silme.
+          if (durum === 502 && partiBoyutu > 1) {
+            partiBoyutu -= 1;
+            yanitDenemesi = 0;
+            setUretimMesaji("Yanıt doğrulanamadı. Kayıtlı kartlar korunuyor; daha küçük konu grubuyla yeniden deneniyor.");
+            await bekle(3000, controller.signal);
+            continue;
+          }
+          if (durum === 502 && partiBoyutu === 1 && yanitDenemesi < 1) {
+            yanitDenemesi += 1;
+            setUretimMesaji("Tek konunun yanıtı doğrulanamadı; bir kez daha deneniyor.");
+            await bekle(4000, controller.signal);
+            continue;
+          }
           if (durum === 429 && data.kotaTuru !== "gunluk" && kotaDenemesi < 2) {
             kotaDenemesi += 1;
+            if (data.kotaTuru === "tpm") partiBoyutu = 1;
             const sure = Math.max(60000, Math.min(120000, Number(data.retryAfterMs) || 60000));
             setUretimMesaji("Gemini geçici istek sınırına ulaştı. Daha önce üretilen kartlar kayıtlı; yeniden denenecek.");
             await bekle(sure, controller.signal);
@@ -127,7 +146,10 @@ function DersCalismaKartlari() {
       }
     } catch (e) {
       if (!controller.signal.aborted) {
-        setHata(kullaniciHataMesaji(e, "Kart üretimine devam edilemedi. Mevcut kartlar kaydedildi."));
+        const baglantiYok = !e.response && (e.code === "ERR_NETWORK" || e.isAxiosError);
+        setHata(baglantiYok
+          ? "Yerel sunucuya bağlanılamadı. Backend'in çalıştığını kontrol edip 'Üretime Devam Et' düğmesine basın. Önceki kartlar korunuyor."
+          : kullaniciHataMesaji(e, "Kart üretimine devam edilemedi. Önceki kartlar korundu."));
         setUretimMesaji("");
       }
     } finally {
@@ -235,7 +257,8 @@ function DersCalismaKartlari() {
             {[false, true].map(arka => <div key={String(arka)}
               className={`absolute inset-0 flex flex-col rounded-[20px] border p-6 sm:p-9 ${panel}`}
               style={{ backfaceVisibility: "hidden", WebkitBackfaceVisibility: "hidden", transform: arka ? "rotateY(180deg)" : "none" }}
-              aria-hidden={cevapAcik !== arka}>
+              aria-hidden={cevapAcik !== arka}
+              inert={cevapAcik !== arka}>
               <div className="flex items-start justify-between gap-3">
                 <span className={`max-w-[85%] truncate text-xs font-medium ${ikincil}`}>{aktif.konuBasligi}</span>
                 {!arka && <button type="button" disabled={kaydediliyor} onClick={() => durum(aktif, { yildizli: !aktif.yildizli })}
@@ -245,7 +268,7 @@ function DersCalismaKartlari() {
                 </button>}
                 {arka && <span className="text-xs font-bold tracking-[0.2em] text-emerald-400">CEVAP</span>}
               </div>
-              <button type="button" tabIndex={cevapAcik === arka ? 0 : -1} onClick={cevir}
+              <button type="button" tabIndex={cevapAcik === arka ? 0 : -1} onClick={e => { e.currentTarget.blur(); cevir(); }}
                 disabled={kaydediliyor} aria-label={arka ? "Soruyu görmek için kartı çevir" : "Cevabı görmek için kartı çevir"}
                 className="flex min-h-0 flex-1 flex-col items-center justify-center gap-5 overflow-y-auto rounded-xl px-2 py-4 text-center focus-visible:outline focus-visible:outline-2 focus-visible:outline-violet-400">
                 <span className="whitespace-pre-wrap break-words text-xl font-semibold leading-relaxed sm:text-2xl">{arka ? aktif.cevap : aktif.soru}</span>
