@@ -131,3 +131,40 @@ test("Kanıt içermeyen konu atlanır, diğer konuların kartları korunur", asy
     assert.equal(sonuc.kartlar.length, 1);
     assert.equal((await calismaKartlariDurumunuGetir(v.args, v.deps)).atlananKonuSayisi, 1);
 });
+
+test("31 konuluk derste 6 konu sonrası 429, kayıtlar korunarak kalan 25 konu tamamlanır", async () => {
+    let sdkCagrisi = 0;
+    const konular = Array.from({ length: 31 }, (_, i) => "Veri Kalitesi Bölüm " + (i + 1));
+    const v = veriOlustur({ konular, uret: async ({ konular: parti }) => {
+        sdkCagrisi += 1;
+        if (sdkCagrisi === 3) {
+            throw Object.assign(new Error("Rate limit"), { status: 429, kod: "GEMINI_KOTA_ASIMI" });
+        }
+        return { kartlar: parti.map((konu) => ({
+            konuId: konu.konuId,
+            soru: konu.baslik + " neden önemlidir?",
+            cevap: "Doğruluk ve tutarlılık için önemlidir.",
+            kaynakKodlari: [konu.kaynaklar[0].kod],
+        })) };
+    } });
+    const ilk = await calismaKartlariniOlustur(v.args, v.deps);
+    const ikinci = await calismaKartlariniOlustur(v.args, v.deps);
+    assert.equal(ilk.tamamlananKonuSayisi, 3);
+    assert.equal(ikinci.tamamlananKonuSayisi, 6);
+    assert.equal(v.kartlar.length, 6);
+    await assert.rejects(calismaKartlariniOlustur(v.args, v.deps), (e) => e.status === 429);
+    assert.equal(v.kartlar.length, 6);
+
+    let sonuc;
+    for (let i = 0; i < 11; i += 1) {
+        sonuc = await calismaKartlariniOlustur({ ...v.args, yalnizcaKaynak: true }, v.deps);
+        if (sonuc.tamamlandi) break;
+    }
+    assert.equal(sonuc.tamamlandi, true);
+    assert.equal(sonuc.tamamlananKonuSayisi, 31);
+    assert.equal(sonuc.atlananKonuSayisi, 0);
+    assert.equal(sonuc.kartlar.length, 31);
+    assert.equal(sonuc.kartlar.filter((k) => k.uretimYontemi === "gemini").length, 6);
+    assert.equal(sonuc.kartlar.filter((k) => k.uretimYontemi === "kaynak").length, 25);
+    assert.equal(sdkCagrisi, 3);
+});
