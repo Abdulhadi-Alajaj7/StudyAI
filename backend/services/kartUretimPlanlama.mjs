@@ -62,30 +62,37 @@ export const partiKaynaklariniOlustur = (konular, materyalAdlari, parcalariSec, 
 };
 
 export const kartAdaylariniDogrula = ({ cevap, konular, mevcutSorular = new Set() }) => {
-    const konularMap = new Map(konular.map((konu) => [String(konu.konuId), {
-        konu,
-        kodlar: new Map(konu.kaynaklar.map((kaynak) => [kaynak.kod, kaynak])),
-        sayi: 0,
+    const konuHaritasi = new Map(konular.map((konu) => [String(konu.konuId), {
+        konu, kodlar: new Map(konu.kaynaklar.map((kaynak) => [kaynak.kod, kaynak])), sayi: 0,
     }]));
+    const kaynakSahipleri = new Map();
+    for (const konu of konular) {
+        for (const kaynak of konu.kaynaklar) {
+            kaynakSahipleri.set(String(kaynak.kod), String(konu.konuId));
+        }
+    }
     const sonuc = [];
     for (const kart of Array.isArray(cevap?.kartlar) ? cevap.kartlar : []) {
-        const kayit = konularMap.get(String(kart?.konuId || ""));
+        if (!kart || typeof kart !== "object") continue;
+        const kodlar = Array.isArray(kart.kaynakKodlari) ? [...new Set(kart.kaynakKodlari)] : [];
+        const kodSahipleri = [...new Set(kodlar.map((kod) => kaynakSahipleri.get(String(kod))).filter(Boolean))];
+        let konuId = String(kart.konuId || "");
+        // Kaynak tek konuya işaret ediyorsa unutulan konu kimliğini güvenle çıkar.
+        if (!konuHaritasi.has(konuId) && kodSahipleri.length === 1) konuId = kodSahipleri[0];
+        if (kodSahipleri.length > 1 || (kodSahipleri.length && kodSahipleri[0] !== konuId)) continue;
+        const kayit = konuHaritasi.get(konuId);
         if (!kayit || kayit.sayi >= Math.min(8, kayit.konu.adet)) continue;
-        const soru = typeof kart?.soru === "string" ? kart.soru.trim().slice(0, 1000) : "";
-        const yanit = typeof kart?.cevap === "string" ? kart.cevap.trim().slice(0, 2000) : "";
-        const referanslar = Array.isArray(kart?.kaynakKodlari)
-            ? [...new Set(kart.kaynakKodlari)].map((kod) => kayit.kodlar.get(kod)).filter(Boolean)
-            : [];
-        if (!soru || !yanit || !referanslar.length) continue;
-        const soruAnahtari = String(kayit.konu.konuId) + ":" + soru.toLocaleLowerCase("tr-TR");
-        if (mevcutSorular.has(soruAnahtari)) continue;
-        mevcutSorular.add(soruAnahtari);
+        const soru = typeof kart.soru === "string" ? kart.soru.trim().slice(0, 1000) : "";
+        const cevapMetni = typeof kart.cevap === "string" ? kart.cevap.trim().slice(0, 2000) : "";
+        const referanslar = kodlar.map((kod) => kayit.kodlar.get(String(kod))).filter(Boolean);
+        if (!soru || !cevapMetni || !referanslar.length) continue;
+        const anahtar = konuId + ":" + soru.toLocaleLowerCase("tr-TR");
+        if (mevcutSorular.has(anahtar)) continue;
+        mevcutSorular.add(anahtar);
         kayit.sayi += 1;
         sonuc.push({
-            konuId: kayit.konu.konuId,
-            konuBasligi: kayit.konu.baslik,
-            soru,
-            cevap: yanit,
+            konuId, konuBasligi: kayit.konu.baslik, soru, cevap: cevapMetni,
+            uretimYontemi: "gemini",
             kaynaklar: referanslar.map((kaynak) => ({
                 materyalId: kaynak.materyalId,
                 dosyaAdi: kaynak.dosyaAdi,
@@ -94,4 +101,50 @@ export const kartAdaylariniDogrula = ({ cevap, konular, mevcutSorular = new Set(
         });
     }
     return sonuc;
+};
+
+const kaynakKelimeleri = (metin) => String(metin || "")
+    .toLocaleLowerCase("tr-TR")
+    .replace(/[^a-z0-9çğıöşü\s]/gi, " ")
+    .split(/\s+/).filter((kelime) => kelime.length >= 4);
+const genelKelimeler = new Set(["konusu", "hakkında", "dersi", "genel", "giriş", "temel", "hangi", "nedir", "olarak", "olan", "göre", "veri"]);
+
+/**
+ * Geçersiz Gemini yanıtından sonra yerel, kaynak cümlesiyle kanıtlanan tek kart.
+ * Metinde konuya ilişkin tam cümle yoksa null; asla hayalî yanıt üretme.
+ */
+export const kaynakMetnindenYedekKartOlustur = (konu, mevcutSorular = new Set()) => {
+    const kelimeler = [...new Set(kaynakKelimeleri(konu.baslik))].filter((x) => !genelKelimeler.has(x));
+    const terimler = kelimeler.length ? kelimeler : [...new Set(kaynakKelimeleri(konu.baslik))];
+    if (!terimler.length) return null;
+    const adaylar = [];
+    for (const kaynak of konu.kaynaklar || []) {
+        const cumleler = String(kaynak.icerik || "").replace(/\s+/g, " ").split(/(?<=[.!?])\s+/u);
+        for (const ham of cumleler) {
+            const cumle = ham.trim();
+            if (cumle.length < 45 || cumle.length > 310) continue;
+            if (/konya teknik|bilgisayar mühendisliği|doç\.?\s*dr\.?|https?:\/\//i.test(cumle)) continue;
+            if (!/[.!?]$/.test(cumle) || !/[a-zçğıöşü]{3,}/i.test(cumle)) continue;
+            const sozcukler = new Set(kaynakKelimeleri(cumle));
+            const eslesenler = terimler.filter((kelime) => sozcukler.has(kelime));
+            if (!eslesenler.length) continue;
+            const skor = eslesenler.length * 10 + (cumle.length >= 70 ? 2 : 0) - Math.max(0, cumle.length - 210) / 30;
+            adaylar.push({ cumle, kaynak, skor });
+        }
+    }
+    adaylar.sort((a, b) => b.skor - a.skor);
+    const soru = String(konu.baslik) + " konusunda kaynakta verilen temel açıklama nedir?";
+    const anahtar = String(konu.konuId) + ":" + soru.toLocaleLowerCase("tr-TR");
+    if (mevcutSorular.has(anahtar) || !adaylar.length) return null;
+    const secilen = adaylar[0];
+    mevcutSorular.add(anahtar);
+    return {
+        konuId: konu.konuId, konuBasligi: konu.baslik,
+        soru, cevap: secilen.cumle, uretimYontemi: "kaynak",
+        kaynaklar: [{
+            materyalId: secilen.kaynak.materyalId,
+            dosyaAdi: secilen.kaynak.dosyaAdi,
+            parcaIndex: secilen.kaynak.parcaIndex,
+        }],
+    };
 };
