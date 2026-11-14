@@ -196,6 +196,15 @@ function DersCalismaKartlari() {
         </button>}
       </div>
     )}
+    {Number.isFinite(uretim.sureMs) && (
+      <div role="status" className={`flex flex-wrap items-center justify-between gap-2 rounded-xl border px-4 py-3 text-sm ${panel}`}>
+        <span className="font-semibold">Hızlı işlem: {Math.round(uretim.sureMs / 1000)} saniye</span>
+        <span className={ikincil}>{uretim.yeniKartSayisi ?? 0} yeni kart kaydedildi</span>
+        {uretim.geminiYanitiAlindi === false && (
+          <span className="text-amber-400">Gemini kullanılamadı; yalnızca ders metnindeki doğrulanabilir bilgiler kullanıldı.</span>
+        )}
+      </div>
+    )}
     {kartlar.some(k => k.uretimYontemi === "kaynak") && (
       <p role="status" className="rounded-xl border border-sky-400/30 bg-sky-500/10 p-4 text-sm text-sky-400">
         {kartlar.filter(k => k.uretimYontemi === "kaynak").length} kart, Gemini yanıtı doğrulanamadığı veya kullanım sınırı aşıldığı için doğrudan ders metninden oluşturuldu. Kartlarda "Kaynak metni" etiketi bulunur.
