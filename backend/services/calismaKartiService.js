@@ -481,7 +481,7 @@ export const calismaKartlariniHizliOlustur = async ({ kullaniciId, dersId }, d =
         }, {
             $set: {
                 kartKaynakSurumImzasi: imza,
-                kartHizliUretimSurumImzasi: imza,
+                kartHizliUretimSurumImzasi: aiKartiSayisi > 0 ? imza : "",
                 kartUretimHedefKonuIds: hedef,
                 kartTamamlananKonuIds: tamamlanan,
                 kartAtlananKonuIds: atlanan,
@@ -496,7 +496,7 @@ export const calismaKartlariniHizliOlustur = async ({ kullaniciId, dersId }, d =
             toplamKonuSayisi: hedef.length,
             tamamlananKonuSayisi: hedef.length,
             atlananKonuSayisi: atlanan.length,
-            hizliUretimYapildi: true,
+            hizliUretimYapildi: aiKartiSayisi > 0,
             yeniKartSayisi: tumKartlar.length - eskiKartlar.length,
             partiGeminiKartiSayisi: aiKartiSayisi,
             partiKaynakKartiSayisi: adaylar.length - aiKartiSayisi,
