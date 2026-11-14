@@ -230,13 +230,20 @@ function DersCalismaKartlari() {
         </button>}
       </div>
     )}
+    {uretim.atlananKonuSayisi > 0 && (
+      <p role="status" className="rounded-xl border border-amber-400/40 bg-amber-500/10 p-4 text-sm text-amber-400">
+        {uretim.atlananKonuSayisi} konu için kaynakta yeterli doğrulanabilir bilgi bulunamadı. Bu konularda uydurma kart oluşturulmadı; mevcut kartlar korundu.
+      </p>
+    )}
     {hata && <p role="alert" className="rounded-xl border border-rose-400/40 bg-rose-500/10 p-4 text-sm text-rose-400">{hata}</p>}
     {yukleniyor ? <div role="status" className="py-14 text-center">Kartlar yükleniyor...</div> : !kartlar.length ?
       <div className={`flex min-h-[380px] flex-col items-center justify-center rounded-2xl border p-8 text-center ${panel}`}>
         <RectangleStackIcon className="h-14 w-14 text-violet-400" />
         <h3 className="mt-5 text-xl font-bold">Bilgilerini kartlarla kalıcı hâle getir</h3>
-        <p className={`mt-3 max-w-lg text-sm leading-6 ${ikincil}`}>Onaylanmış konu haritanız ve ders materyallerinizden her konuya uygun soru ve cevap kartları hazırlayalım.</p>
-        <button type="button" disabled={olusturuluyor} onClick={olustur} className="mt-7 inline-flex items-center gap-2 rounded-xl bg-[#705CF5] px-6 py-3 font-semibold text-white hover:bg-[#6250DE] disabled:opacity-50">
+        <p className={`mt-3 max-w-lg text-sm leading-6 ${ikincil}`}>{uretim.tamamlandi
+          ? "İşlem tamamlandı ancak kaynaklardan doğrulanabilir kart bulunamadı. Konu haritası ve materyalleri kontrol edin."
+          : "Onaylanmış konu haritanız ve ders materyallerinizden her konuya uygun soru ve cevap kartları hazırlayalım."}</p>
+        <button type="button" disabled={olusturuluyor || uretim.tamamlandi} onClick={olustur} className="mt-7 inline-flex items-center gap-2 rounded-xl bg-[#705CF5] px-6 py-3 font-semibold text-white hover:bg-[#6250DE] disabled:opacity-50">
           {olusturuluyor ? <ArrowPathIcon className="h-5 w-5 animate-spin" /> : <SparklesIcon className="h-5 w-5" />}
           {olusturuluyor ? "Kartlar hazırlanıyor..." : uretim.toplamKonuSayisi > 0 ? "Üretime Devam Et" : "Kartları Oluştur"}
         </button>
@@ -248,7 +255,7 @@ function DersCalismaKartlari() {
       </div> :
       <div className="mx-auto max-w-5xl space-y-4">
         <div className={`flex flex-wrap items-center justify-between gap-3 text-sm ${ikincil}`}>
-          <span className="min-w-0 break-words">{aktif.konuBasligi}</span>
+          <span className="min-w-0 break-words">{aktif.konuBasligi} {aktif.uretimYontemi === "kaynak" && <span className="ml-2 rounded-full border border-amber-400/40 px-2 py-0.5 text-[11px] text-amber-400">Kaynak metni</span>}</span>
           <span className="shrink-0">Kart {aktifIndex + 1} / {filtrelenmis.length}</span>
         </div>
         <div className="relative" style={{ perspective: "1400px" }}>
