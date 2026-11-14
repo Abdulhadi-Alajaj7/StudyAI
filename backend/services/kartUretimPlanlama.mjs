@@ -41,6 +41,30 @@ export const konuKotalariniBelirle = (konular, hedef) => {
  * Aynı kaynağı birden fazla konuya gönderirken konuya ait benzersiz K kodları
  * tanımlar. İçeriği konu başına dengeli ve küçük tutmak TPM tüketimini azaltır.
  */
+/**
+ * Tek paragraf uzun bir doküman kesitiyse baştaki 1200 karakteri körlemesine
+ * almak yerine gerçek konu başlığının yakınındaki parçayı seç.
+ */
+export const konuOdakliIcerikSec = (icerik, baslik, limit) => {
+    const metin = String(icerik || "").trim();
+    if (metin.length <= limit) return metin;
+    const kucuk = metin.toLocaleLowerCase("tr-TR");
+    const konu = String(baslik || "").toLocaleLowerCase("tr-TR").trim();
+    const kelimeler = konu.split(/[^\p{L}\p{N}]+/u)
+        .filter((k) => k.length >= 3 && !["ve", "ile", "giriş", "temel", "konu"].includes(k));
+    let konum = konu ? kucuk.indexOf(konu) : -1;
+    if (konum < 0) {
+        const adaylar = kelimeler
+            .sort((a, b) => b.length - a.length)
+            .map((k) => kucuk.indexOf(k.slice(0, Math.min(k.length, 7))))
+            .filter((i) => i >= 0);
+        if (adaylar.length) konum = Math.min(...adaylar);
+    }
+    if (konum < 0) return metin.slice(0, limit);
+    const baslangic = Math.max(0, Math.min(metin.length - limit, konum - Math.floor(limit * 0.2)));
+    return metin.slice(baslangic, baslangic + limit);
+};
+
 export const partiKaynaklariniOlustur = (konular, materyalAdlari, parcalariSec, karakterButcesi = 4500) => {
     let kaynakNo = 0;
     return konular.map((konu) => {
@@ -55,7 +79,7 @@ export const partiKaynaklariniOlustur = (konular, materyalAdlari, parcalariSec, 
             const anahtar = String(parca.materyalId) + ":" + String(parca.parcaIndex);
             if (gorulen.has(anahtar)) continue;
             gorulen.add(anahtar);
-            const icerik = String(parca.icerik || "").trim().slice(0, Math.min(2400, kalan));
+            const icerik = konuOdakliIcerikSec(parca.icerik, konu.baslik, Math.min(2400, kalan));
             if (icerik.length < 70) continue;
             kalan -= icerik.length;
             kaynaklar.push({
