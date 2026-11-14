@@ -15,6 +15,7 @@ import {
     konuKotalariniBelirle,
     partiKaynaklariniOlustur,
     kartAdaylariniDogrula,
+    kaynakMetnindenYedekKartOlustur,
 } from "./kartUretimPlanlama.mjs";
 
 export {
@@ -68,16 +69,19 @@ const kartlariGetir = (x, kullaniciId, dersId) => (
 const uretimDurumunuOlustur = (ders, kartlar) => {
     const hedef = ders?.kartUretimHedefKonuIds || [];
     const tamamlanan = new Set(ders?.kartTamamlananKonuIds || []);
+    const atlanan = new Set(ders?.kartAtlananKonuIds || []);
     const toplamKonuSayisi = hedef.length;
-    const tamamlananKonuSayisi = hedef.filter((id) => tamamlanan.has(id)).length;
+    const islenenKonuSayisi = hedef.filter((id) => tamamlanan.has(id) || atlanan.has(id)).length;
+    const atlananKonuSayisi = hedef.filter((id) => atlanan.has(id)).length;
     return {
         kartlar,
         // Eski sistemde üretilmiş kartları değiştirmeden koru.
         tamamlandi: toplamKonuSayisi
-            ? tamamlananKonuSayisi === toplamKonuSayisi
+            ? islenenKonuSayisi === toplamKonuSayisi
             : kartlar.length > 0,
         toplamKonuSayisi,
-        tamamlananKonuSayisi,
+        tamamlananKonuSayisi: islenenKonuSayisi,
+        atlananKonuSayisi,
     };
 };
 
@@ -165,7 +169,8 @@ export const calismaKartlariniOlustur = async ({ kullaniciId, dersId, azamiKonuS
         return uretimDurumunuOlustur(ders, oncekiKartlar);
     }
     if (ders.kartUretimHedefKonuIds?.length &&
-        ders.kartUretimHedefKonuIds.every((id) => (ders.kartTamamlananKonuIds || []).includes(id))) {
+        ders.kartUretimHedefKonuIds.every((id) =>
+            (ders.kartTamamlananKonuIds || []).includes(id) || (ders.kartAtlananKonuIds || []).includes(id))) {
         return uretimDurumunuOlustur(ders, oncekiKartlar);
     }
 
@@ -189,16 +194,19 @@ export const calismaKartlariniOlustur = async ({ kullaniciId, dersId, azamiKonuS
         const imza = kaynakSurumImzasi(materyaller);
         let hedefIds = kilitliDers.kartUretimHedefKonuIds || [];
         let tamamlananIds = kilitliDers.kartTamamlananKonuIds || [];
+        let atlananIds = kilitliDers.kartAtlananKonuIds || [];
 
         if (!hedefIds.length) {
             hedefIds = kotalar.map((konu) => String(konu.konuId));
             tamamlananIds = [];
+            atlananIds = [];
             await x.DersModel.updateOne({
                 _id: dersId, kullaniciId, kartUretimToken: token,
             }, {
                 $set: {
                     kartUretimHedefKonuIds: hedefIds,
                     kartTamamlananKonuIds: [],
+                    kartAtlananKonuIds: [],
                     kartKaynakSurumImzasi: imza,
                 },
             });
@@ -210,7 +218,7 @@ export const calismaKartlariniOlustur = async ({ kullaniciId, dersId, azamiKonuS
             );
         }
 
-        const tamamlananSeti = new Set(tamamlananIds);
+        const tamamlananSeti = new Set([...tamamlananIds, ...atlananIds]);
         const kotalarMap = new Map(kotalar.map((konu) => [String(konu.konuId), konu]));
         const kalanKonular = hedefIds.filter((id) => !tamamlananSeti.has(id))
             .map((id) => kotalarMap.get(id))
@@ -233,25 +241,36 @@ export const calismaKartlariniOlustur = async ({ kullaniciId, dersId, azamiKonuS
         const kaynakliKonular = partiKaynaklariniOlustur(
             parti, adlar, x.parcaSec, PARTI_KONU_KARAKTER_BUTCESI
         );
-        if (!kaynakliKonular.length) {
-            throw new CalismaKartiHatasi("Kart üretmek için doğrulanabilir konu kaynağı bulunamadı.");
+        // Geçersiz Gemini JSON'u veya eksik kart listesi sonsuz retry döngüsüne neden
+        // olmamalı. Yalnızca aynı kaynakta geçen açıklayıcı cümleden yedek kart oluştur.
+        let yanit = { kartlar: [] };
+        if (kaynakliKonular.length) {
+            try {
+                yanit = await x.uret({ dersAdi: kilitliDers.dersAdi, konular: kaynakliKonular });
+            } catch (hata) {
+                if (hata?.status !== 502) throw hata;
+                console.warn("[CalismaKartlari] Gemini JSON doğrulanamadı; kaynak tabanlı yedek kullanılıyor.", {
+                    kod: hata.kod || "GEMINI_502",
+                });
+            }
         }
-
-        // Bir HTTP isteğinde en fazla üç konu: küçük, kaynaklı tek Gemini çağrısı.
-        const yanit = await x.uret({ dersAdi: kilitliDers.dersAdi, konular: kaynakliKonular });
         const mevcutSorular = new Set(kayitliKartlar.map((kart) => (
             String(kart.konuId) + ":" + String(kart.soru).toLocaleLowerCase("tr-TR")
         )));
         const adaylar = kartAdaylariniDogrula({
             cevap: yanit, konular: kaynakliKonular, mevcutSorular,
         });
-        if (!adaylar.length) {
-            throw new CalismaKartiHatasi(
-                "Gemini bu kaynaklardan doğrulanabilir çalışma kartı üretmedi. Yeniden deneyebilirsiniz.",
-                502,
-                "KART_GECERSIZ_YANIT"
-            );
+        const kartliKonular = new Set(adaylar.map((kart) => String(kart.konuId)));
+        for (const konu of kaynakliKonular) {
+            if (kartliKonular.has(String(konu.konuId))) continue;
+            const yedek = kaynakMetnindenYedekKartOlustur(konu, mevcutSorular);
+            if (yedek) {
+                adaylar.push(yedek);
+                kartliKonular.add(String(konu.konuId));
+            }
         }
+        // Kaynaktan güvenilir bir cümle bulunamadıysa konu atlanır ve kullanıcıya
+        // sayısı bildirilir; uydurma kart veya bitmeyen 502 tekrarları üretilmez.
 
         const guncelMateryaller = await x.MateryalModel.find({
             kullaniciId, dersId, durum: "hazir", aktifIslemeId: { $ne: null },
@@ -266,7 +285,7 @@ export const calismaKartlariniOlustur = async ({ kullaniciId, dersId, azamiKonuS
         await islemSahibiniDogrula(x, kullaniciId, dersId, token);
 
         // Retry halinde aynı soru ikinci kez eklenmez.
-        await x.KartModel.bulkWrite(adaylar.map((kart) => {
+        if (adaylar.length) await x.KartModel.bulkWrite(adaylar.map((kart) => {
             const soruKimligi = createHash("sha256")
                 .update(kart.soru.toLocaleLowerCase("tr-TR")).digest("hex");
             return {
@@ -281,23 +300,29 @@ export const calismaKartlariniOlustur = async ({ kullaniciId, dersId, azamiKonuS
         // Gemini bazen partideki tüm konular için kart dönmeyebilir.
         // Sadece en az bir doğrulanmış kart üretilen konuları tamamlandı say.
         const partiIds = [...new Set(adaylar.map((kart) => String(kart.konuId)))];
+        const atlananPartiIds = parti.map((konu) => String(konu.konuId))
+            .filter((id) => !partiIds.includes(id));
         const yenile = await x.DersModel.updateOne({
             _id: dersId, kullaniciId, kartUretimToken: token,
             temizleniyor: { $ne: true },
         }, {
-            $addToSet: { kartTamamlananKonuIds: { $each: partiIds } },
+            $addToSet: {
+                kartTamamlananKonuIds: { $each: partiIds },
+                kartAtlananKonuIds: { $each: atlananPartiIds },
+            },
             $currentDate: { kartUretimSonYenileme: true },
         });
         if ((yenile.matchedCount ?? yenile.n) !== 1) {
             throw new CalismaKartiHatasi("Kart üretimi ilerlemesi kaydedilemedi.", 409);
         }
         const sonrakiKartlar = await kartlariGetir(x, kullaniciId, dersId);
-        const tamamlananYeni = new Set([...tamamlananIds, ...partiIds]);
+        const tamamlananYeni = new Set([...tamamlananIds, ...atlananIds, ...partiIds, ...atlananPartiIds]);
         return {
             kartlar: sonrakiKartlar,
             tamamlandi: hedefIds.every((id) => tamamlananYeni.has(id)),
             toplamKonuSayisi: hedefIds.length,
             tamamlananKonuSayisi: hedefIds.filter((id) => tamamlananYeni.has(id)).length,
+            atlananKonuSayisi: new Set([...atlananIds, ...atlananPartiIds]).size,
         };
     } finally {
         await kartKilidiniBirak(x.DersModel, kullaniciId, dersId, token);
