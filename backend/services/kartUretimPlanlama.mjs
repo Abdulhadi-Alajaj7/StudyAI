@@ -183,7 +183,7 @@ export const kaynakMetnindenYedekKartOlustur = (konu, mevcutSorular = new Set())
             const cumle = parca.metin;
             if (cumle.length < 22 || cumle.length > 310 || parca.konum < 0) continue;
             if (/konya teknik|bilgisayar mühendisliği|doç\.?\s*dr\.?|https?:\/\//i.test(cumle)) continue;
-            if (/\b(temel kavramlarından biridir|kavramı öğrenirken|konusunun tanımını|çalışırken işlem adımlarını|önce veri yapısının mantığını|öğrenme hedefleri|kaynaklar)\b/i.test(cumle)) continue;
+            if (/(temel kavramlarından biridir|kavramı öğrenirken|konusunun tanımını|çalışırken işlem adımlarını|önce veri yapısının mantığını|öğrenme hedefleri|kaynaklar)/i.test(cumle)) continue;
             if (/[?]$/.test(cumle)) continue;
             if (kaynakKelimeleri(cumle).length < (cumle.includes(":") ? 3 : 5)) continue;
             if (parca.cumle && !/[.!?]$/.test(cumle)) continue;
