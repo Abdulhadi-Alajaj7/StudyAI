@@ -101,7 +101,7 @@ mock.module("../models/Ders.js", { defaultExport: model(() => dersler) });
 mock.module("../models/Materyal.js", { defaultExport: model(() => materyaller) });
 mock.module("../models/MetinParcasi.js", { defaultExport: model(() => parcalar) });
 mock.module("../models/KonuHaritasi.js", { defaultExport: model(() => haritalar) });
-for (const isim of ["Sohbet", "Mesaj", "DersOzeti", "Test"]) {
+for (const isim of ["Sohbet", "Mesaj", "DersOzeti", "Test", "CalismaKarti"]) {
     mock.module(`../models/${isim}.js`, { defaultExport: model(() => []) });
 }
 mock.module("../utils/dosyaIslemleri.js", { namedExports: { guvenliDosyaSil: p => silinenDosyalar.push(p) } });
