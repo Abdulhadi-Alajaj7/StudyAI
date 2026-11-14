@@ -100,6 +100,7 @@ function DersCalismaKartlari() {
     let partiBoyutu = 3;
     let yanitDenemesi = 0;
     let yalnizcaKaynak = false;
+    let ardArdaKaynakPartisi = 0;
     try {
       // Her HTTP çağrısı birkaç konu üretir, başarılı sonuçlar anında MongoDB'de saklanır.
       // Sayfa kapanırsa sonraki girişte kalan konulardan devam edilebilir.
@@ -109,6 +110,12 @@ function DersCalismaKartlari() {
           if (controller.signal.aborted) break;
           setKartlar(r.data.kartlar || []);
           setUretim(r.data);
+          if (!yalnizcaKaynak && r.data.partiGeminiKartiSayisi === 0 && r.data.partiKaynakKartiSayisi > 0) {
+            ardArdaKaynakPartisi += 1;
+            if (ardArdaKaynakPartisi >= 2) yalnizcaKaynak = true;
+          } else if (!yalnizcaKaynak) {
+            ardArdaKaynakPartisi = 0;
+          }
           setUretimMesaji(r.data.tamamlandi ? "" : yalnizcaKaynak
             ? "Gemini kotası nedeniyle doğrudan kaynak metninden doğrulanabilir kartlar hazırlanıyor..."
             : "Kartlar kaydediliyor, sıradaki konular hazırlanacak...");
@@ -116,7 +123,7 @@ function DersCalismaKartlari() {
           yanitDenemesi = 0;
           if (r.data.tamamlandi) break;
           // Aynı kullanıcıdan dakikada çok sayıda SDK isteği çıkmasını engelle.
-          await bekle(15000, controller.signal);
+          await bekle(yalnizcaKaynak ? 150 : 15000, controller.signal);
         } catch (e) {
           if (controller.signal.aborted || e.code === "ERR_CANCELED") break;
           const durum = e.response?.status;
