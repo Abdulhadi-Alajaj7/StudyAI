@@ -141,3 +141,17 @@ test("Uzun belgede başta değil, doğru başlığın yanındaki kanıt seçilir
     assert.match(secilen, /Binary Search sıralı veride/);
     assert.ok(secilen.length <= 400);
 });
+
+test("Kaynağı olmayan kart yalnızca açıkça genel bilgi olarak etiketlenirse kabul edilir", () => {
+    const konular = [{ konuId: "k1", baslik: "Stack", adet: 3, kaynaklar: [{ kod: "K1", materyalId: "m1", dosyaAdi: "dosya.pdf", parcaIndex: 0 }] }];
+    const sonuc = kartAdaylariniDogrula({
+        konular, cevap: { kartlar: [
+            { konuId: "k1", soru: "Kaynak yok 1?", cevap: "A", kaynakKodlari: [] },
+            { konuId: "k1", soru: "Genel bilgi nedir?", cevap: "LIFO kuralı.", bilgiTuru: "genel", kaynakKodlari: [] },
+            { konuId: "k1", soru: "Uydurma dosya?", cevap: "B", bilgiTuru: "kaynak", kaynakKodlari: ["K999"] },
+        ] },
+    });
+    assert.equal(sonuc.length, 1);
+    assert.equal(sonuc[0].uretimYontemi, "genel");
+    assert.deepEqual(sonuc[0].kaynaklar, []);
+});
