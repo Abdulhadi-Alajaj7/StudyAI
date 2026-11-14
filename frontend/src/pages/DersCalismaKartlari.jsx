@@ -95,80 +95,18 @@ function DersCalismaKartlari() {
     uretimControllerRef.current = controller;
     setOlusturuluyor(true);
     setHata("");
-    setUretimMesaji("Konulara göre çalışma kartları hazırlanıyor...");
-    let kotaDenemesi = 0;
-    let partiBoyutu = 3;
-    let yanitDenemesi = 0;
-    let yalnizcaKaynak = false;
-    let ardArdaKaynakPartisi = 0;
+    setUretimMesaji("Kartlar hazırlanıyor. Kaynaklar tek seferde inceleniyor...");
     try {
-      // Her HTTP çağrısı birkaç konu üretir, başarılı sonuçlar anında MongoDB'de saklanır.
-      // Sayfa kapanırsa sonraki girişte kalan konulardan devam edilebilir.
-      for (let adim = 0; adim < 500 && !controller.signal.aborted; adim += 1) {
-        try {
-          const r = await api.olustur(dersId, controller.signal, partiBoyutu, yalnizcaKaynak);
-          if (controller.signal.aborted) break;
-          setKartlar(r.data.kartlar || []);
-          setUretim(r.data);
-          if (!yalnizcaKaynak && r.data.partiGeminiKartiSayisi === 0 && r.data.partiKaynakKartiSayisi > 0) {
-            ardArdaKaynakPartisi += 1;
-            if (ardArdaKaynakPartisi >= 2) yalnizcaKaynak = true;
-          } else if (!yalnizcaKaynak) {
-            ardArdaKaynakPartisi = 0;
-          }
-          setUretimMesaji(r.data.tamamlandi ? "" : yalnizcaKaynak
-            ? "Gemini kotası nedeniyle doğrudan kaynak metninden doğrulanabilir kartlar hazırlanıyor..."
-            : "Kartlar kaydediliyor, sıradaki konular hazırlanacak...");
-          kotaDenemesi = 0;
-          yanitDenemesi = 0;
-          if (r.data.tamamlandi) break;
-          // Aynı kullanıcıdan dakikada çok sayıda SDK isteği çıkmasını engelle.
-          await bekle(yalnizcaKaynak ? 150 : 15000, controller.signal);
-        } catch (e) {
-          if (controller.signal.aborted || e.code === "ERR_CANCELED") break;
-          const durum = e.response?.status;
-          const data = e.response?.data || {};
-          // Çok konulu Gemini yanıtı hatalıysa daha küçük grupta dene.
-          // Önceden kaydedilmiş kartları veya ilerleme bilgisini silme.
-          if (durum === 502 && partiBoyutu > 1) {
-            partiBoyutu -= 1;
-            yanitDenemesi = 0;
-            setUretimMesaji("Yanıt doğrulanamadı. Kayıtlı kartlar korunuyor; daha küçük konu grubuyla yeniden deneniyor.");
-            await bekle(3000, controller.signal);
-            continue;
-          }
-          if (durum === 502 && partiBoyutu === 1 && yanitDenemesi < 1) {
-            yanitDenemesi += 1;
-            setUretimMesaji("Tek konunun yanıtı doğrulanamadı; bir kez daha deneniyor.");
-            await bekle(4000, controller.signal);
-            continue;
-          }
-          if (durum === 429) {
-            if (data.kotaTuru === "gunluk" || kotaDenemesi >= 1) {
-              // Sağlayıcı kotasına takıldığında kalan konuları bekletme.
-              // Kullanıcıya kaynak metnine dayalı kartlar göster, Gemini çıktısıymış gibi sunma.
-              yalnizcaKaynak = true;
-              partiBoyutu = 3;
-              setUretimMesaji("Gemini kullanım sınırına ulaştı. Konular doğrudan ders kaynaklarından hazırlanarak tamamlanıyor.");
-              continue;
-            }
-            kotaDenemesi += 1;
-            if (data.kotaTuru === "tpm") partiBoyutu = 1;
-            const sure = Math.max(60000, Math.min(120000, Number(data.retryAfterMs) || 60000));
-            setUretimMesaji("Gemini geçici sınırına ulaştı. Kayıtlı kartlar korundu; bir kez daha deneniyor.");
-            await bekle(sure, controller.signal);
-            continue;
-          }
-          throw e;
-        }
-      }
+      const r = await api.hizliOlustur(dersId, controller.signal);
+      if (controller.signal.aborted) return;
+      setKartlar(r.data.kartlar || []);
+      setUretim(r.data);
     } catch (e) {
-      if (!controller.signal.aborted) {
+      if (!controller.signal.aborted && e.code !== "ERR_CANCELED") {
         const baglantiYok = !e.response && (e.code === "ERR_NETWORK" || e.isAxiosError);
         setHata(baglantiYok
-          ? "Yerel sunucuya bağlanılamadı. Backend'in çalıştığını kontrol edip 'Üretime Devam Et' düğmesine basın. Önceki kartlar korunuyor."
-          : kullaniciHataMesaji(e, "Kart üretimine devam edilemedi. Önceki kartlar korundu."));
-        setUretimMesaji("");
+          ? "Backend sunucusuna bağlanılamadı. Sunucuyu kontrol edip yeniden deneyin. Önceden oluşturulan kartlar saklanır."
+          : kullaniciHataMesaji(e, "Kartlar hazırlanamadı. Daha önce kaydedilen kartlar korundu."));
       }
     } finally {
       islemRef.current = false;
@@ -224,6 +162,16 @@ function DersCalismaKartlari() {
         <span className="ml-3 text-[10px] font-bold text-sky-400">YAKINDA</span>
       </div>
     </div>
+    {!yukleniyor && kartlar.length > 0 && !uretim.hizliUretimYapildi && (
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className={`text-xs ${ikincil}`}>Mevcut kartlarınız korunur. Eksik konular için yeni kartlar eklenebilir.</p>
+        <button type="button" disabled={olusturuluyor} onClick={olustur}
+          className="inline-flex items-center gap-2 rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-violet-500 disabled:opacity-50">
+          {olusturuluyor ? <ArrowPathIcon className="h-4 w-4 animate-spin" /> : <SparklesIcon className="h-4 w-4" />}
+          {olusturuluyor ? "Kartlar hazırlanıyor..." : "Kartları Zenginleştir"}
+        </button>
+      </div>
+    )}
     <div className="grid grid-cols-2 gap-3 lg:grid-cols-4" role="group" aria-label="Kart filtreleri">
       {FILTRELER.map(({ id, ad }) => <button type="button" key={id} onClick={() => filtreDegistir(id)}
         aria-pressed={filtre === id}
@@ -266,7 +214,7 @@ function DersCalismaKartlari() {
         <p className={`mt-3 max-w-lg text-sm leading-6 ${ikincil}`}>{uretim.tamamlandi
           ? "İşlem tamamlandı ancak kaynaklardan doğrulanabilir kart bulunamadı. Konu haritası ve materyalleri kontrol edin."
           : "Onaylanmış konu haritanız ve ders materyallerinizden her konuya uygun soru ve cevap kartları hazırlayalım."}</p>
-        <button type="button" disabled={olusturuluyor || uretim.tamamlandi} onClick={olustur} className="mt-7 inline-flex items-center gap-2 rounded-xl bg-[#705CF5] px-6 py-3 font-semibold text-white hover:bg-[#6250DE] disabled:opacity-50">
+        <button type="button" disabled={olusturuluyor || uretim.hizliUretimYapildi} onClick={olustur} className="mt-7 inline-flex items-center gap-2 rounded-xl bg-[#705CF5] px-6 py-3 font-semibold text-white hover:bg-[#6250DE] disabled:opacity-50">
           {olusturuluyor ? <ArrowPathIcon className="h-5 w-5 animate-spin" /> : <SparklesIcon className="h-5 w-5" />}
           {olusturuluyor ? "Kartlar hazırlanıyor..." : uretim.toplamKonuSayisi > 0 ? "Üretime Devam Et" : "Kartları Oluştur"}
         </button>
