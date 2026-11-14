@@ -249,7 +249,7 @@ export const calismaKartlariniOlustur = async ({ kullaniciId, dersId, azamiKonuS
             try {
                 yanit = await x.uret({ dersAdi: kilitliDers.dersAdi, konular: kaynakliKonular });
             } catch (hata) {
-                if (hata?.status !== 502) throw hata;
+                if (![502, 503, 504].includes(Number(hata?.status))) throw hata;
                 console.warn("[CalismaKartlari] Gemini JSON doğrulanamadı; kaynak tabanlı yedek kullanılıyor.", {
                     kod: hata.kod || "GEMINI_502",
                 });
