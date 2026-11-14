@@ -7,6 +7,7 @@ import {
     partiKaynaklariniOlustur,
     kartAdaylariniDogrula,
     kaynakMetnindenYedekKartOlustur,
+    konuOdakliIcerikSec,
 } from "../services/kartUretimPlanlama.mjs";
 
 test("Alt konu kimlikleri korunur", () => {
@@ -105,4 +106,38 @@ test("Kaynakta konuya dair sözcük veya yakın açıklama yoksa uydurma kart ü
         }],
     };
     assert.equal(kaynakMetnindenYedekKartOlustur(konu), null);
+});
+
+test("Kısa sınav tekrarı notundaki gerçek bilgi korunarak kart yapılır", () => {
+    const kart = kaynakMetnindenYedekKartOlustur({
+        konuId: "array", baslik: "Array yapısı ve indeksleme",
+        adet: 4,
+        kaynaklar: [{
+            kod: "K1", materyalId: "m9", dosyaAdi: "09_Sinav_Oncesi_Hizli_Tekrar.txt",
+            parcaIndex: 0, icerik: "1. Array: İndeksle erişim hızlıdır. Tipik erişim O(1).\n2. Stack: LIFO - son giren ilk çıkar.",
+        }],
+    });
+    assert.ok(kart);
+    assert.match(kart.cevap, /İndeksle erişim hızlıdır/);
+    assert.equal(kart.uretimYontemi, "kaynak");
+});
+
+test("Yalnızca çalışın/öğrenin diyen tekrar şablonu yanlış bilgi kartına dönüşmez", () => {
+    const kart = kaynakMetnindenYedekKartOlustur({
+        konuId: "bubble", baslik: "Bubble Sort", adet: 3,
+        kaynaklar: [{
+            kod: "K1", materyalId: "m7", dosyaAdi: "07_Siralama_Algoritmalari.pptx",
+            parcaIndex: 0,
+            icerik: "Bubble Sort konusunun tanımını, temel işlemlerini ve kullanım alanlarını öğren. Çalışırken işlem adımlarını küçük bir örnek üzerinde uygula.",
+        }],
+    });
+    assert.equal(kart, null);
+});
+
+test("Uzun belgede başta değil, doğru başlığın yanındaki kanıt seçilir", () => {
+    const metin = "Başka ders bilgisi. ".repeat(100) +
+        "\nBinary Search\nBinary Search sıralı veride uygulanır ve O(log n) erişim sağlar.";
+    const secilen = konuOdakliIcerikSec(metin, "Binary Search", 400);
+    assert.match(secilen, /Binary Search sıralı veride/);
+    assert.ok(secilen.length <= 400);
 });
