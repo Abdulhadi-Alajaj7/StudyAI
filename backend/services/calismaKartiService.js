@@ -412,22 +412,20 @@ export const calismaKartlariniHizliOlustur = async ({ kullaniciId, dersId }, d =
             const sonuc = cevaplar[i];
             if (sonuc.status !== "fulfilled") {
                 const durum = Number(sonuc.reason?.status) || 0;
-                // Yapılandırma hatasını ve erişim yetki hatasını gizleme.
-                if ([400, 401, 403, 404].includes(durum)) {
-                    throw sonuc.reason;
-                }
+                // API kimlik doğrulama, kota, ağ veya JSON hatasında
+                // kaynaklardan güvenli devam et; kullanıcıya AI başarısızlığı bildirilir.
                 console.warn("[CalismaKartlari] Hızlı Gemini çağrısı tamamlanamadı; kaynaklar kullanılacak.", {
                     status: durum || 0,
                     kod: typeof sonuc.reason?.kod === "string" ? sonuc.reason.kod : "BILINMIYOR",
                 });
                 continue;
             }
-            apiBasarili = true;
             const dogrulanan = kartAdaylariniDogrula({
                 cevap: sonuc.value, konular: parcalar[i], mevcutSorular: sorular,
             });
             adaylar.push(...dogrulanan);
             aiKartiSayisi += dogrulanan.length;
+            if (dogrulanan.length > 0) apiBasarili = true;
         }
 
         // Gemini boş dönerse veya bazı konuları atlarsa, yalnızca gerçek kaynak
