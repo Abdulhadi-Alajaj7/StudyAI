@@ -87,7 +87,7 @@ export const kartAdaylariniDogrula = ({ cevap, konular, mevcutSorular = new Set(
         const kodSahipleri = [...new Set(kodlar.map((kod) => kaynakSahipleri.get(String(kod))).filter(Boolean))];
         let konuId = String(kart.konuId || "");
         // Kaynak tek konuya işaret ediyorsa unutulan konu kimliğini güvenle çıkar.
-        if (!konuHaritasi.has(konuId) && kodSahipleri.length === 1) konuId = kodSahipleri[0];
+        if (!konuId && kodSahipleri.length === 1) konuId = kodSahipleri[0];
         if (kodSahipleri.length > 1 || (kodSahipleri.length && kodSahipleri[0] !== konuId)) continue;
         const kayit = konuHaritasi.get(konuId);
         if (!kayit || kayit.sayi >= Math.min(8, kayit.konu.adet)) continue;
