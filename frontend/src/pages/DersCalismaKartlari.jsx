@@ -205,6 +205,11 @@ function DersCalismaKartlari() {
         )}
       </div>
     )}
+    {kartlar.some(k => k.uretimYontemi === "genel") && (
+      <p role="status" className="rounded-xl border border-indigo-400/30 bg-indigo-500/10 p-4 text-sm text-indigo-400">
+        {kartlar.filter(k => k.uretimYontemi === "genel").length} kart, ders dosyasında ayrıntılı açıklama bulunmadığı için genel akademik bilgiden üretildi. Bu kartlar dosya kaynağı olarak gösterilmez.
+      </p>
+    )}
     {kartlar.some(k => k.uretimYontemi === "kaynak") && (
       <p role="status" className="rounded-xl border border-sky-400/30 bg-sky-500/10 p-4 text-sm text-sky-400">
         {kartlar.filter(k => k.uretimYontemi === "kaynak").length} kart, Gemini yanıtı doğrulanamadığı veya kullanım sınırı aşıldığı için doğrudan ders metninden oluşturuldu. Kartlarda "Kaynak metni" etiketi bulunur.
@@ -235,7 +240,8 @@ function DersCalismaKartlari() {
       </div> :
       <div className="mx-auto max-w-5xl space-y-4">
         <div className={`flex flex-wrap items-center justify-between gap-3 text-sm ${ikincil}`}>
-          <span className="min-w-0 break-words">{aktif.konuBasligi} {aktif.uretimYontemi === "kaynak" && <span className="ml-2 rounded-full border border-amber-400/40 px-2 py-0.5 text-[11px] text-amber-400">Kaynak metni</span>}</span>
+          <span className="min-w-0 break-words">{aktif.konuBasligi} {aktif.uretimYontemi === "kaynak" && <span className="ml-2 rounded-full border border-amber-400/40 px-2 py-0.5 text-[11px] text-amber-400">Kaynak metni</span>}
+            {aktif.uretimYontemi === "genel" && <span className="ml-2 rounded-full border border-indigo-400/40 px-2 py-0.5 text-[11px] text-indigo-400">Genel bilgi</span>}</span>
           <span className="shrink-0">Kart {aktifIndex + 1} / {filtrelenmis.length}</span>
         </div>
         <div className="relative" style={{ perspective: "1400px" }}>
@@ -280,7 +286,7 @@ function DersCalismaKartlari() {
           </div>
           <p className={`mt-4 text-xs ${ikincil}`}>Değerlendirmeniz kaydedilir. Otomatik tekrar planlaması henüz etkin değildir.</p>
         </div>}
-        <p className={`break-all px-1 text-xs ${ikincil}`}>Kaynak: {[...new Set((aktif.kaynaklar || []).map(k => k.dosyaAdi))].join(", ")}</p>
+        <p className={`break-all px-1 text-xs ${ikincil}`}>{aktif.uretimYontemi === "genel" ? "Bilgi türü: Genel akademik bilgi (ders dosyasında ayrıntı yok)" : `Kaynak: ${[...new Set((aktif.kaynaklar || []).map(k => k.dosyaAdi))].join(", ")}` }</p>
       </div>}
   </section>;
 }
