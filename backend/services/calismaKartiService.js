@@ -335,6 +335,179 @@ export const calismaKartlariniOlustur = async ({ kullaniciId, dersId, azamiKonuS
     }
 };
 
+
+/**
+ * Gösterim/demo için tek HTTP çağrısıyla hızlı tam ders üretimi.
+ * Tek Gemini çağrısı (en fazla 26s) veya kaynak tabanlı güvenli cevap.
+ * Mevcut kartlar asla silinmez, zaten kaydedilmiş sorular tekrar yazılmaz.
+ */
+export const calismaKartlariniHizliOlustur = async ({ kullaniciId, dersId }, d = {}) => {
+    const baslangic = Date.now();
+    const x = deps(d);
+    const ders = await dersGetir(kullaniciId, dersId, x);
+    if (!ders.materyallerOnaylandi) {
+        throw new CalismaKartiHatasi("Önce ders materyallerini onaylayın.");
+    }
+    const token = new mongoose.Types.ObjectId();
+    const kilit = await kartKilidiniAl(x.DersModel, kullaniciId, dersId, token);
+    if (!kilit) {
+        throw new CalismaKartiHatasi(
+            "Bu ders için kart üretimi zaten devam ediyor.", 409, "KART_URETIM_DEVAM_EDIYOR"
+        );
+    }
+    try {
+        const guncelDers = await dersGetir(kullaniciId, dersId, x);
+        const eskiKartlar = await kartlariGetir(x, kullaniciId, dersId);
+        const { materyaller, konular } = await hazirKaynaklariGetir({ kullaniciId, dersId }, x);
+        const imza = kaynakSurumImzasi(materyaller);
+        if (guncelDers.kartKaynakSurumImzasi && guncelDers.kartKaynakSurumImzasi !== imza) {
+            throw new CalismaKartiHatasi(
+                "Ders materyalleri değişti. Kayıtlı kartların kaynakları doğrulanmalıdır.",
+                409, "KART_MATERYAL_SURUMU_DEGISTI"
+            );
+        }
+        if (guncelDers.kartHizliUretimSurumImzasi === imza) {
+            return {
+                ...uretimDurumunuOlustur(guncelDers, eskiKartlar),
+                sureMs: Date.now() - baslangic,
+                yeniKartSayisi: 0,
+            };
+        }
+
+        const adetler = new Map();
+        const sorular = new Set();
+        for (const kart of eskiKartlar) {
+            const id = String(kart.konuId);
+            adetler.set(id, (adetler.get(id) || 0) + 1);
+            sorular.add(id + ":" + String(kart.soru).trim().toLocaleLowerCase("tr-TR"));
+        }
+        // Tek yanıtın 8192 çıkış tokenına sığması için ders boyutuna göre dengeli kota.
+        const istekAdedi = konular.length > 25 ? 2 : konular.length > 12 ? 3 : 4;
+        const uygun = konular.filter((konu) =>
+            konu.parcalar.length && konu.karakterSayisi >= 80 &&
+            (adetler.get(String(konu.konuId)) || 0) < 8
+        ).map((konu) => ({
+            ...konu,
+            adet: Math.min(8 - (adetler.get(String(konu.konuId)) || 0), istekAdedi),
+        }));
+        const adlar = new Map(materyaller.map((m) => [
+            String(m._id), m.orijinalDosyaAdi || m.dosyaAdi,
+        ]));
+        const kaynakliKonular = partiKaynaklariniOlustur(
+            uygun, adlar, x.parcaSec, 1200
+        );
+        let apiBasarili = false;
+        let aiKartiSayisi = 0;
+        const adaylar = [];
+        // 60 konuyu aşan derslerde model çağrıları paralel çalışır;
+        // her bölüm için K kodları kendi cevap kümesinde değerlendirilir.
+        const parcalar = [];
+        for (let i = 0; i < kaynakliKonular.length; i += 60) {
+            parcalar.push(kaynakliKonular.slice(i, i + 60));
+        }
+        const cevaplar = await Promise.allSettled(parcalar.map((parca) =>
+            x.hizliUret({ dersAdi: guncelDers.dersAdi, konular: parca })
+        ));
+        for (let i = 0; i < parcalar.length; i += 1) {
+            const sonuc = cevaplar[i];
+            if (sonuc.status !== "fulfilled") {
+                const durum = Number(sonuc.reason?.status) || 0;
+                // Yapılandırma hatasını ve erişim yetki hatasını gizleme.
+                if ([400, 401, 403, 404].includes(durum)) {
+                    throw sonuc.reason;
+                }
+                console.warn("[CalismaKartlari] Hızlı Gemini çağrısı tamamlanamadı; kaynaklar kullanılacak.", {
+                    status: durum || 0,
+                    kod: typeof sonuc.reason?.kod === "string" ? sonuc.reason.kod : "BILINMIYOR",
+                });
+                continue;
+            }
+            apiBasarili = true;
+            const dogrulanan = kartAdaylariniDogrula({
+                cevap: sonuc.value, konular: parcalar[i], mevcutSorular: sorular,
+            });
+            adaylar.push(...dogrulanan);
+            aiKartiSayisi += dogrulanan.length;
+        }
+
+        // Gemini boş dönerse veya bazı konuları atlarsa, yalnızca gerçek kaynak
+        // cümlesi bulunan ve önceden kartı olmayan konulara yerel bir kart ekle.
+        const yeniKonuIdleri = new Set(adaylar.map((kart) => String(kart.konuId)));
+        for (const konu of kaynakliKonular) {
+            const id = String(konu.konuId);
+            if (yeniKonuIdleri.has(id) || (adetler.get(id) || 0) > 0) continue;
+            const yedek = kaynakMetnindenYedekKartOlustur(konu, sorular);
+            if (yedek) {
+                adaylar.push(yedek);
+                yeniKonuIdleri.add(id);
+            }
+        }
+        // İçeriğinde sadece "konuyu öğrenin" gibi talimatlar olan dosyalarla
+        // öğretici kart sayısını yapay olarak şişirme.
+        const guncelMateryaller = await x.MateryalModel.find({
+            kullaniciId, dersId, durum: "hazir", aktifIslemeId: { $ne: null },
+        }).select("_id aktifIslemeId").lean();
+        if (kaynakSurumImzasi(guncelMateryaller) !== imza) {
+            throw new CalismaKartiHatasi(
+                "Materyal sürümü üretim sırasında değişti.", 409,
+                "KART_MATERYAL_SURUMU_DEGISTI"
+            );
+        }
+        await islemSahibiniDogrula(x, kullaniciId, dersId, token);
+        if (adaylar.length) {
+            await x.KartModel.bulkWrite(adaylar.map((kart) => {
+                const soruKimligi = createHash("sha256")
+                    .update(kart.soru.toLocaleLowerCase("tr-TR")).digest("hex");
+                return {
+                    updateOne: {
+                        filter: { kullaniciId, dersId, konuId: kart.konuId, soruKimligi },
+                        update: { $setOnInsert: {
+                            kullaniciId, dersId, ...kart, soruKimligi,
+                        } },
+                        upsert: true,
+                    },
+                };
+            }), { ordered: false });
+        }
+        const tumKartlar = await kartlariGetir(x, kullaniciId, dersId);
+        const kartliKonular = new Set(tumKartlar.map((kart) => String(kart.konuId)));
+        const hedef = (guncelDers.kartUretimHedefKonuIds?.length
+            ? guncelDers.kartUretimHedefKonuIds : konular.map((konu) => String(konu.konuId)));
+        const tamamlanan = hedef.filter((id) => kartliKonular.has(String(id)));
+        const atlanan = hedef.filter((id) => !kartliKonular.has(String(id)));
+        // Tek tam güncelleme: eski kart kayıtlarına dokunmadan ders ilerlemesini düzelt.
+        const guncelle = await x.DersModel.updateOne({
+            _id: dersId, kullaniciId, kartUretimToken: token, temizleniyor: { $ne: true },
+        }, {
+            $set: {
+                kartKaynakSurumImzasi: imza,
+                kartHizliUretimSurumImzasi: imza,
+                kartUretimHedefKonuIds: hedef,
+                kartTamamlananKonuIds: tamamlanan,
+                kartAtlananKonuIds: atlanan,
+            },
+        });
+        if ((guncelle.matchedCount ?? guncelle.n) !== 1) {
+            throw new CalismaKartiHatasi("Kart üretim durumu kaydedilemedi.", 409);
+        }
+        return {
+            kartlar: tumKartlar,
+            tamamlandi: true,
+            toplamKonuSayisi: hedef.length,
+            tamamlananKonuSayisi: hedef.length,
+            atlananKonuSayisi: atlanan.length,
+            hizliUretimYapildi: true,
+            yeniKartSayisi: tumKartlar.length - eskiKartlar.length,
+            partiGeminiKartiSayisi: aiKartiSayisi,
+            partiKaynakKartiSayisi: adaylar.length - aiKartiSayisi,
+            geminiYanitiAlindi: apiBasarili,
+            sureMs: Date.now() - baslangic,
+        };
+    } finally {
+        await kartKilidiniBirak(x.DersModel, kullaniciId, dersId, token);
+    }
+};
+
 export const calismaKartiDurumuGuncelle = async ({
     kullaniciId, dersId, kartId, goruldu, yildizli, zorluk,
 }, d = {}) => {
