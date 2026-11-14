@@ -99,16 +99,19 @@ function DersCalismaKartlari() {
     let kotaDenemesi = 0;
     let partiBoyutu = 3;
     let yanitDenemesi = 0;
+    let yalnizcaKaynak = false;
     try {
       // Her HTTP çağrısı birkaç konu üretir, başarılı sonuçlar anında MongoDB'de saklanır.
       // Sayfa kapanırsa sonraki girişte kalan konulardan devam edilebilir.
       for (let adim = 0; adim < 500 && !controller.signal.aborted; adim += 1) {
         try {
-          const r = await api.olustur(dersId, controller.signal, partiBoyutu);
+          const r = await api.olustur(dersId, controller.signal, partiBoyutu, yalnizcaKaynak);
           if (controller.signal.aborted) break;
           setKartlar(r.data.kartlar || []);
           setUretim(r.data);
-          setUretimMesaji(r.data.tamamlandi ? "" : "Kartlar kaydediliyor, sıradaki konular hazırlanacak...");
+          setUretimMesaji(r.data.tamamlandi ? "" : yalnizcaKaynak
+            ? "Gemini kotası nedeniyle doğrudan kaynak metninden doğrulanabilir kartlar hazırlanıyor..."
+            : "Kartlar kaydediliyor, sıradaki konular hazırlanacak...");
           kotaDenemesi = 0;
           yanitDenemesi = 0;
           if (r.data.tamamlandi) break;
@@ -133,11 +136,19 @@ function DersCalismaKartlari() {
             await bekle(4000, controller.signal);
             continue;
           }
-          if (durum === 429 && data.kotaTuru !== "gunluk" && kotaDenemesi < 2) {
+          if (durum === 429) {
+            if (data.kotaTuru === "gunluk" || kotaDenemesi >= 1) {
+              // Sağlayıcı kotasına takıldığında kalan konuları bekletme.
+              // Kullanıcıya kaynak metnine dayalı kartlar göster, Gemini çıktısıymış gibi sunma.
+              yalnizcaKaynak = true;
+              partiBoyutu = 3;
+              setUretimMesaji("Gemini kullanım sınırına ulaştı. Konular doğrudan ders kaynaklarından hazırlanarak tamamlanıyor.");
+              continue;
+            }
             kotaDenemesi += 1;
             if (data.kotaTuru === "tpm") partiBoyutu = 1;
             const sure = Math.max(60000, Math.min(120000, Number(data.retryAfterMs) || 60000));
-            setUretimMesaji("Gemini geçici istek sınırına ulaştı. Daha önce üretilen kartlar kayıtlı; yeniden denenecek.");
+            setUretimMesaji("Gemini geçici sınırına ulaştı. Kayıtlı kartlar korundu; bir kez daha deneniyor.");
             await bekle(sure, controller.signal);
             continue;
           }
@@ -229,6 +240,11 @@ function DersCalismaKartlari() {
           Üretime Devam Et
         </button>}
       </div>
+    )}
+    {kartlar.some(k => k.uretimYontemi === "kaynak") && (
+      <p role="status" className="rounded-xl border border-sky-400/30 bg-sky-500/10 p-4 text-sm text-sky-400">
+        {kartlar.filter(k => k.uretimYontemi === "kaynak").length} kart, Gemini yanıtı doğrulanamadığı veya kullanım sınırı aşıldığı için doğrudan ders metninden oluşturuldu. Kartlarda "Kaynak metni" etiketi bulunur.
+      </p>
     )}
     {uretim.atlananKonuSayisi > 0 && (
       <p role="status" className="rounded-xl border border-amber-400/40 bg-amber-500/10 p-4 text-sm text-amber-400">
