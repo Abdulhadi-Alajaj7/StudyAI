@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import mongoose from "mongoose";
-import { calismaKartlariniOlustur, calismaKartlariDurumunuGetir } from "../services/calismaKartiService.js";
+import { calismaKartlariniOlustur, calismaKartlariniHizliOlustur, calismaKartlariDurumunuGetir } from "../services/calismaKartiService.js";
 
 const sorgu = (deger) => ({
     select() { return this; },
@@ -167,4 +167,63 @@ test("31 konuluk derste 6 konu sonrası 429, kayıtlar korunarak kalan 25 konu t
     assert.equal(sonuc.kartlar.filter((k) => k.uretimYontemi === "gemini").length, 6);
     assert.equal(sonuc.kartlar.filter((k) => k.uretimYontemi === "kaynak").length, 25);
     assert.equal(sdkCagrisi, 3);
+});
+
+test("Hızlı mod 33 konuyu tek Gemini çağrısıyla, 66 farklı kartla tamamlar", async () => {
+    let cagrilar = 0;
+    const konular = Array.from({ length: 33 }, (_, i) => "Algoritma Konusu " + i);
+    const v = veriOlustur({ konular });
+    v.deps.hizliUret = async ({ konular: istekKonular }) => {
+        cagrilar += 1;
+        return { kartlar: istekKonular.flatMap((konu) => [
+            { konuId: konu.konuId, soru: konu.baslik + " nedir?", cevap: "Tanım 1", kaynakKodlari: [konu.kaynaklar[0].kod] },
+            { konuId: konu.konuId, soru: konu.baslik + " nasıl kullanılır?", cevap: "Tanım 2", kaynakKodlari: [konu.kaynaklar[0].kod] },
+        ]) };
+    };
+    const sonuc = await calismaKartlariniHizliOlustur(v.args, v.deps);
+    assert.equal(cagrilar, 1);
+    assert.equal(sonuc.kartlar.length, 66);
+    assert.equal(sonuc.yeniKartSayisi, 66);
+    assert.equal(sonuc.tamamlandi, true);
+    assert.equal(sonuc.toplamKonuSayisi, 33);
+    assert.equal(sonuc.atlananKonuSayisi, 0);
+    assert.equal(sonuc.hizliUretimYapildi, true);
+    const yeniden = await calismaKartlariniHizliOlustur(v.args, v.deps);
+    assert.equal(yeniden.yeniKartSayisi, 0);
+    assert.equal(cagrilar, 1);
+    assert.equal((await calismaKartlariDurumunuGetir(v.args, v.deps)).hizliUretimYapildi, true);
+});
+
+test("Hızlı mod 429 sonrası beklemeden kaynak kartları üretir ve mevcut kartları korur", async () => {
+    let cagrilar = 0;
+    const v = veriOlustur({ konular: ["Eksik Veri", "Veri Kalitesi", "Bilgi Sistemi"] });
+    v.deps.hizliUret = async () => {
+        cagrilar += 1;
+        throw Object.assign(new Error("Quota exceeded"), { status: 429, kod: "GEMINI_KOTA_ASIMI" });
+    };
+    const sonuc = await calismaKartlariniHizliOlustur(v.args, v.deps);
+    assert.equal(cagrilar, 1);
+    assert.equal(sonuc.tamamlandi, true);
+    assert.equal(sonuc.partiGeminiKartiSayisi, 0);
+    assert.equal(sonuc.kartlar.length, 3);
+    assert.ok(sonuc.kartlar.every((k) => k.uretimYontemi === "kaynak"));
+});
+
+test("Hızlı mod mevcut soruları silmeden en fazla sekiz kartı saklar", async () => {
+    const v = veriOlustur({ konular: ["Veri Analizi"] });
+    const eskiSorular = Array.from({ length: 7 }, (_, i) => ({
+        _id: new mongoose.Types.ObjectId(), konuId: "k0",
+        soru: "Eski Soru " + i, cevap: "Eski Cevap", soruKimligi: createHash("sha256").update("eski soru " + i).digest("hex"),
+        goruldu: true, yildizli: i === 0,
+    }));
+    v.kartlar.push(...eskiSorular);
+    v.deps.hizliUret = async ({ konular }) => ({ kartlar: konular.flatMap((konu) => [
+        { konuId: konu.konuId, soru: "Yeni Soru 1", cevap: "Yanıt 1", kaynakKodlari: [konu.kaynaklar[0].kod] },
+        { konuId: konu.konuId, soru: "Yeni Soru 2", cevap: "Yanıt 2", kaynakKodlari: [konu.kaynaklar[0].kod] },
+    ]) });
+    const sonuc = await calismaKartlariniHizliOlustur(v.args, v.deps);
+    assert.equal(sonuc.kartlar.length, 8);
+    assert.equal(sonuc.yeniKartSayisi, 1);
+    assert.equal(sonuc.kartlar[0].goruldu, true);
+    assert.equal(sonuc.kartlar[0].yildizli, true);
 });
