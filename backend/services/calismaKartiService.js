@@ -5,7 +5,7 @@ import KonuHaritasi from "../models/KonuHaritasi.js";
 import Materyal from "../models/Materyal.js";
 import MetinParcasi from "../models/MetinParcasi.js";
 import CalismaKarti from "../models/CalismaKarti.js";
-import { geminiIleCalismaKartiPartisiUret } from "./geminiService.js";
+import { geminiIleCalismaKartiPartisiUret, geminiIleHizliCalismaKartlariUret } from "./geminiService.js";
 import { konuIcinParcalariSirala } from "./testService.js";
 import { dengeliOzetParcalariniSec } from "./dersOzetiService.js";
 import { kartKilidiniAl, kartKilidiniBirak } from "./calismaKartiLock.js";
@@ -42,6 +42,7 @@ const deps = (d = {}) => ({
     ParcaModel: d.ParcaModel || MetinParcasi,
     KartModel: d.KartModel || CalismaKarti,
     uret: d.uret || geminiIleCalismaKartiPartisiUret,
+    hizliUret: d.hizliUret || geminiIleHizliCalismaKartlariUret,
     parcaSec: d.parcaSec || dengeliOzetParcalariniSec,
     eslestir: d.eslestir || konuIcinParcalariSirala,
 });
@@ -83,6 +84,8 @@ const uretimDurumunuOlustur = (ders, kartlar) => {
         toplamKonuSayisi,
         tamamlananKonuSayisi: islenenKonuSayisi,
         atlananKonuSayisi,
+        hizliUretimYapildi: Boolean(ders?.kartHizliUretimSurumImzasi &&
+            ders.kartHizliUretimSurumImzasi === ders.kartKaynakSurumImzasi),
     };
 };
 
@@ -145,7 +148,7 @@ const hazirKaynaklariGetir = async ({ kullaniciId, dersId }, x) => {
     if (!kotalar.length) {
         throw new CalismaKartiHatasi("Konularla eşleşen yeterli materyal içeriği bulunamadı.");
     }
-    return { materyaller, kotalar };
+    return { materyaller, kotalar, konular };
 };
 
 const islemSahibiniDogrula = async (x, kullaniciId, dersId, token) => {
