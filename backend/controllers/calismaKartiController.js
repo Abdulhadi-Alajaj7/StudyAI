@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 import {
     calismaKartlariDurumunuGetir,
     calismaKartlariniOlustur,
+    calismaKartlariniHizliOlustur,
     calismaKartiDurumuGuncelle,
 } from "../services/calismaKartiService.js";
 
@@ -46,6 +47,10 @@ export const kartlariOlustur = async (req, res) => {
     if (!gecerliId(req.params.dersId)) {
         return res.status(400).json({ hata: "Geçersiz ders kimliği." });
     }
+    const hizli = req.body?.hizli ?? false;
+    if (typeof hizli !== "boolean") {
+        return res.status(400).json({ hata: "Geçersiz kart üretim modu." });
+    }
     const azamiKonuSayisi = req.body?.azamiKonuSayisi ?? 3;
     const yalnizcaKaynak = req.body?.yalnizcaKaynak ?? false;
     if (!Number.isInteger(azamiKonuSayisi) || azamiKonuSayisi < 1 || azamiKonuSayisi > 3 ||
@@ -53,7 +58,9 @@ export const kartlariOlustur = async (req, res) => {
         return res.status(400).json({ hata: "Geçersiz kart üretim ayarı." });
     }
     try {
-        const sonuc = await calismaKartlariniOlustur({
+        const sonuc = hizli ? await calismaKartlariniHizliOlustur({
+            kullaniciId: req.user._id, dersId: req.params.dersId,
+        }) : await calismaKartlariniOlustur({
             kullaniciId: req.user._id,
             dersId: req.params.dersId,
             azamiKonuSayisi,
