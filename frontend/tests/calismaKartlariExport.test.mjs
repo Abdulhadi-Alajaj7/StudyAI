@@ -32,7 +32,7 @@ test("Excel CSV Türkçe karakterleri, çok satırlı cevabı, kaynak adlarını
   assert.ok(sonuc.startsWith("\uFEFFsep=;\r\n"));
   assert.match(sonuc, /"Konu";"Soru";"Cevap"/);
   assert.match(sonuc, /"Veri Ön İşleme"/);
-  assert.match(sonuc, /'MCAR, MAR ve MNAR/);
+  assert.match(sonuc, /"MCAR, MAR ve MNAR/);
   assert.match(sonuc, /"Eksiklik mekanizmalarıdır\.\n""MCAR"" gözlemlerden bağımsızdır\."/);
   assert.match(sonuc, /"Hafta_03\.pdf"/);
   assert.match(sonuc, /"Zor"/);
