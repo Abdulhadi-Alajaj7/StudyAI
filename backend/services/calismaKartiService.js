@@ -88,7 +88,13 @@ const uretimDurumunuOlustur = (ders, kartlar) => {
         atlananKonuSayisi,
         hizliUretimYapildi: Boolean(ders?.kartHizliUretimSurumImzasi &&
             ders.kartHizliUretimSurumImzasi === ders.kartKaynakSurumImzasi),
-        haritaTabanliTamamlandi: Boolean(ders?.kartHaritaTamamlandi),
+        haritaTabanliTamamlandi: Boolean(ders?.kartHaritaTamamlandi &&
+            ders?.kartHaritaZenginlestirmeTamamlandi),
+        kapsamKontroluTamamlandi: Boolean(ders?.kartHaritaZenginlestirmeTamamlandi),
+        kapsamKontroluBekleyenGrupSayisi: (ders?.kartHaritaEksikKapsamGruplari || [])
+            .filter((g) => g.eksikKavramlar?.length &&
+                !(ders?.kartHaritaKapsamTamamlananGrupImzalari || [])
+                    .includes(String(g.grupImzasi))).length,
         toplamGrupSayisi: Number(ders?.kartHaritaToplamGrupSayisi || 0),
         islenenGrupSayisi: (ders?.kartHaritaIslenenGrupImzalari || []).length,
     };
