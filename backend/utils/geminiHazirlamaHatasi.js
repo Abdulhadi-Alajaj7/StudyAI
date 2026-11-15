@@ -93,7 +93,10 @@ export const geminiHazirlamaHatasiniSiniflandir = (hata, simdi = Date.now()) => 
 
 export const geminiRetryBeklemesiniGetir = (hata, deneme, maksBeklemeMs = 30000) => {
     if (!hata.gecici || hata.kod === "GEMINI_GUNLUK_KOTA") return null;
-    const sure = Math.max(hata.retryAfterMs || 0, hata.status === 429 ? (hata.retryAfterMs ?? 60000) : Math.min(8000, 1000 * 2 ** (deneme - 1)));
+    const taban = hata.status === 429 ? (hata.retryAfterMs ?? 60000)
+        : hata.status === 503 ? Math.min(12000, 2500 * 2 ** (deneme - 1))
+            : Math.min(8000, 1000 * 2 ** (deneme - 1));
+    const sure = Math.max(hata.retryAfterMs || 0, taban);
     return sure <= maksBeklemeMs ? sure : null;
 };
 
