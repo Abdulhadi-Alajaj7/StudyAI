@@ -93,6 +93,9 @@ mock.module("../models/MetinParcasi.js", {
     async deleteMany() { silinenMetinParcasi = true; }
   }
 });
+mock.module("../models/KonuParcaEslesmesi.js", {
+  defaultExport: { async deleteMany() {} }
+});
 mock.module("../models/KonuHaritasi.js", {
   defaultExport: {
     async deleteMany() { silinenKonuHaritasi = true; }
