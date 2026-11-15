@@ -42,7 +42,7 @@ test("Excel CSV Türkçe karakterleri, çok satırlı cevabı, kaynak adlarını
 
 test("Excel formül enjeksiyonu cevapta engellenir ve konu metadata dışarı çıkmaz", () => {
   const sonuc = calismaKartlariCsvOlustur(kartlar);
-  assert.match(sonuc, /"'=HYPERLINK/);
+  assert.doesNotMatch(sonuc, /HYPERLINK/);
   assert.match(sonuc, /"'\+1\+2"/);
 });
 
