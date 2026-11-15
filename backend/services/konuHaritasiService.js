@@ -306,6 +306,7 @@ export const konuHaritasiUretVeKaydet = async (
         }));
 
         let hamKonular = [];
+        const kullanilanModeller = new Set();
 
         const dersBilgisi = {
             dersAdi: ders.dersAdi,
@@ -319,6 +320,7 @@ export const konuHaritasiUretVeKaydet = async (
                 dersBilgisi,
                 modelAdi
             ));
+            kullanilanModeller.add(hamKonular.kullanilanModel || modelAdi);
         } else {
             const araKonuListeleri = [];
 
@@ -329,6 +331,7 @@ export const konuHaritasiUretVeKaydet = async (
                         dersBilgisi,
                         modelAdi
                     ));
+                kullanilanModeller.add(araListe?.kullanilanModel || modelAdi);
 
                 if (araListe && araListe.length > 0) {
                     araKonuListeleri.push(...araListe);
@@ -340,6 +343,7 @@ export const konuHaritasiUretVeKaydet = async (
                 dersBilgisi,
                 modelAdi
             ));
+            kullanilanModeller.add(hamKonular.kullanilanModel || modelAdi);
         }
 
         await heartbeat.kilidiDogrula();
@@ -707,7 +711,7 @@ export const konuHaritasiUretVeKaydet = async (
                             kaliciAnaKonular.length,
                         toplamAltKonuSayisi: toplamAlt,
                         kaynakMateryaller,
-                        kullanilanModel: modelAdi,
+                        kullanilanModel: [...kullanilanModeller].join(', ') || modelAdi,
                         sonOlusturmaTarihi: new Date(),
                         aktifIslemToken: null,
                         kilitSonYenilemeTarihi: null
