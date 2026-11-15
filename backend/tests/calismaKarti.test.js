@@ -10,6 +10,7 @@ import {
     kartAdaylariniDogrula,
     kaynakMetnindenYedekKartOlustur,
     konuOdakliIcerikSec,
+    sinirliParalelKartPartileri,
 } from "../services/kartUretimPlanlama.mjs";
 
 test("Alt konu kimlikleri korunur", () => {
@@ -167,4 +168,23 @@ test("Mongoose genel bilgi kartını kaynaksız kabul eder, kaynak kartını red
     };
     await new CalismaKarti({ ...temel, uretimYontemi: "genel" }).validate();
     await assert.rejects(new CalismaKarti({ ...temel, uretimYontemi: "gemini" }).validate());
+});
+
+test("Hızlı üretim partileri eşzamanlı en fazla iki istek gönderir; hata diğer partileri durdurmaz", async () => {
+    const indeksler = Array.from({ length: 11 }, (_, i) => i);
+    let aktif = 0;
+    let maksimum = 0;
+    const sonuc = await sinirliParalelKartPartileri(indeksler, async (sayi) => {
+        aktif += 1;
+        maksimum = Math.max(maksimum, aktif);
+        await new Promise((resolve) => setTimeout(resolve, 3));
+        aktif -= 1;
+        if (sayi === 4) throw Object.assign(new Error("quota"), { status: 429 });
+        return sayi * 2;
+    }, 10);
+    assert.equal(maksimum, 2);
+    assert.equal(sonuc.length, 11);
+    assert.equal(sonuc[4].status, "rejected");
+    assert.equal(sonuc[10].status, "fulfilled");
+    assert.equal(sonuc[10].value, 20);
 });
