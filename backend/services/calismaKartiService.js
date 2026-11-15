@@ -385,7 +385,7 @@ export const calismaKartlariniHizliOlustur = async ({ kullaniciId, dersId }, d =
             const hedef = konu.karakterSayisi >= 900 ? 6 : 4;
             return {
                 ...konu,
-                adet: Math.min(8 - onceki, Math.max(0, hedef - onceki)),
+                adet: Math.min(8 - onceki, Math.max(1, hedef - onceki)),
                 oncekiSorular: eskiKartlar.filter((kart) => String(kart.konuId) === String(konu.konuId))
                     .map((kart) => String(kart.soru).slice(0, 140)).slice(0, 8),
             };
