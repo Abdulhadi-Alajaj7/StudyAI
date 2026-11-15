@@ -3,7 +3,6 @@ import Ders from "../models/Ders.js";
 import Materyal from "../models/Materyal.js";
 import MetinParcasi from "../models/MetinParcasi.js";
 import KonuHaritasi from "../models/KonuHaritasi.js";
-import KonuParcaEslesmesi from "../models/KonuParcaEslesmesi.js";
 import Sohbet from "../models/Sohbet.js";
 import Mesaj from "../models/Mesaj.js";
 import DersOzeti from "../models/DersOzeti.js";
@@ -219,7 +218,6 @@ export const geciciDersTemizlemeTuruCalistir = async ({
             await Promise.all([
                 MetinParcasi.deleteMany({ dersId: kilit._id }),
                 KonuHaritasi.deleteMany({ dersId: kilit._id }),
-                KonuParcaEslesmesi.deleteMany({ dersId: kilit._id }),
                 Materyal.deleteMany({ dersId: kilit._id }),
                 Mesaj.deleteMany({
                     dersId: kilit._id,
