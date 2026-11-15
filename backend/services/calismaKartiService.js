@@ -22,13 +22,24 @@ const dersGetir = async (x, kullaniciId, dersId) => {
 export const calismaKartlariDurumunuGetir = async ({ kullaniciId, dersId }, d = {}) => {
     const x = bagimliliklar(d);
     const ders = await dersGetir(x, kullaniciId, dersId);
-    const kartlar = await x.KartModel.find({ kullaniciId, dersId })
-        .sort({ createdAt: 1, _id: 1 }).lean();
     const yeniSistem = Boolean(ders.kartDersSurumImzasi);
-    const tamamlandi = yeniSistem && Boolean(ders.kartDersTamamlandi);
+    const uretimSuruyor = Boolean(ders.kartDersOtomatikAktif);
+    const tamamlandi = yeniSistem && Boolean(ders.kartDersTamamlandi) &&
+        !uretimSuruyor;
+    // Yarım üretilmiş kartlar ve eski kartlar öğrencinin önüne düşmez.
+    // Tamamlanma anında bütün ders kartları tek defada açılır.
+    const kartlarGosterilsin = !uretimSuruyor && (!yeniSistem || tamamlandi);
+    const kartlar = kartlarGosterilsin
+        ? await x.KartModel.find({ kullaniciId, dersId })
+            .sort({ createdAt: 1, _id: 1 }).lean()
+        : [];
     return {
         kartlar, tamamlandi,
         dersKartTamamlandi: tamamlandi,
+        uretimSuruyor,
+        uretimHatasi: !uretimSuruyor
+            ? String(ders.kartDersOtomatikHataKodu || "") : "",
+        sonrakiDeneme: uretimSuruyor ? ders.kartDersSonrakiDeneme || null : null,
         toplamGrupSayisi: yeniSistem ? Number(ders.kartDersToplamGrupSayisi || 0) : 0,
         islenenGrupSayisi: yeniSistem
             ? (ders.kartDersIslenenGrupImzalari || []).length : 0,
