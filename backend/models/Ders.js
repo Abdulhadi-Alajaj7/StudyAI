@@ -82,6 +82,22 @@ const dersSchema = new mongoose.Schema(
         kartHaritaIslenenGrupImzalari: { type: [String], default: [] },
         kartHaritaTamamlandi: { type: Boolean, default: false },
         kartHaritaZenginlestirmeTamamlandi: { type: Boolean, default: false },
+        kartHaritaEksikKapsamGruplari: {
+            type: [{
+                grupImzasi: { type: String, required: true },
+                eksikKavramlar: {
+                    type: [{
+                        konuId: { type: String, required: true },
+                        bilgi: { type: String, required: true },
+                        kaynakKodlari: { type: [String], default: [] },
+                        onem: { type: Number, required: true },
+                    }],
+                    default: [],
+                },
+            }],
+            default: [],
+        },
+        kartHaritaKapsamTamamlananGrupImzalari: { type: [String], default: [] },
         kartUretimToken: { type: mongoose.Schema.Types.ObjectId, default: null },
         kartUretimSonYenileme: { type: Date, default: null },
         temizleniyor: {
