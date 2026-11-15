@@ -301,3 +301,23 @@ test("Az kartlı konular kullanıcıya sunulmadan otomatik incelenir, yeni önem
     assert.equal(tekrar.kartlar.length, 4);
     assert.equal(odaklar.length, 2);
 });
+
+test("Açık başka konu başlığıyla eşleşen kart yanlış konu altında kaydedilmez", () => {
+    const konular = [
+        { konuId: "a", baslik: "Naive Bayes", aciklama: "Olasılıksal sınıflandırma" },
+        { konuId: "b", baslik: "Görselleştirme ile Veri Keşfi", aciklama: "Histogram ve kutu grafiği" },
+    ];
+    const kaynaklar = [{ kod: "K1", materyalId: "m1", dosyaAdi: "h.pdf", parcaIndex: 0 }];
+    const hamKartlar = [
+        { konuId: "a", soru: "Görselleştirme ile Veri Keşfi neden önemlidir?",
+            cevap: "Veri dağılımını gösterir.", kaynakKodlari: ["K1"] },
+        { konuId: "b", soru: "Görselleştirme ile Veri Keşfi neden önemlidir?",
+            cevap: "Veri dağılımını gösterir.", kaynakKodlari: ["K1"] },
+        { konuId: "a", soru: "Naive Bayes hangi varsayıma dayanır?",
+            cevap: "Koşullu bağımsızlık.", kaynakKodlari: ["K1"] },
+    ];
+    const sonuc = haritaKartlariniDogrula({ hamKartlar, konular, kaynaklar, ayrinti: true });
+    assert.equal(sonuc.gecersiz, 1);
+    assert.equal(sonuc.kartlar.length, 2);
+    assert.deepEqual(sonuc.kartlar.map(k => k.konuId), ["b", "a"]);
+});
