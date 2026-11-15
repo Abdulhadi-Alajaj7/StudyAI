@@ -2731,6 +2731,7 @@ export const geminiIleHaritaTabanliKartUret = async ({
     konuHaritasi,
     grup,
     oncekiSorular = [],
+    odakKonuIdleri = [],
     kartLimiti = 48,
     modelAdi = process.env.GEMINI_KART_MODELI || process.env.GEMINI_TEST_MODELI || VARSAYILAN_GEMINI_MODELI,
 }, bagimliliklar = {}) => {
@@ -2771,6 +2772,13 @@ export const geminiIleHaritaTabanliKartUret = async ({
                 konuId: String(s.konuId || ""),
                 soru: String(s.soru || "").slice(0, 160),
             }))),
+        ] : []),
+        ...(odakKonuIdleri.length ? [
+            "OTOMATİK KAPSAM KONTROLÜ: İlk turda az kart oluşan konu kimlikleri:",
+            JSON.stringify(odakKonuIdleri),
+            "YALNIZCA bu konu kimliklerine ait ve mevcut kartlarda eksik kalan önemli bilgileri soru yap.",
+            "Kaynakta yeni önemli bilgi yoksa boş kartlar dizisi döndür; sırf kart sayısını artırma.",
+            "Önceki sorularla benzer fakat farklı öğrenme açısı sunan sorulara izin ver; birebir tekrar etme.",
         ] : []),
         "BU METİN GRUBUNUN TOPLAM KART ÜST SINIRI (konu kotası değildir): " + Math.max(1, Math.min(48, Math.floor(kartLimiti) || 48)),
         "DERS METNİ (parçalar konu bazında SEÇİLMEDİ; metnin tümünü değerlendir):",
