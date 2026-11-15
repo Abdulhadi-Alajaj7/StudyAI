@@ -105,8 +105,8 @@ function DersCalismaKartlari() {
       if (!controller.signal.aborted && e.code !== "ERR_CANCELED") {
         const baglantiYok = !e.response && (e.code === "ERR_NETWORK" || e.isAxiosError);
         setHata(baglantiYok
-          ? "Backend sunucusuna bağlanılamadı. Sunucuyu kontrol edip yeniden deneyin. Önceden oluşturulan kartlar saklanır."
-          : kullaniciHataMesaji(e, "Kartlar hazırlanamadı. Daha önce kaydedilen kartlar korundu."));
+          ? "Sunucuya şu anda bağlanılamıyor. Mevcut kartlarınız korundu; yeniden deneyebilirsiniz."
+          : "Kartlar şu anda hazırlanamadı. Mevcut kartlarınız korundu; tekrar deneyebilirsiniz.");
       }
     } finally {
       islemRef.current = false;
@@ -162,7 +162,7 @@ function DersCalismaKartlari() {
         <span className="ml-3 text-[10px] font-bold text-sky-400">YAKINDA</span>
       </div>
     </div>
-    {!yukleniyor && kartlar.length > 0 && !uretim.hizliUretimYapildi && (
+    {!yukleniyor && kartlar.length > 0 && (
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className={`text-xs ${ikincil}`}>Mevcut kartlarınız korunur. Eksik konular için yeni kartlar eklenebilir.</p>
         <button type="button" disabled={olusturuluyor} onClick={olustur}
@@ -200,25 +200,7 @@ function DersCalismaKartlari() {
       <div role="status" className={`flex flex-wrap items-center justify-between gap-2 rounded-xl border px-4 py-3 text-sm ${panel}`}>
         <span className="font-semibold">Hızlı işlem: {Math.round(uretim.sureMs / 1000)} saniye</span>
         <span className={ikincil}>{uretim.yeniKartSayisi ?? 0} yeni kart kaydedildi</span>
-        {uretim.geminiYanitiAlindi === false && (
-          <span className="text-amber-400">Gemini kullanılamadı; yalnızca ders metnindeki doğrulanabilir bilgiler kullanıldı.</span>
-        )}
       </div>
-    )}
-    {kartlar.some(k => k.uretimYontemi === "genel") && (
-      <p role="status" className="rounded-xl border border-indigo-400/30 bg-indigo-500/10 p-4 text-sm text-indigo-400">
-        {kartlar.filter(k => k.uretimYontemi === "genel").length} kart, ders dosyasında ayrıntılı açıklama bulunmadığı için genel akademik bilgiden üretildi. Bu kartlar dosya kaynağı olarak gösterilmez.
-      </p>
-    )}
-    {kartlar.some(k => k.uretimYontemi === "kaynak") && (
-      <p role="status" className="rounded-xl border border-sky-400/30 bg-sky-500/10 p-4 text-sm text-sky-400">
-        {kartlar.filter(k => k.uretimYontemi === "kaynak").length} kart, Gemini yanıtı doğrulanamadığı veya kullanım sınırı aşıldığı için doğrudan ders metninden oluşturuldu. Kartlarda "Kaynak metni" etiketi bulunur.
-      </p>
-    )}
-    {uretim.atlananKonuSayisi > 0 && (
-      <p role="status" className="rounded-xl border border-amber-400/40 bg-amber-500/10 p-4 text-sm text-amber-400">
-        {uretim.atlananKonuSayisi} konu için kaynakta yeterli doğrulanabilir bilgi bulunamadı. Bu konularda uydurma kart oluşturulmadı; mevcut kartlar korundu.
-      </p>
     )}
     {hata && <p role="alert" className="rounded-xl border border-rose-400/40 bg-rose-500/10 p-4 text-sm text-rose-400">{hata}</p>}
     {yukleniyor ? <div role="status" className="py-14 text-center">Kartlar yükleniyor...</div> : !kartlar.length ?
@@ -228,7 +210,7 @@ function DersCalismaKartlari() {
         <p className={`mt-3 max-w-lg text-sm leading-6 ${ikincil}`}>{uretim.tamamlandi
           ? "İşlem tamamlandı ancak kaynaklardan doğrulanabilir kart bulunamadı. Konu haritası ve materyalleri kontrol edin."
           : "Onaylanmış konu haritanız ve ders materyallerinizden her konuya uygun soru ve cevap kartları hazırlayalım."}</p>
-        <button type="button" disabled={olusturuluyor || uretim.hizliUretimYapildi} onClick={olustur} className="mt-7 inline-flex items-center gap-2 rounded-xl bg-[#705CF5] px-6 py-3 font-semibold text-white hover:bg-[#6250DE] disabled:opacity-50">
+        <button type="button" disabled={olusturuluyor} onClick={olustur} className="mt-7 inline-flex items-center gap-2 rounded-xl bg-[#705CF5] px-6 py-3 font-semibold text-white hover:bg-[#6250DE] disabled:opacity-50">
           {olusturuluyor ? <ArrowPathIcon className="h-5 w-5 animate-spin" /> : <SparklesIcon className="h-5 w-5" />}
           {olusturuluyor ? "Kartlar hazırlanıyor..." : uretim.toplamKonuSayisi > 0 ? "Üretime Devam Et" : "Kartları Oluştur"}
         </button>
