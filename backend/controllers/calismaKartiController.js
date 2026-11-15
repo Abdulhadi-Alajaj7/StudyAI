@@ -2,8 +2,6 @@ import mongoose from "mongoose";
 import { haritaTabanliKartlariOlustur } from "../services/haritaTabanliKartService.js";
 import {
     calismaKartlariDurumunuGetir,
-    calismaKartlariniOlustur,
-    calismaKartlariniHizliOlustur,
     calismaKartiDurumuGuncelle,
 } from "../services/calismaKartiService.js";
 
@@ -48,24 +46,12 @@ export const kartlariOlustur = async (req, res) => {
     if (!gecerliId(req.params.dersId)) {
         return res.status(400).json({ hata: "Geçersiz ders kimliği." });
     }
-    const hizli = req.body?.hizli ?? false;
-    if (typeof hizli !== "boolean") {
-        return res.status(400).json({ hata: "Geçersiz kart üretim modu." });
-    }
-    const azamiKonuSayisi = req.body?.azamiKonuSayisi ?? 3;
-    const yalnizcaKaynak = req.body?.yalnizcaKaynak ?? false;
-    if (!Number.isInteger(azamiKonuSayisi) || azamiKonuSayisi < 1 || azamiKonuSayisi > 3 ||
-        typeof yalnizcaKaynak !== "boolean") {
-        return res.status(400).json({ hata: "Geçersiz kart üretim ayarı." });
-    }
     try {
-        const sonuc = hizli ? await haritaTabanliKartlariOlustur({
-            kullaniciId: req.user._id, dersId: req.params.dersId,
-        }) : await calismaKartlariniOlustur({
+        // Tüm oluşturma istekleri artık konu haritası + dersin bütün metinleriyle
+        // çalışır. Eski kelime-eşleştirmeli konu başına parça seçimi kullanılmaz.
+        const sonuc = await haritaTabanliKartlariOlustur({
             kullaniciId: req.user._id,
             dersId: req.params.dersId,
-            azamiKonuSayisi,
-            yalnizcaKaynak,
         });
         return res.status(sonuc.tamamlandi ? 201 : 202).json(sonuc);
     } catch (hata) {
