@@ -39,17 +39,6 @@ function DersCalismaKartlari() {
   const metin = isDark ? "text-[#F8FAFC]" : "text-[#0F172A]";
   const ikincil = isDark ? "text-[#92A7C5]" : "text-[#64748B]";
 
-  const bekle = (ms, signal) => new Promise((resolve) => {
-    if (signal.aborted) return resolve();
-    const zamanlayici = setTimeout(tamamla, ms);
-    function tamamla() {
-      clearTimeout(zamanlayici);
-      signal.removeEventListener("abort", tamamla);
-      resolve();
-    }
-    signal.addEventListener("abort", tamamla, { once: true });
-  });
-
   useEffect(() => {
     const controller = new AbortController();
     setYukleniyor(true);
@@ -133,7 +122,7 @@ function DersCalismaKartlari() {
     uretimControllerRef.current = controller;
     setOlusturuluyor(true);
     setHata("");
-    setUretimMesaji("Kartlar hazırlanıyor. Kaynaklar tek seferde inceleniyor...");
+    setUretimMesaji("Ders metni ve konu haritası birlikte inceleniyor. Kart sayısını Gemini içerik önemine göre seçiyor...");
     try {
       const r = await api.hizliOlustur(dersId, controller.signal);
       if (controller.signal.aborted) return;
@@ -238,17 +227,22 @@ function DersCalismaKartlari() {
         <p className="mt-2 text-3xl font-bold">{sayilar[id]}</p>
       </button>)}
     </div>
-    {(olusturuluyor || (uretim.toplamKonuSayisi > 0 && !uretim.tamamlandi)) && (
+    {!yukleniyor && (olusturuluyor ||
+      (uretim.toplamGrupSayisi > 0 && !uretim.haritaTabanliTamamlandi) ||
+      (kartlar.length > 0 && !uretim.haritaTabanliTamamlandi)) && (
       <div role="status" aria-live="polite" className={`flex flex-wrap items-center justify-between gap-3 rounded-xl border border-violet-400/30 bg-violet-500/10 px-4 py-3 text-sm ${metin}`}>
         <div className="flex items-center gap-2">
           {olusturuluyor && <ArrowPathIcon className="h-5 w-5 animate-spin text-violet-400" />}
-          <span>{uretimMesaji || "Kart üretimi henüz tamamlanmadı. Kaldığınız yerden devam edebilirsiniz."}</span>
+          <span>{uretimMesaji || (uretim.toplamGrupSayisi > 0
+            ? "Ders metninin bazı bölümleri henüz tamamlanmadı. Kayıtlı kartlar korunarak devam edilebilir."
+            : "Mevcut kartlarınız korunur. Yeni konu haritası tabanlı sistemle kart oluşturabilirsiniz.")}</span>
         </div>
-        {uretim.toplamKonuSayisi > 0 && <span className="text-xs font-semibold text-violet-400">
-          {uretim.tamamlananKonuSayisi} / {uretim.toplamKonuSayisi} konu
+        {uretim.toplamGrupSayisi > 0 && <span className="text-xs font-semibold text-violet-400">
+          {uretim.islenenGrupSayisi || 0} / {uretim.toplamGrupSayisi} metin bölümü
         </span>}
-        {!olusturuluyor && <button type="button" onClick={olustur} className="rounded-lg border border-violet-400/50 px-3 py-2 font-semibold text-violet-400 hover:bg-violet-500/10">
-          Üretime Devam Et
+        {!olusturuluyor && <button type="button" onClick={olustur}
+          className="rounded-lg border border-violet-400/50 px-3 py-2 font-semibold text-violet-400 hover:bg-violet-500/10">
+          {uretim.toplamGrupSayisi > 0 ? "Üretime Devam Et" : "Kartları Oluştur"}
         </button>}
       </div>
     )}
@@ -263,12 +257,12 @@ function DersCalismaKartlari() {
       <div className={`flex min-h-[380px] flex-col items-center justify-center rounded-2xl border p-8 text-center ${panel}`}>
         <RectangleStackIcon className="h-14 w-14 text-violet-400" />
         <h3 className="mt-5 text-xl font-bold">Bilgilerini kartlarla kalıcı hâle getir</h3>
-        <p className={`mt-3 max-w-lg text-sm leading-6 ${ikincil}`}>{uretim.tamamlandi
-          ? "İşlem tamamlandı ancak kaynaklardan doğrulanabilir kart bulunamadı. Konu haritası ve materyalleri kontrol edin."
+        <p className={`mt-3 max-w-lg text-sm leading-6 ${ikincil}`}>{uretim.haritaTabanliTamamlandi
+          ? "Kaynak metinleri incelendi ancak doğrulanabilir soru-cevap kartı bulunamadı. Konu haritası ve materyalleri kontrol edin."
           : "Onaylanmış konu haritanız ve ders materyallerinizden her konuya uygun soru ve cevap kartları hazırlayalım."}</p>
         <button type="button" disabled={olusturuluyor} onClick={olustur} className="mt-7 inline-flex items-center gap-2 rounded-xl bg-[#705CF5] px-6 py-3 font-semibold text-white hover:bg-[#6250DE] disabled:opacity-50">
           {olusturuluyor ? <ArrowPathIcon className="h-5 w-5 animate-spin" /> : <SparklesIcon className="h-5 w-5" />}
-          {olusturuluyor ? "Kartlar hazırlanıyor..." : uretim.toplamKonuSayisi > 0 ? "Üretime Devam Et" : "Kartları Oluştur"}
+          {olusturuluyor ? "Kartlar hazırlanıyor..." : uretim.toplamGrupSayisi > 0 && !uretim.haritaTabanliTamamlandi ? "Üretime Devam Et" : "Kartları Oluştur"}
         </button>
       </div> : !aktif ?
       <div className={`rounded-2xl border p-14 text-center ${panel}`}>
