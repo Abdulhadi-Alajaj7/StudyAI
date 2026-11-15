@@ -173,6 +173,7 @@ export const haritaTabanliKartlariOlustur = async ({ kullaniciId, dersId }, d = 
         let tekrarSayisi = 0;
         let basarisizGrupSayisi = 0;
         let ilkHata = null;
+        let kotaAsildi = false;
         let sira = 0;
         // Gemini istekleri en fazla iki eşzamanlıdır. Veritabanı yazımı
         // sıralıdır: paralel gruplar aynı kartı iki kez ekleyemez.
@@ -183,16 +184,28 @@ export const haritaTabanliKartlariOlustur = async ({ kullaniciId, dersId }, d = 
             return islem;
         };
         const isci = async () => {
-            while (sira < kalan.length) {
+            while (sira < kalan.length && !kotaAsildi) {
                 const grup = kalan[sira++];
                 const t0 = Date.now();
                 try {
-                    const cevap = await x.uret({
+                    const girdi = {
                         dersAdi: guncelDers.dersAdi,
                         konuHaritasi: agac,
                         grup,
                         oncekiSorular: mevcutKartlar,
-                    });
+                    };
+                    let cevap;
+                    try {
+                        cevap = await x.uret(girdi);
+                    } catch (hata) {
+                        if (Number(hata?.status) !== 502) throw hata;
+                        // Kesilmiş JSON oluştuysa bir kez daha, daha kısa cevap iste.
+                        // Kota hatasında hiçbir ek istek yapılmaz.
+                        console.warn("[CalismaKartlari][harita] JSON kesildi, kısa yanıt deneniyor", {
+                            grup: grup.sira, status: 502,
+                        });
+                        cevap = await x.uret({ ...girdi, kartLimiti: 24 });
+                    }
                     await siraliKaydet(async () => {
                         const kontrol = haritaKartlariniDogrula({
                             hamKartlar: cevap?.kartlar,
@@ -228,6 +241,7 @@ export const haritaTabanliKartlariOlustur = async ({ kullaniciId, dersId }, d = 
                         });
                     });
                 } catch (hata) {
+                    if (Number(hata?.status) === 429) kotaAsildi = true;
                     basarisizGrupSayisi += 1;
                     if (!ilkHata) ilkHata = hata;
                     console.warn("[CalismaKartlari][harita] Grup işlenemedi", {
