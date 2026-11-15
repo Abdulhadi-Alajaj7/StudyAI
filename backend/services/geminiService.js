@@ -2811,5 +2811,11 @@ export const geminiIleHaritaTabanliKartUret = async ({
             status: 502, kod: "GEMINI_GECERSIZ_YANIT",
         });
     }
-    return { kartlar: veri.kartlar, model: modelAdi, tokenKullanimi };
+    return {
+        kartlar: veri.kartlar,
+        eksikOnemliNoktalar: Array.isArray(veri.eksikOnemliNoktalar)
+            ? veri.eksikOnemliNoktalar : [],
+        model: modelAdi,
+        tokenKullanimi,
+    };
 };
