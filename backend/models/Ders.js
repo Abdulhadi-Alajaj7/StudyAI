@@ -82,6 +82,7 @@ const dersSchema = new mongoose.Schema(
         kartHaritaIslenenGrupImzalari: { type: [String], default: [] },
         kartHaritaTamamlandi: { type: Boolean, default: false },
         kartHaritaZenginlestirmeTamamlandi: { type: Boolean, default: false },
+        kartHaritaKapsamDenetimSurumu: { type: Number, default: 0 },
         kartHaritaEksikKapsamGruplari: {
             type: [{
                 grupImzasi: { type: String, required: true },
