@@ -44,7 +44,8 @@ function DersCalismaKartlari() {
     setYukleniyor(true);
     setHata("");
     setKartlar([]);
-    setUretim({ dersKartTamamlandi: false, toplamGrupSayisi: 0, islenenGrupSayisi: 0 });
+    setUretim({ dersKartTamamlandi: false, uretimSuruyor: false,
+      toplamGrupSayisi: 0, islenenGrupSayisi: 0 });
     setUretimMesaji("");
     setIndex(0);
     setCevapAcik(false);
@@ -55,6 +56,36 @@ function DersCalismaKartlari() {
       .finally(() => { if (!controller.signal.aborted) setYukleniyor(false); });
     return () => { controller.abort(); uretimControllerRef.current?.abort(); };
   }, [dersId]);
+
+  // Bir kez başlatılan üretim tarayıcıdan bağımsız devam eder.
+  // Yalnızca durum sorgulanır; kartlar bitince topluca gösterilir.
+  useEffect(() => {
+    if (!uretim.uretimSuruyor) return undefined;
+    const controller = new AbortController();
+    let bekleyen = false;
+    const interval = setInterval(async () => {
+      if (bekleyen) return;
+      bekleyen = true;
+      try {
+        const r = await api.listele(dersId, controller.signal);
+        if (controller.signal.aborted) return;
+        setUretim(r.data);
+        if (r.data.dersKartTamamlandi) {
+          setKartlar(r.data.kartlar || []);
+          setUretimMesaji("");
+          setHata("");
+        } else {
+          setKartlar([]);
+        }
+      } catch (e) {
+        // Geçici bağlantı sorunu arka plandaki üretimi durdurmaz.
+        // Aynı sorgu bir sonraki aralıkta otomatik tekrarlanır.
+      } finally {
+        bekleyen = false;
+      }
+    }, 3000);
+    return () => { clearInterval(interval); controller.abort(); };
+  }, [dersId, uretim.uretimSuruyor]);
 
   useEffect(() => {
     if (!disaAktarMenuAcik) return;
@@ -89,6 +120,17 @@ function DersCalismaKartlari() {
       setDisaAktariliyor(false);
     }
   };
+
+  const uretimAktif = olusturuluyor || Boolean(uretim.uretimSuruyor);
+  const uretimHatasi = Boolean(uretim.uretimHatasi);
+  const durumMesaji = uretim.uretimSuruyor
+    ? (uretim.sonrakiDeneme &&
+      new Date(uretim.sonrakiDeneme).getTime() > Date.now()
+        ? "Kartlar hazırlanıyor. Sistem geçici yoğunluk nedeniyle otomatik yeniden deneyecek."
+        : "Dersin tüm metinleri arka planda inceleniyor. Bu sayfadan ayrılsanız da işlem devam eder.")
+    : uretimHatasi
+      ? "Kartlar henüz tamamlanamadı. Kayıtlı ilerleme korunuyor; daha sonra tekrar başlatabilirsiniz."
+      : "Dersin önemli bilgileri çalışma kartlarına dönüştürülecek.";
 
   const sayilar = useMemo(() => ({
     tum: kartlar.length,
@@ -126,14 +168,21 @@ function DersCalismaKartlari() {
     try {
       const r = await api.hizliOlustur(dersId, controller.signal);
       if (controller.signal.aborted) return;
-      setKartlar(r.data.kartlar || []);
-      setUretim(r.data);
+      setUretim(eski => ({ ...eski, ...r.data }));
+      if (r.data.uretimSuruyor) {
+        setKartlar([]);
+      } else {
+        const mevcut = await api.listele(dersId, controller.signal);
+        if (controller.signal.aborted) return;
+        setKartlar(mevcut.data.kartlar || []);
+        setUretim(mevcut.data);
+      }
     } catch (e) {
       if (!controller.signal.aborted && e.code !== "ERR_CANCELED") {
         const baglantiYok = !e.response && (e.code === "ERR_NETWORK" || e.isAxiosError);
         setHata(baglantiYok
-          ? "Sunucuya şu anda bağlanılamıyor. Mevcut kartlarınız korundu; yeniden deneyebilirsiniz."
-          : "Kartlar şu anda hazırlanamadı. Mevcut kartlarınız korundu; tekrar deneyebilirsiniz.");
+          ? "Bağlantı kurulamadı. İşin durumunu tekrar kontrol edebilirsiniz."
+          : "Kart üretimi başlatılamadı. Lütfen tekrar deneyin.");
       }
     } finally {
       islemRef.current = false;
@@ -185,7 +234,7 @@ function DersCalismaKartlari() {
       </div>
       <div className="flex flex-wrap items-center gap-3">
         <div className="relative" ref={disaAktarMenuRef}>
-          <button type="button" disabled={yukleniyor || !kartlar.length || disaAktariliyor}
+          <button type="button" disabled={yukleniyor || uretimAktif || !kartlar.length || disaAktariliyor}
             onClick={() => setDisaAktarMenuAcik(v => !v)}
             aria-haspopup="menu" aria-expanded={disaAktarMenuAcik}
             className={`inline-flex items-center gap-2 rounded-xl border px-4 py-3 text-sm font-semibold transition-colors hover:border-violet-400/60 disabled:cursor-not-allowed disabled:opacity-50 ${panel}`}>
@@ -227,29 +276,20 @@ function DersCalismaKartlari() {
         <p className="mt-2 text-3xl font-bold">{sayilar[id]}</p>
       </button>)}
     </div>
-    {!yukleniyor && (olusturuluyor ||
-      (uretim.toplamGrupSayisi > 0 && !uretim.dersKartTamamlandi) ||
-      (kartlar.length > 0 && !uretim.dersKartTamamlandi)) && (
-      <div role="status" aria-live="polite" className={`flex flex-wrap items-center justify-between gap-3 rounded-xl border border-violet-400/30 bg-violet-500/10 px-4 py-3 text-sm ${metin}`}>
+    {!yukleniyor && (uretimAktif || uretimHatasi) && (
+      <div role="status" aria-live="polite"
+        className={`flex flex-wrap items-center justify-between gap-3 rounded-xl border border-violet-400/30 bg-violet-500/10 px-4 py-3 text-sm ${metin}`}>
         <div className="flex items-center gap-2">
-          {olusturuluyor && <ArrowPathIcon className="h-5 w-5 animate-spin text-violet-400" />}
-          <span>{uretimMesaji || (uretim.toplamGrupSayisi > 0
-            ? "Ders metninin işlenmemiş bölümleri var. Mevcut kartlar korunarak devam edilebilir."
-            : "Dersin bütün materyallerinden çalışma kartları oluşturabilirsiniz. Mevcut kartlarınız korunur.")}</span>
+          {uretimAktif && <ArrowPathIcon className="h-5 w-5 animate-spin text-violet-400" />}
+          <span>{uretimAktif && uretimMesaji ? uretimMesaji : durumMesaji}</span>
         </div>
         {uretim.toplamGrupSayisi > 0 && <span className="text-xs font-semibold text-violet-400">
-          {`${uretim.islenenGrupSayisi || 0} / ${uretim.toplamGrupSayisi} metin bölümü`}
+          {uretim.islenenGrupSayisi || 0} / {uretim.toplamGrupSayisi} metin bölümü
         </span>}
-        {!olusturuluyor && <button type="button" onClick={olustur}
-          className="rounded-lg border border-violet-400/50 px-3 py-2 font-semibold text-violet-400 hover:bg-violet-500/10">
-          {uretim.toplamGrupSayisi > 0 ? "Üretime Devam Et" : "Kartları Oluştur"}
+        {!uretimAktif && uretimHatasi && <button type="button" onClick={olustur}
+          className="rounded-lg border border-violet-400/50 px-3 py-2 font-semibold text-violet-400">
+          Yeniden Dene
         </button>}
-      </div>
-    )}
-    {Number.isFinite(uretim.sureMs) && (
-      <div role="status" className={`flex flex-wrap items-center justify-between gap-2 rounded-xl border px-4 py-3 text-sm ${panel}`}>
-        <span className="font-semibold">Hızlı işlem: {Math.round(uretim.sureMs / 1000)} saniye</span>
-        <span className={ikincil}>{uretim.yeniKartSayisi ?? 0} yeni kart kaydedildi</span>
       </div>
     )}
     {hata && <p role="alert" className="rounded-xl border border-rose-400/40 bg-rose-500/10 p-4 text-sm text-rose-400">{hata}</p>}
@@ -257,12 +297,14 @@ function DersCalismaKartlari() {
       <div className={`flex min-h-[380px] flex-col items-center justify-center rounded-2xl border p-8 text-center ${panel}`}>
         <RectangleStackIcon className="h-14 w-14 text-violet-400" />
         <h3 className="mt-5 text-xl font-bold">Bilgilerini kartlarla kalıcı hâle getir</h3>
-        <p className={`mt-3 max-w-lg text-sm leading-6 ${ikincil}`}>{uretim.dersKartTamamlandi
-          ? "Ders materyalleri incelendi ancak kaynaklı soru-cevap kartı bulunamadı. Yüklenen dosyaları kontrol edin."
-          : "Ders materyallerindeki önemli bilgileri kapsayan soru-cevap kartları hazırlayalım."}</p>
-        <button type="button" disabled={olusturuluyor} onClick={olustur} className="mt-7 inline-flex items-center gap-2 rounded-xl bg-[#705CF5] px-6 py-3 font-semibold text-white hover:bg-[#6250DE] disabled:opacity-50">
-          {olusturuluyor ? <ArrowPathIcon className="h-5 w-5 animate-spin" /> : <SparklesIcon className="h-5 w-5" />}
-          {olusturuluyor ? "Kartlar hazırlanıyor..." : uretim.toplamGrupSayisi > 0 && !uretim.dersKartTamamlandi ? "Üretime Devam Et" : "Kartları Oluştur"}
+        <p className={`mt-3 max-w-lg text-sm leading-6 ${ikincil}`}>{uretimAktif
+          ? durumMesaji
+          : uretim.dersKartTamamlandi
+            ? "Ders materyalleri incelendi ancak kaynaklı soru-cevap kartı bulunamadı. Yüklenen dosyaları kontrol edin."
+            : "Ders materyallerindeki önemli bilgileri kapsayan soru-cevap kartları hazırlayalım."}</p>
+        <button type="button" disabled={uretimAktif || uretim.dersKartTamamlandi} onClick={olustur} className="mt-7 inline-flex items-center gap-2 rounded-xl bg-[#705CF5] px-6 py-3 font-semibold text-white hover:bg-[#6250DE] disabled:opacity-50">
+          {uretimAktif ? <ArrowPathIcon className="h-5 w-5 animate-spin" /> : <SparklesIcon className="h-5 w-5" />}
+          {uretimAktif ? "Kartlar hazırlanıyor..." : "Kartları Oluştur"}
         </button>
       </div> : !aktif ?
       <div className={`rounded-2xl border p-14 text-center ${panel}`}>
