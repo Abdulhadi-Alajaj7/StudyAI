@@ -1,312 +1,175 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import mongoose from "mongoose";
-import { calismaKartlariniOlustur, calismaKartlariniHizliOlustur, calismaKartlariDurumunuGetir } from "../services/calismaKartiService.js";
+import { dersGeneliKartlariOlustur } from "../services/dersKartService.js";
+import {
+    calismaKartlariDurumunuGetir, calismaKartiDurumuGuncelle,
+} from "../services/calismaKartiService.js";
 
-const sorgu = (deger) => ({
-    select() { return this; },
-    sort() { return this; },
-    lean() { return Promise.resolve(typeof deger === "function" ? deger() : deger); },
+const q = (value) => ({
+    sort() { return this; }, select() { return this; },
+    lean() { return Promise.resolve(typeof value === "function" ? value() : value); },
 });
-const veriOlustur = ({ konular = ["Eksik Veri", "Veri Kalitesi"], uret, oncekiKartlar = [] } = {}) => {
+const kur = ({ uret, kayitli = [], metinler = [] } = {}) => {
     const kullaniciId = new mongoose.Types.ObjectId();
     const dersId = new mongoose.Types.ObjectId();
     const materyalId = new mongoose.Types.ObjectId();
     const islemeId = new mongoose.Types.ObjectId();
     const ders = {
-        _id: dersId, kullaniciId, dersAdi: "Uygulamalı Veri Bilimi", materyallerOnaylandi: true,
-        kartUretimHedefKonuIds: [], kartTamamlananKonuIds: [],
-        kartAtlananKonuIds: [], kartKaynakSurumImzasi: "", kartUretimToken: null,
+        _id: dersId, kullaniciId, dersAdi: "Uygulamalı Veri Bilimi",
+        materyallerOnaylandi: true, kartUretimToken: null,
+        kartDersSurumImzasi: "", kartDersToplamGrupSayisi: 0,
+        kartDersIslenenGrupImzalari: [], kartDersTamamlandi: false,
     };
-    const materyaller = [{ _id: materyalId, aktifIslemeId: islemeId, dosyaAdi: "hafta.pdf" }];
-    const metinler = konular.map((baslik, i) => ({
-        _id: new mongoose.Types.ObjectId(),
-        konuId: "k" + i, materyalId, islemeId, parcaIndex: i,
-        icerik: (
-            baslik + ", üniversitedeki veri analizinde önemli bir kavramdır. " +
-            baslik + " analizin güvenilirliğini değerlendirmede kullanılır. "
-        ).repeat(12),
-    }));
-    const harita = { anaKonular: konular.map((baslik, i) => ({ konuId: "k" + i, baslik, altKonular: [] })) };
-    const kartlar = [...oncekiKartlar];
-    const DersModel = {
-        findOne(filtre) {
-            const uygun = !filtre.kartUretimToken ||
-                String(filtre.kartUretimToken) === String(ders.kartUretimToken);
-            return sorgu(uygun ? ders : null);
+    const materyaller = [{ _id: materyalId, aktifIslemeId: islemeId, dosyaAdi: "Hafta.pdf" }];
+    const parcalar = metinler.length ? metinler : [
+        { materyalId, islemeId, parcaIndex: 0, icerik: "MCAR veri yokluğunun türüdür." },
+        { materyalId, islemeId, parcaIndex: 1, icerik: "Naive Bayes olasılık temellidir." },
+    ];
+    const kartlar = [...kayitli];
+    let istekler = 0;
+    const deps = {
+        DersModel: {
+            findOne(f) {
+                if (f.kartUretimToken != null &&
+                    String(f.kartUretimToken) !== String(ders.kartUretimToken))
+                    return q(null);
+                return q(ders);
+            },
+            async findOneAndUpdate(_f, g) {
+                if (ders.kartUretimToken != null) return null;
+                Object.assign(ders, g.$set || {});
+                return ders;
+            },
+            async updateOne(f, g) {
+                if (String(f.kartUretimToken) !== String(ders.kartUretimToken))
+                    return { matchedCount: 0 };
+                Object.assign(ders, g.$set || {});
+                for (const [key, value] of Object.entries(g.$addToSet || {}))
+                    ders[key] = [...new Set([...(ders[key] || []), value])];
+                return { matchedCount: 1 };
+            },
         },
-        async findOneAndUpdate(filtre, degisiklik) {
-            if (ders.kartUretimToken != null) return null;
-            Object.assign(ders, degisiklik.$set || {});
-            return { ...ders };
-        },
-        async updateOne(filtre, guncelleme) {
-            if (String(filtre.kartUretimToken) !== String(ders.kartUretimToken)) return { matchedCount: 0 };
-            Object.assign(ders, guncelleme.$set || {});
-            for (const [alan, deger] of Object.entries(guncelleme.$addToSet || {})) {
-                ders[alan] = [...new Set([...(ders[alan] || []), ...deger.$each])];
-            }
-            return { matchedCount: 1 };
-        },
-    };
-    const KartModel = {
-        find() { return sorgu(() => [...kartlar]); },
-        async bulkWrite(islemler) {
-            for (const islem of islemler) {
-                const k = islem.updateOne.update.$setOnInsert;
-                if (!kartlar.some((x) => x.soruKimligi === k.soruKimligi && x.konuId === k.konuId)) {
-                    kartlar.push({ _id: new mongoose.Types.ObjectId(), ...k });
+        MateryalModel: { find() { return q(materyaller); } },
+        ParcaModel: { find() { return q(parcalar); } },
+        KartModel: {
+            find() { return q(() => [...kartlar]); },
+            async bulkWrite(ops) {
+                for (const op of ops) {
+                    const k = op.updateOne.update.$setOnInsert;
+                    if (!kartlar.some((old) => old.soruKimligi === k.soruKimligi))
+                        kartlar.push({ _id: new mongoose.Types.ObjectId(), ...k });
                 }
-            }
+            },
+            findOneAndUpdate(f, g) {
+                const i = kartlar.findIndex((k) => String(k._id) === String(f._id));
+                if (i !== -1) Object.assign(kartlar[i], g.$set);
+                return q(i < 0 ? null : kartlar[i]);
+            },
+        },
+        gruplama: (_parcalar, mats) => [
+            { sira: 1, imza: "grup1",
+                kaynaklar: [{ kod: "K1", materyalId: mats[0]._id,
+                    dosyaAdi: "Hafta.pdf", parcaIndex: 0 }],
+                metin: "[K1] MCAR eksik veri" },
+            { sira: 2, imza: "grup2",
+                kaynaklar: [{ kod: "K2", materyalId: mats[0]._id,
+                    dosyaAdi: "Hafta.pdf", parcaIndex: 1 }],
+                metin: "[K2] Naive Bayes olasılık" },
+        ],
+        async uret(args) {
+            istekler++;
+            return uret ? uret(args) : { kartlar: [{
+                soru: "Bu ders bölümünün temel bilgisi " + args.grup.sira + " nedir?",
+                cevap: "Metinde açıklanan gerçek bilgi.", kaynakKodlari: [args.grup.kaynaklar[0].kod],
+            }] };
         },
     };
-    const MateryalModel = { find() { return sorgu(materyaller); } };
-    const ParcaModel = { find() { return sorgu(metinler); } };
-    const HaritaModel = { findOne() { return sorgu(harita); } };
-    return {
-        args: { kullaniciId, dersId },
-        ders, kartlar,
-        deps: { DersModel, KartModel, MateryalModel, ParcaModel, HaritaModel,
-            eslestir: (_, konu) => metinler.filter((p) => p.konuId === konu.konuId),
-            uret: uret || (async () => ({ kartlar: [] })),
-        },
-    };
+    return { args: { kullaniciId, dersId }, deps, ders, kartlar, parcalar,
+        getIstekler: () => istekler };
 };
 
-test("Gemini boş cevap verse de her konu kaynak metninden tamamlanır", async () => {
-    const v = veriOlustur();
-    const sonuc = await calismaKartlariniOlustur(v.args, v.deps);
-    assert.equal(sonuc.tamamlandi, true);
-    assert.equal(sonuc.tamamlananKonuSayisi, 2);
-    assert.equal(sonuc.atlananKonuSayisi, 0);
-    assert.equal(sonuc.kartlar.length, 2);
-    assert.ok(sonuc.kartlar.every((k) => k.uretimYontemi === "kaynak"));
-    assert.ok(sonuc.kartlar.every((k) => k.cevap.includes(k.konuBasligi)));
-    const tekrar = await calismaKartlariniOlustur(v.args, v.deps);
-    assert.equal(tekrar.kartlar.length, 2);
+test("Yeni sistem iki metin grubunu konu haritası olmadan üretir, ikinci tıklamada tekrar üretmez", async () => {
+    const x = kur();
+    const ilk = await dersGeneliKartlariOlustur(x.args, x.deps);
+    assert.equal(ilk.tamamlandi, true);
+    assert.equal(ilk.kartlar.length, 2);
+    assert.equal(ilk.islenenGrupSayisi, 2);
+    assert.equal(x.getIstekler(), 2);
+    assert.ok(ilk.kartlar.every((k) => !k.konuId && !k.konuBasligi));
+    const ikinci = await dersGeneliKartlariOlustur(x.args, x.deps);
+    assert.equal(ikinci.yeniKartSayisi, 0);
+    assert.equal(x.getIstekler(), 2);
+    const durum = await calismaKartlariDurumunuGetir(x.args, x.deps);
+    assert.equal(durum.dersKartTamamlandi, true);
 });
 
-test("Gemini 502 dönerse yeniden deneme döngüsüne girmeden güvenli kart üretilir", async () => {
-    let cagrilar = 0;
-    const v = veriOlustur({ uret: async () => {
-        cagrilar += 1;
-        throw Object.assign(new Error("Invalid JSON"), { status: 502, kod: "GEMINI_GECERSIZ_YANIT" });
+test("503 sonrası kaydedilenler silinmez, yalnız eksik grup yeniden denenir", async () => {
+    let deneme = 0;
+    const x = kur({ uret: async ({ grup }) => {
+        if (grup.sira === 2 && deneme++ === 0)
+            throw Object.assign(new Error("Service unavailable"), { status: 503 });
+        return { kartlar: [{
+            soru: "Kaynak " + grup.sira + " önemli bilgi nasıl açıklanır?",
+            cevap: "Ders materyalinde açıklanmaktadır.",
+            kaynakKodlari: [grup.kaynaklar[0].kod],
+        }] };
     } });
-    const sonuc = await calismaKartlariniOlustur(v.args, v.deps);
-    assert.equal(cagrilar, 1);
-    assert.equal(sonuc.tamamlandi, true);
-    assert.equal(sonuc.kartlar.length, 2);
+    const ilk = await dersGeneliKartlariOlustur(x.args, x.deps);
+    assert.equal(ilk.tamamlandi, false);
+    assert.equal(ilk.kartlar.length, 1);
+    assert.equal(ilk.islenenGrupSayisi, 1);
+    const ikinci = await dersGeneliKartlariOlustur(x.args, x.deps);
+    assert.equal(ikinci.tamamlandi, true);
+    assert.equal(ikinci.kartlar.length, 2);
+    assert.equal(x.ders.kartDersIslenenGrupImzalari.length, 2);
 });
 
-test("Gemini 429 kalıcı olarak saklanmaz; önceki kartlar korunur, yerel modla devam edilir", async () => {
-    let cagrilar = 0;
-    const v = veriOlustur({ uret: async () => {
-        cagrilar += 1;
-        throw Object.assign(new Error("Quota exhausted"), { status: 429, kod: "GEMINI_KOTA_ASIMI" });
-    } });
-    await assert.rejects(calismaKartlariniOlustur(v.args, v.deps), (hata) => hata.status === 429);
-    assert.equal(v.kartlar.length, 0);
-    const sonuc = await calismaKartlariniOlustur({ ...v.args, yalnizcaKaynak: true }, v.deps);
-    assert.equal(sonuc.tamamlandi, true);
-    assert.equal(sonuc.kartlar.length, 2);
-    assert.equal(cagrilar, 1);
-});
-
-test("Kanıt içermeyen konu atlanır, diğer konuların kartları korunur", async () => {
-    const v = veriOlustur({ konular: ["Eksik Veri", "Veri Kalitesi"] });
-    v.deps.eslestir = (parcalar, konu) => parcalar.filter((p) => p.konuId === konu.konuId);
-    // İkinci konunun kaynağında konuya ilişkin terim yok, yalnızca tekrar eden metin var.
-    const original = v.deps.uret;
-    v.deps.uret = original;
-    const model = v.deps.ParcaModel;
-    const parcaBul = model.find.bind(model);
-    // Metni değiştirirken MongoDB kesitlerinin tek kaynağı mock olarak aynı kalır.
-    const gecersiz = { materyalId: new mongoose.Types.ObjectId(), parcaIndex: 9,
-        icerik: "Bambaşka ve ilgisiz bilgiler analiz raporunda aktarılmaktadır. ".repeat(30) };
-    v.deps.eslestir = (p, konu) => konu.konuId === "k1" ? [gecersiz] : p.filter((x) => x.konuId === konu.konuId);
-    const sonuc = await calismaKartlariniOlustur(v.args, v.deps);
-    assert.equal(sonuc.tamamlandi, true);
-    assert.equal(sonuc.atlananKonuSayisi, 1);
-    assert.equal(sonuc.kartlar.length, 1);
-    assert.equal((await calismaKartlariDurumunuGetir(v.args, v.deps)).atlananKonuSayisi, 1);
-});
-
-test("31 konuluk derste 6 konu sonrası 429, kayıtlar korunarak kalan 25 konu tamamlanır", async () => {
-    let sdkCagrisi = 0;
-    const konular = Array.from({ length: 31 }, (_, i) => "Veri Kalitesi Bölüm " + (i + 1));
-    const v = veriOlustur({ konular, uret: async ({ konular: parti }) => {
-        sdkCagrisi += 1;
-        if (sdkCagrisi === 3) {
-            throw Object.assign(new Error("Rate limit"), { status: 429, kod: "GEMINI_KOTA_ASIMI" });
-        }
-        return { kartlar: parti.map((konu) => ({
-            konuId: konu.konuId,
-            soru: konu.baslik + " neden önemlidir?",
-            cevap: "Doğruluk ve tutarlılık için önemlidir.",
-            kaynakKodlari: [konu.kaynaklar[0].kod],
-        })) };
-    } });
-    const ilk = await calismaKartlariniOlustur(v.args, v.deps);
-    const ikinci = await calismaKartlariniOlustur(v.args, v.deps);
-    assert.equal(ilk.tamamlananKonuSayisi, 3);
-    assert.equal(ikinci.tamamlananKonuSayisi, 6);
-    assert.equal(v.kartlar.length, 6);
-    await assert.rejects(calismaKartlariniOlustur(v.args, v.deps), (e) => e.status === 429);
-    assert.equal(v.kartlar.length, 6);
-
-    let sonuc;
-    for (let i = 0; i < 11; i += 1) {
-        sonuc = await calismaKartlariniOlustur({ ...v.args, yalnizcaKaynak: true }, v.deps);
-        if (sonuc.tamamlandi) break;
-    }
-    assert.equal(sonuc.tamamlandi, true);
-    assert.equal(sonuc.tamamlananKonuSayisi, 31);
-    assert.equal(sonuc.atlananKonuSayisi, 0);
-    assert.equal(sonuc.kartlar.length, 31);
-    assert.equal(sonuc.kartlar.filter((k) => k.uretimYontemi === "gemini").length, 6);
-    assert.equal(sonuc.kartlar.filter((k) => k.uretimYontemi === "kaynak").length, 25);
-    assert.equal(sdkCagrisi, 3);
-});
-
-test("Hızlı mod 33 konuyu altı küçük Gemini partisine bölüp 66 farklı kartı kaydeder", async () => {
-    let cagrilar = 0;
-    const konular = Array.from({ length: 33 }, (_, i) => "Algoritma Konusu " + i);
-    const v = veriOlustur({ konular });
-    v.deps.hizliUret = async ({ konular: istekKonular }) => {
-        cagrilar += 1;
-        return { kartlar: istekKonular.flatMap((konu) => [
-            { konuId: konu.konuId, soru: konu.baslik + " nedir?", cevap: "Tanım 1", kaynakKodlari: [konu.kaynaklar[0].kod] },
-            { konuId: konu.konuId, soru: konu.baslik + " nasıl kullanılır?", cevap: "Tanım 2", kaynakKodlari: [konu.kaynaklar[0].kod] },
-        ]) };
+test("Eski konuya bağlı kartlar silinmeden yeni konu bağımsız kartlar eklenir", async () => {
+    const eski = {
+        _id: new mongoose.Types.ObjectId(), konuId: "eski-konu", konuBasligi: "Eski",
+        soru: "Eski soru?", cevap: "Eski yanıt", goruldu: true, yildizli: true,
     };
-    const sonuc = await calismaKartlariniHizliOlustur(v.args, v.deps);
-    assert.equal(cagrilar, 6);
-    assert.equal(sonuc.kartlar.length, 66);
-    assert.equal(sonuc.yeniKartSayisi, 66);
-    assert.equal(sonuc.tamamlandi, true);
-    assert.equal(sonuc.toplamKonuSayisi, 33);
-    assert.equal(sonuc.atlananKonuSayisi, 0);
-    assert.equal(sonuc.hizliUretimYapildi, true);
-    const yeniden = await calismaKartlariniHizliOlustur(v.args, v.deps);
-    assert.equal(yeniden.yeniKartSayisi, 0);
-    assert.equal(cagrilar, 12);
-    assert.equal((await calismaKartlariDurumunuGetir(v.args, v.deps)).hizliUretimYapildi, true);
-});
-
-test("Hızlı mod 429 sonrası beklemeden kaynak kartları üretir ve mevcut kartları korur", async () => {
-    let cagrilar = 0;
-    const v = veriOlustur({ konular: ["Eksik Veri", "Veri Kalitesi", "Bilgi Sistemi"] });
-    v.deps.hizliUret = async () => {
-        cagrilar += 1;
-        throw Object.assign(new Error("Quota exceeded"), { status: 429, kod: "GEMINI_KOTA_ASIMI" });
-    };
-    const sonuc = await calismaKartlariniHizliOlustur(v.args, v.deps);
-    assert.equal(cagrilar, 1);
-    assert.equal(sonuc.tamamlandi, true);
-    assert.equal(sonuc.partiGeminiKartiSayisi, 0);
+    const x = kur({ kayitli: [eski] });
+    const sonuc = await dersGeneliKartlariOlustur(x.args, x.deps);
     assert.equal(sonuc.kartlar.length, 3);
-    assert.ok(sonuc.kartlar.every((k) => k.uretimYontemi === "kaynak"));
-});
-
-test("Hızlı mod mevcut soruları silmeden en fazla sekiz kartı saklar", async () => {
-    const v = veriOlustur({ konular: ["Veri Analizi"] });
-    const eskiSorular = Array.from({ length: 7 }, (_, i) => ({
-        _id: new mongoose.Types.ObjectId(), konuId: "k0",
-        soru: "Eski Soru " + i, cevap: "Eski Cevap", soruKimligi: createHash("sha256").update("eski soru " + i).digest("hex"),
-        goruldu: true, yildizli: i === 0,
-    }));
-    v.kartlar.push(...eskiSorular);
-    v.deps.hizliUret = async ({ konular }) => ({ kartlar: konular.flatMap((konu) => [
-        { konuId: konu.konuId, soru: "Yeni Soru 1", cevap: "Yanıt 1", kaynakKodlari: [konu.kaynaklar[0].kod] },
-        { konuId: konu.konuId, soru: "Yeni Soru 2", cevap: "Yanıt 2", kaynakKodlari: [konu.kaynaklar[0].kod] },
-    ]) });
-    const sonuc = await calismaKartlariniHizliOlustur(v.args, v.deps);
-    assert.equal(sonuc.kartlar.length, 8);
-    assert.equal(sonuc.yeniKartSayisi, 1);
+    assert.strictEqual(sonuc.kartlar[0], eski);
     assert.equal(sonuc.kartlar[0].goruldu, true);
     assert.equal(sonuc.kartlar[0].yildizli, true);
 });
 
-test("41 kayıtlı kartlı 31 konuluk ders, sekiz kart sınırına uyarak en az 128 karta zenginleştirilir", async () => {
-    const v = veriOlustur({
-        konular: Array.from({ length: 31 }, (_, i) => "Veri Bilimi Kavramı " + (i + 1)),
-    });
-    for (let i = 0; i < 31; i += 1) {
-        for (let j = 0; j < (i < 10 ? 2 : 1); j += 1) {
-            const soru = "Önceden Kaydedilen Soru " + i + " " + j;
-            v.kartlar.push({
-                _id: new mongoose.Types.ObjectId(),
-                konuId: "k" + i, konuBasligi: "Veri Bilimi Kavramı " + (i + 1),
-                soru, cevap: "Eski kart cevabı",
-                soruKimligi: createHash("sha256").update(soru.toLocaleLowerCase("tr-TR")).digest("hex"),
-                goruldu: true, yildizli: j === 0,
-            });
-        }
-    }
-    let istekler = 0;
-    v.deps.hizliUret = async ({ konular }) => {
-        istekler += 1;
-        return { kartlar: konular.flatMap((konu) =>
-            Array.from({ length: konu.adet }, (_, i) => ({
-                konuId: konu.konuId,
-                soru: konu.baslik + " yeni kritik bilgi " + i + "?",
-                cevap: "Öğretici kaynak yanıtı " + i,
-                kaynakKodlari: [konu.kaynaklar[0].kod],
-            }))
-        ) };
-    };
-    const sonuc = await calismaKartlariniHizliOlustur(v.args, v.deps);
-    assert.equal(istekler, 6);
-    assert.ok(sonuc.kartlar.length >= 128, "Toplam kart sayısı 128'i aşmalıdır.");
-    assert.ok(sonuc.kartlar.length <= 31 * 8);
-    assert.equal(sonuc.kartlar.filter((kart) => kart.goruldu).length, 41);
-    const sayilar = new Map();
-    for (const kart of sonuc.kartlar) {
-        sayilar.set(kart.konuId, (sayilar.get(kart.konuId) || 0) + 1);
-    }
-    assert.ok([...sayilar.values()].every((adet) => adet <= 8));
+test("Yeni materyal metniyle tekrar tarama yapılırken eski kartlara dokunulmaz", async () => {
+    const x = kur();
+    await dersGeneliKartlariOlustur(x.args, x.deps);
+    assert.equal(x.getIstekler(), 2);
+    x.parcalar[0].icerik += " Yeni kavram açıklaması.";
+    const yeni = await dersGeneliKartlariOlustur(x.args, x.deps);
+    assert.equal(yeni.tamamlandi, true);
+    assert.equal(x.getIstekler(), 4);
+    assert.equal(x.kartlar.length, 2);
 });
 
-
-test("Kartları Oluştur tek tıklamada bir kartta kalan konuları otomatik tamamlar", async () => {
-    const v = veriOlustur({ konular: ["Betimsel İstatistik", "MCAR MAR MNAR", "k-NN Karar Mekanizması"] });
-    let cagrilar = 0;
-    v.deps.hizliUret = async ({ konular }) => {
-        cagrilar += 1;
-        if (cagrilar === 1) {
-            return { kartlar: konular.map((konu) => ({
-                konuId: konu.konuId,
-                soru: konu.baslik + " ilk kavram nedir?",
-                cevap: "İlk açıklama.",
-                kaynakKodlari: [konu.kaynaklar[0].kod],
-            })) };
-        }
-        // İkinci çağrı yalnızca eksik konulara yapılır ve önceki soruları bilmelidir.
-        assert.ok(konular.every((konu) => konu.oncekiSorular.some((s) => s.includes("ilk kavram"))));
-        return { kartlar: konular.flatMap((konu) => [
-            { konuId: konu.konuId, soru: konu.baslik + " nasıl çalışır?", cevap: "Aşamaları açıklar.", kaynakKodlari: [konu.kaynaklar[0].kod] },
-            { konuId: konu.konuId, soru: konu.baslik + " ne zaman kullanılır?", cevap: "Uygun durumlarda kullanılır.", kaynakKodlari: [konu.kaynaklar[0].kod] },
-        ]) };
-    };
-    const sonuc = await calismaKartlariniHizliOlustur(v.args, v.deps);
-    assert.equal(cagrilar, 2);
-    assert.equal(sonuc.kartlar.length, 9);
-    const adetler = new Map();
-    for (const kart of sonuc.kartlar) adetler.set(kart.konuId, (adetler.get(kart.konuId) || 0) + 1);
-    assert.deepEqual([...adetler.values()], [3, 3, 3]);
-    assert.equal(sonuc.hizliUretimYapildi, true);
+test("Geçersiz kaynak kodu olan Gemini yanıtı tamamlandı sayılmaz", async () => {
+    const x = kur({ uret: async () => ({ kartlar: [{
+        soru: "Sahte kaynak kodu nedir?", cevap: "Kaynağı yok.", kaynakKodlari: ["K999"],
+    }] }) });
+    const sonuc = await dersGeneliKartlariOlustur(x.args, x.deps);
+    assert.equal(sonuc.tamamlandi, false);
+    assert.equal(sonuc.kartlar.length, 0);
+    assert.equal(sonuc.islenenGrupSayisi, 0);
 });
 
-test("Kart sınırı hatasında fazladan Gemini çağrısı yapılmaz", async () => {
-    const v = veriOlustur({ konular: ["MCAR", "MAR", "MNAR"] });
-    let cagrilar = 0;
-    v.deps.hizliUret = async () => {
-        cagrilar += 1;
-        throw Object.assign(new Error("quota"), { status: 429, kod: "GEMINI_KOTA_ASIMI" });
-    };
-    const sonuc = await calismaKartlariniHizliOlustur(v.args, v.deps);
-    assert.equal(cagrilar, 1);
-    assert.ok(sonuc.kartlar.length <= 3);
-    assert.ok(sonuc.kartlar.every((k) => k.uretimYontemi === "kaynak"));
+test("Öğrencinin kart çalışma durumu kayıtlı ders kartında güncellenir", async () => {
+    const x = kur();
+    const sonuc = await dersGeneliKartlariOlustur(x.args, x.deps);
+    const k = sonuc.kartlar[0];
+    const yeni = await calismaKartiDurumuGuncelle({
+        ...x.args, kartId: k._id, goruldu: true, zorluk: "zor",
+    }, x.deps);
+    assert.equal(yeni.goruldu, true);
+    assert.equal(yeni.zorluk, "zor");
+    await assert.rejects(
+        calismaKartiDurumuGuncelle({ ...x.args, kartId: k._id, zorluk: "gecersiz" }, x.deps),
+        (e) => e.status === 400
+    );
 });
