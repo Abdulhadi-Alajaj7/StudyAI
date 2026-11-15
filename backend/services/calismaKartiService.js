@@ -89,12 +89,18 @@ const uretimDurumunuOlustur = (ders, kartlar) => {
         hizliUretimYapildi: Boolean(ders?.kartHizliUretimSurumImzasi &&
             ders.kartHizliUretimSurumImzasi === ders.kartKaynakSurumImzasi),
         haritaTabanliTamamlandi: Boolean(ders?.kartHaritaTamamlandi &&
-            ders?.kartHaritaZenginlestirmeTamamlandi),
-        kapsamKontroluTamamlandi: Boolean(ders?.kartHaritaZenginlestirmeTamamlandi),
-        kapsamKontroluBekleyenGrupSayisi: (ders?.kartHaritaEksikKapsamGruplari || [])
-            .filter((g) => g.eksikKavramlar?.length &&
-                !(ders?.kartHaritaKapsamTamamlananGrupImzalari || [])
-                    .includes(String(g.grupImzasi))).length,
+            ders?.kartHaritaZenginlestirmeTamamlandi &&
+            Number(ders?.kartHaritaKapsamDenetimSurumu || 0) >= 2),
+        kapsamKontroluTamamlandi: Boolean(ders?.kartHaritaZenginlestirmeTamamlandi &&
+            Number(ders?.kartHaritaKapsamDenetimSurumu || 0) >= 2),
+        kapsamKontroluBekleyenGrupSayisi: ders?.kartHaritaTamamlandi &&
+            (!ders?.kartHaritaZenginlestirmeTamamlandi ||
+                Number(ders?.kartHaritaKapsamDenetimSurumu || 0) < 2)
+            ? Math.max(0, Number(ders?.kartHaritaToplamGrupSayisi || 0) -
+                (Number(ders?.kartHaritaKapsamDenetimSurumu || 0) >= 2
+                    ? (ders?.kartHaritaKapsamTamamlananGrupImzalari || []).length
+                    : 0))
+            : 0,
         toplamGrupSayisi: Number(ders?.kartHaritaToplamGrupSayisi || 0),
         islenenGrupSayisi: (ders?.kartHaritaIslenenGrupImzalari || []).length,
     };
