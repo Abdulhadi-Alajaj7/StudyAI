@@ -94,9 +94,14 @@ export const kartOtomatikUretiminiCalistir = async ({
             // Geçici servis sorunlarında backend kendisi kaldığı yerden sürer.
             // Aynı kaynak sürekli geçersiz JSON dönüyorsa kalıcı hatayı
             // sonsuz isteğe dönüştürmeyiz.
-            const deneme = int(ders.kartDersDenemeSayisi) + 1;
+            // Bazı gruplar tamamlandıysa hata sayacını sıfırla. Böylece
+            // büyük derslerde ilerleme sürerken birkaç aralıklı hata yüzünden
+            // üretim durmaz.
+            const ilerlemeVar = int(sonuc.islenenGrupSayisi) >
+                (ders.kartDersIslenenGrupImzalari || []).length;
+            const deneme = ilerlemeVar ? 1 : int(ders.kartDersDenemeSayisi) + 1;
             const kota = Boolean(sonuc.kotaEngeli);
-            const kalici = !kota && deneme >= AZAMI_KALICI_HATA;
+            const kalici = !kota && !ilerlemeVar && deneme >= AZAMI_KALICI_HATA;
             await DersModel.updateOne({
                 _id: dersId, kullaniciId, kartDersOtomatikAktif: true,
                 temizleniyor: { $ne: true },
@@ -118,7 +123,7 @@ export const kartOtomatikUretiminiCalistir = async ({
             const gecici = cakisma || status === 429 || status === 503 ||
                 status >= 500 || ["ECONNRESET", "ETIMEDOUT", "ENOTFOUND"].includes(hata?.code);
             const deneme = int(ders.kartDersDenemeSayisi) + (cakisma ? 0 : 1);
-            const kalici = !gecici || (status !== 429 && !cakisma &&
+            const kalici = !gecici || (![429, 503].includes(status) && !cakisma &&
                 deneme >= AZAMI_KALICI_HATA);
             await DersModel.updateOne({
                 _id: dersId, kullaniciId, kartDersOtomatikAktif: true,
