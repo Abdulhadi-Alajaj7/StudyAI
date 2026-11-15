@@ -229,3 +229,44 @@ test("Gemini boş kart listesi döndürürse konu başına zorunlu alt sayı yok
     assert.equal(sonuc.kartlar.length, 0);
     assert.equal(sonuc.atlananKonuSayisi, 3);
 });
+
+
+test("Gemini 502 JSON hatasında yalnızca bir kez daha küçük yanıt istenir", async () => {
+    let sayi = 0;
+    const v = servisKur({ uret: async ({ grup, kartLimiti }) => {
+        sayi++;
+        if (grup.kaynaklar[0].kod === "K1" && !kartLimiti) {
+            throw Object.assign(new Error("Truncated JSON"), { status: 502, kod: "GEMINI_GECERSIZ_YANIT" });
+        }
+        return { kartlar: [{
+            konuId: grup.kaynaklar[0].kod === "K1" ? "a" : "b",
+            soru: "Kaynağa dayalı bilgi " + grup.kaynaklar[0].kod + "?",
+            cevap: "Tanımlama yapılır.", kaynakKodlari: [grup.kaynaklar[0].kod],
+        }] };
+    } });
+    const result = await haritaTabanliKartlariOlustur(v.args, v.deps);
+    assert.equal(result.tamamlandi, true);
+    assert.equal(result.kartlar.length, 2);
+    assert.equal(sayi, 3);
+});
+
+test("Gemini 429 sonrasında sıradaki metin gruplarına yeni istek gönderilmez", async () => {
+    let sayi = 0;
+    const v = servisKur({ uret: async () => {
+        sayi++;
+        throw Object.assign(new Error("Quota exceeded"), { status: 429, kod: "GEMINI_KOTA_ASIMI" });
+    } });
+    const m = v.deps.gruplama;
+    v.deps.gruplama = (p, mats) => Array.from({ length: 8 }, (_, i) => ({
+        metin: "[K" + (i + 1) + "] Veri kavramı " + i,
+        kaynaklar: [{
+            kod: "K" + (i + 1), materyalId: mats[0]._id,
+            dosyaAdi: "Hafta_01.pdf", parcaIndex: i,
+        }],
+    }));
+    const result = await haritaTabanliKartlariOlustur(v.args, v.deps);
+    assert.equal(result.tamamlandi, false);
+    assert.ok(sayi <= 2);
+    assert.equal(result.islenenGrupSayisi, 0);
+    assert.equal(result.toplamGrupSayisi, 8);
+});
