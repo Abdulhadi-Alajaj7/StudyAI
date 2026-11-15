@@ -1,5 +1,5 @@
 import mongoose from "mongoose";
-import { haritaTabanliKartlariOlustur } from "../services/haritaTabanliKartService.js";
+import { dersGeneliKartlariOlustur } from "../services/dersKartService.js";
 import {
     calismaKartlariDurumunuGetir,
     calismaKartiDurumuGuncelle,
@@ -47,9 +47,8 @@ export const kartlariOlustur = async (req, res) => {
         return res.status(400).json({ hata: "Geçersiz ders kimliği." });
     }
     try {
-        // Tüm oluşturma istekleri artık konu haritası + dersin bütün metinleriyle
-        // çalışır. Eski kelime-eşleştirmeli konu başına parça seçimi kullanılmaz.
-        const sonuc = await haritaTabanliKartlariOlustur({
+        // Kartlar yalnızca ders metinlerine dayanır; konu haritası kullanılmaz.
+        const sonuc = await dersGeneliKartlariOlustur({
             kullaniciId: req.user._id,
             dersId: req.params.dersId,
         });
