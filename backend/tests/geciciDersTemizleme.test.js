@@ -159,6 +159,9 @@ mock.module("../models/MetinParcasi.js", {
         }
     }
 });
+mock.module("../models/KonuParcaEslesmesi.js", {
+  defaultExport: { async deleteMany() {} }
+});
 mock.module("../models/KonuHaritasi.js", {
     defaultExport: {
         async deleteMany(filtre) {
