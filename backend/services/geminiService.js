@@ -2374,9 +2374,16 @@ export async function callGeminiStructuredJson(ai, modelAdi, prompt, systemInstr
     const logger = bagimliliklar.logger || console;
     const asama = bagimliliklar.asama || "konu_haritasi";
     const tahminiToken = Math.ceil((prompt.length + systemInstruction.length) / 3);
+    const temelDeneme = Math.max(1, ayarlar.maksDeneme);
+    // 503 yoğunluk hatasında önceki iki çok hızlı deneme yetersiz kalıyordu.
+    // Sadece 503 için en az üç deneme yap; 429 veya kalıcı hataların kotasını artırma.
+    const azami503Deneme = Math.max(3, temelDeneme);
+    const yedekModel = bagimliliklar.yedekModel !== undefined
+        ? bagimliliklar.yedekModel
+        : process.env.GEMINI_KONU_HARITASI_YEDEK_MODELI;
     let sonHata;
     let istemci = ai;
-    for (let deneme = 1; deneme <= ayarlar.maksDeneme; deneme++) {
+    for (let deneme = 1; deneme <= azami503Deneme; deneme++) {
         const baslangic = performance.now();
         let yanit;
         try {
@@ -2396,6 +2403,8 @@ export async function callGeminiStructuredJson(ai, modelAdi, prompt, systemInstr
             catch { throw Object.assign(new Error("Geçersiz JSON"), { kod: "GEMINI_GECERSIZ_JSON", status: 502 }); }
             const konular = semaDogrulaVeNormalizeEt(parsed);
             if (!konular.length) throw Object.assign(new Error("Geçersiz şema"), { kod: "GEMINI_GECERSIZ_SEMA", status: 502 });
+            // Şema/JSON olarak dışarı çıkmayan yalnızca servis içi tanılama.
+            Object.defineProperty(konular, "kullanilanModel", { value: modelAdi, enumerable: false });
             geminiTanilamasiniLogla({ asama, model: modelAdi, deneme, sureMs: performance.now() - baslangic, yanit, logger });
             return konular;
         } catch (hata) {
@@ -2403,9 +2412,23 @@ export async function callGeminiStructuredJson(ai, modelAdi, prompt, systemInstr
             sinir.hataKaydet(modelAdi, sonHata, simdi());
             geminiTanilamasiniLogla({ asama, model: modelAdi, deneme, sureMs: performance.now() - baslangic, hata: sonHata, yanit, logger });
             const bekleme = geminiRetryBeklemesiniGetir(sonHata, deneme, ayarlar.maksBeklemeMs);
-            if (deneme === ayarlar.maksDeneme || bekleme == null) break;
+            const izinliDeneme = sonHata.status === 503 ? azami503Deneme : temelDeneme;
+            if (deneme >= izinliDeneme || bekleme == null) break;
             await beklet(bekleme);
         }
+    }
+    // Kullanıcı ayrı bir model açıkça yapılandırdıysa, yalnızca tekrarlayan
+    // 503 için bir kez o modelde dene. 429/kota, 400, 401, 403 ve 404 için
+    // otomatik model değiştirilmez.
+    if (sonHata?.status === 503 && typeof yedekModel === "string" &&
+        /^[a-z0-9][a-z0-9._/-]{2,99}$/i.test(yedekModel.trim()) &&
+        yedekModel.trim() !== modelAdi) {
+        logger.info?.("[GeminiHazirlama] Yedek modele geçiliyor", {
+            asama, model: modelAdi, yedekModel: yedekModel.trim(), neden: "GEMINI_503",
+        });
+        return callGeminiStructuredJson(istemci, yedekModel.trim(), prompt, systemInstruction, {
+            ...bagimliliklar, yedekModel: null, asama,
+        });
     }
     throw sonHata;
 }
