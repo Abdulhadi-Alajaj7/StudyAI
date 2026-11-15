@@ -233,12 +233,14 @@ function DersCalismaKartlari() {
       <div role="status" aria-live="polite" className={`flex flex-wrap items-center justify-between gap-3 rounded-xl border border-violet-400/30 bg-violet-500/10 px-4 py-3 text-sm ${metin}`}>
         <div className="flex items-center gap-2">
           {olusturuluyor && <ArrowPathIcon className="h-5 w-5 animate-spin text-violet-400" />}
-          <span>{uretimMesaji || (uretim.toplamGrupSayisi > 0
-            ? "Ders metninin bazı bölümleri henüz tamamlanmadı. Kayıtlı kartlar korunarak devam edilebilir."
-            : "Mevcut kartlarınız korunur. Yeni konu haritası tabanlı sistemle kart oluşturabilirsiniz.")}</span>
+          <span>{uretimMesaji || (uretim.kapsamKontroluBekleyenGrupSayisi > 0
+            ? "Önemli bilgilerin kapsam kontrolü tamamlanamadı. Mevcut kartlar korunarak devam edilebilir."
+            : uretim.toplamGrupSayisi > 0
+              ? "Ders metninin bazı bölümleri henüz tamamlanmadı. Kayıtlı kartlar korunarak devam edilebilir."
+              : "Mevcut kartlarınız korunur. Yeni konu haritası tabanlı sistemle kart oluşturabilirsiniz.")}</span>
         </div>
         {uretim.toplamGrupSayisi > 0 && <span className="text-xs font-semibold text-violet-400">
-          {uretim.islenenGrupSayisi || 0} / {uretim.toplamGrupSayisi} metin bölümü
+          {uretim.kapsamKontroluBekleyenGrupSayisi > 0 ? `${uretim.kapsamKontroluBekleyenGrupSayisi} kapsam kontrolü bekliyor` : `${uretim.islenenGrupSayisi || 0} / ${uretim.toplamGrupSayisi} metin bölümü`}
         </span>}
         {!olusturuluyor && <button type="button" onClick={olustur}
           className="rounded-lg border border-violet-400/50 px-3 py-2 font-semibold text-violet-400 hover:bg-violet-500/10">
