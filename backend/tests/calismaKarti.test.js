@@ -11,6 +11,7 @@ import {
     kaynakMetnindenYedekKartOlustur,
     konuOdakliIcerikSec,
     sinirliParalelKartPartileri,
+    tekKartliKonulariOnarimIcinSec,
 } from "../services/kartUretimPlanlama.mjs";
 
 test("Alt konu kimlikleri korunur", () => {
@@ -187,4 +188,22 @@ test("Hızlı üretim partileri eşzamanlı en fazla iki istek gönderir; hata d
     assert.equal(sonuc[4].status, "rejected");
     assert.equal(sonuc[10].status, "fulfilled");
     assert.equal(sonuc[10].value, 20);
+});
+
+test("Otomatik onarım yalnızca 0-1 kartlı, kaynakça daha zengin konuları önce alır", () => {
+    const konular = [
+        { konuId: "k1", baslik: "Az içerik", adet: 4, karakterSayisi: 200 },
+        { konuId: "k2", baslik: "Çok içerik", adet: 5, karakterSayisi: 18000 },
+        { konuId: "k3", baslik: "Yeterli kart", adet: 4, karakterSayisi: 3000 },
+        { konuId: "k4", baslik: "Henüz boş", adet: 4, karakterSayisi: 1000 },
+    ];
+    const eskiKartlar = [{ konuId: "k1", soru: "Soru 1" },
+        { konuId: "k2", soru: "Soru 2" },
+        { konuId: "k3", soru: "Soru 3" }];
+    const yeniKartlar = [{ konuId: "k3", soru: "Soru 4" }];
+    const eksikler = tekKartliKonulariOnarimIcinSec(konular, eskiKartlar, yeniKartlar);
+    assert.deepEqual(eksikler.map((k) => k.konuId), ["k4", "k2", "k1"]);
+    assert.equal(eksikler[0].adet, 4);
+    assert.equal(eksikler[1].adet, 4);
+    assert.deepEqual(eksikler[1].oncekiSorular, ["Soru 2"]);
 });
