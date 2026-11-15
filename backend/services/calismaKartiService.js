@@ -16,6 +16,7 @@ import {
     partiKaynaklariniOlustur,
     kartAdaylariniDogrula,
     kaynakMetnindenYedekKartOlustur,
+    sinirliParalelKartPartileri,
 } from "./kartUretimPlanlama.mjs";
 
 export {
@@ -366,13 +367,6 @@ export const calismaKartlariniHizliOlustur = async ({ kullaniciId, dersId }, d =
                 409, "KART_MATERYAL_SURUMU_DEGISTI"
             );
         }
-        if (guncelDers.kartHizliUretimSurumImzasi === imza) {
-            return {
-                ...uretimDurumunuOlustur(guncelDers, eskiKartlar),
-                sureMs: Date.now() - baslangic,
-                yeniKartSayisi: 0,
-            };
-        }
 
         const adetler = new Map();
         const sorular = new Set();
@@ -381,52 +375,92 @@ export const calismaKartlariniHizliOlustur = async ({ kullaniciId, dersId }, d =
             adetler.set(id, (adetler.get(id) || 0) + 1);
             sorular.add(id + ":" + String(kart.soru).trim().toLocaleLowerCase("tr-TR"));
         }
-        // Tek yanıtın 8192 çıkış tokenına sığması için ders boyutuna göre dengeli kota.
-        const istekAdedi = konular.length > 25 ? 2 : konular.length > 12 ? 3 : 4;
+        // Eski sürümde >25 konu için yapay "2 kart" sınırı vardı.
+        // Artık her konu en fazla 8 kart taşır; içerik zenginliğine göre
+        // yaklaşık 4-6 farklı soru hedeflenir, mevcut kartlar korunur.
         const uygun = konular.filter((konu) =>
-            konu.parcalar.length && konu.karakterSayisi >= 80 &&
             (adetler.get(String(konu.konuId)) || 0) < 8
-        ).map((konu) => ({
-            ...konu,
-            adet: Math.min(8 - (adetler.get(String(konu.konuId)) || 0), istekAdedi),
-        }));
+        ).map((konu) => {
+            const onceki = adetler.get(String(konu.konuId)) || 0;
+            const hedef = konu.karakterSayisi >= 900 ? 6 : 4;
+            return {
+                ...konu,
+                adet: Math.min(8 - onceki, Math.max(0, hedef - onceki)),
+                oncekiSorular: eskiKartlar.filter((kart) => String(kart.konuId) === String(konu.konuId))
+                    .map((kart) => String(kart.soru).slice(0, 140)).slice(0, 8),
+            };
+        }).filter((konu) => konu.adet > 0);
         const adlar = new Map(materyaller.map((m) => [
             String(m._id), m.orijinalDosyaAdi || m.dosyaAdi,
         ]));
-        const kaynakliKonular = partiKaynaklariniOlustur(
-            uygun, adlar, x.parcaSec, 1200
-        );
+        // En fazla ~2k karakter konu başına, modeli token ve hız açısından korur.
+        const secilen = partiKaynaklariniOlustur(uygun, adlar, x.parcaSec, 2200);
+        const kaynakHaritasi = new Map(secilen.map((konu) => [String(konu.konuId), konu.kaynaklar]));
+        // Konu haritasında bulunan ancak kelime eşleşmesi bulunamayan konular da
+        // modele başlık olarak gider; AI genel bilgi üretirse dosyadanmış gibi sunulmaz.
+        const kaynakliKonular = uygun.map((konu) => ({
+            konuId: konu.konuId,
+            baslik: konu.baslik,
+            adet: konu.adet,
+            oncekiSorular: konu.oncekiSorular,
+            kaynaklar: kaynakHaritasi.get(String(konu.konuId)) || [],
+        }));
         let apiBasarili = false;
         let aiKartiSayisi = 0;
         const adaylar = [];
-        // Ön yüzde tek HTTP isteği, içeride en çok 20 konuluk paralel
-        // çağrılar: kısa yanıtlar ile gecikme ve JSON kesilmesi azaltılır.
-        const parcalar = [];
-        for (let i = 0; i < kaynakliKonular.length; i += 20) {
-            parcalar.push(kaynakliKonular.slice(i, i + 20));
+        // Büyük JSON'lar (20 konu) eksik cevap üretiyordu. Artık ~5-6 konuluk
+        // partiler sadece 2 eşzamanlı Gemini çağrısıyla işlenir.
+        const partiler = [];
+        const PARTI_BOYUTU = 6;
+        for (let i = 0; i < kaynakliKonular.length; i += PARTI_BOYUTU) {
+            partiler.push(kaynakliKonular.slice(i, i + PARTI_BOYUTU));
         }
-        const cevaplar = await Promise.allSettled(parcalar.map((parca) =>
-            x.hizliUret({ dersAdi: guncelDers.dersAdi, konular: parca })
-        ));
-        for (let i = 0; i < parcalar.length; i += 1) {
+        const baslangicParti = Date.now();
+        const cevaplar = await sinirliParalelKartPartileri(partiler, async (parti, indeks) => {
+            const t0 = Date.now();
+            try {
+                const yanit = await x.hizliUret({ dersAdi: guncelDers.dersAdi, konular: parti });
+                console.info("[CalismaKartlari][hizli] Gemini parti tamamlandı", {
+                    parti: indeks + 1, konuSayisi: parti.length,
+                    hamKartSayisi: yanit?.kartlar?.length || 0,
+                    sureMs: Date.now() - t0,
+                });
+                return yanit;
+            } catch (hata) {
+                console.warn("[CalismaKartlari][hizli] Gemini parti hatası", {
+                    parti: indeks + 1, konuSayisi: parti.length,
+                    status: Number(hata?.status) || 0,
+                    kod: String(hata?.kod || "BILINMIYOR").slice(0, 80),
+                    kotaTuru: String(hata?.tanilama?.kotaTuru || "bilinmiyor").slice(0, 30),
+                    sureMs: Date.now() - t0,
+                });
+                throw hata;
+            }
+        }, 2);
+        let basarisizPartiSayisi = 0;
+        for (let i = 0; i < partiler.length; i += 1) {
             const sonuc = cevaplar[i];
             if (sonuc.status !== "fulfilled") {
-                const durum = Number(sonuc.reason?.status) || 0;
-                // API kimlik doğrulama, kota, ağ veya JSON hatasında
-                // kaynaklardan güvenli devam et; kullanıcıya AI başarısızlığı bildirilir.
-                console.warn("[CalismaKartlari] Hızlı Gemini çağrısı tamamlanamadı; kaynaklar kullanılacak.", {
-                    status: durum || 0,
-                    kod: typeof sonuc.reason?.kod === "string" ? sonuc.reason.kod : "BILINMIYOR",
-                });
+                basarisizPartiSayisi += 1;
                 continue;
             }
             const dogrulanan = kartAdaylariniDogrula({
-                cevap: sonuc.value, konular: parcalar[i], mevcutSorular: sorular,
+                cevap: sonuc.value, konular: partiler[i], mevcutSorular: sorular,
             });
             adaylar.push(...dogrulanan);
             aiKartiSayisi += dogrulanan.length;
             if (dogrulanan.length > 0) apiBasarili = true;
+            console.info("[CalismaKartlari][hizli] Parti doğrulandı", {
+                parti: i + 1, hamKartSayisi: sonuc.value?.kartlar?.length || 0,
+                kabulEdilenKartSayisi: dogrulanan.length,
+            });
         }
+        console.info("[CalismaKartlari][hizli] Gemini aşaması", {
+            toplamParti: partiler.length,
+            basarisizParti: basarisizPartiSayisi,
+            toplamGeminiKarti: aiKartiSayisi,
+            sureMs: Date.now() - baslangicParti,
+        });
 
         // Gemini boş dönerse veya bazı konuları atlarsa, yalnızca gerçek kaynak
         // cümlesi bulunan ve önceden kartı olmayan konulara yerel bir kart ekle.
@@ -468,6 +502,13 @@ export const calismaKartlariniHizliOlustur = async ({ kullaniciId, dersId }, d =
             }), { ordered: false });
         }
         const tumKartlar = await kartlariGetir(x, kullaniciId, dersId);
+        console.info("[CalismaKartlari][hizli] Kayıt sonucu", {
+            mevcutKart: eskiKartlar.length,
+            yeniKart: tumKartlar.length - eskiKartlar.length,
+            toplamKart: tumKartlar.length,
+            secilenKonuSayisi: uygun.length,
+            toplamSureMs: Date.now() - baslangic,
+        });
         const kartliKonular = new Set(tumKartlar.map((kart) => String(kart.konuId)));
         const hedef = (guncelDers.kartUretimHedefKonuIds?.length
             ? guncelDers.kartUretimHedefKonuIds : konular.map((konu) => String(konu.konuId)));
@@ -479,7 +520,7 @@ export const calismaKartlariniHizliOlustur = async ({ kullaniciId, dersId }, d =
         }, {
             $set: {
                 kartKaynakSurumImzasi: imza,
-                kartHizliUretimSurumImzasi: aiKartiSayisi > 0 ? imza : "",
+                kartHizliUretimSurumImzasi: aiKartiSayisi > 0 && basarisizPartiSayisi === 0 ? imza : "",
                 kartUretimHedefKonuIds: hedef,
                 kartTamamlananKonuIds: tamamlanan,
                 kartAtlananKonuIds: atlanan,
@@ -494,7 +535,7 @@ export const calismaKartlariniHizliOlustur = async ({ kullaniciId, dersId }, d =
             toplamKonuSayisi: hedef.length,
             tamamlananKonuSayisi: hedef.length,
             atlananKonuSayisi: atlanan.length,
-            hizliUretimYapildi: aiKartiSayisi > 0,
+            hizliUretimYapildi: aiKartiSayisi > 0 && basarisizPartiSayisi === 0,
             yeniKartSayisi: tumKartlar.length - eskiKartlar.length,
             partiGeminiKartiSayisi: aiKartiSayisi,
             partiKaynakKartiSayisi: adaylar.length - aiKartiSayisi,
