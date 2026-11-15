@@ -93,7 +93,12 @@ export const konuParcaBaglantilariniHesapla = ({
         for (const aday of bulunan) {
             for (const komsu of komsuMap.get(aday.parcaId) || []) {
                 const skor = adaylar.find((a) => a.parcaId === kimlik(komsu._id));
-                if (skor) ekle(skor, "komsu");
+                // Komşuluğu körlemesine kullanma: konu dışı komşu metinler
+                // yanlış sorulara yol açabilir. Komşunun da makul
+                // bir ilişki skoru olmalı.
+                if (skor && skor.skor >= Math.max(0.13, aday.skor - 0.35)) {
+                    ekle(skor, "komsu");
+                }
             }
         }
         sonuclar.push({
