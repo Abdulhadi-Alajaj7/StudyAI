@@ -2655,7 +2655,10 @@ export const geminiIleHizliCalismaKartlariUret = async ({
         "Genel bilgi kartlarını ders dosyasından alınmış gibi gösterme. Kurum, öğretmen, sınav veya özel ders içeriği hakkında tahminde bulunma.",
         "Sadece tanım değil; kaynak destekliyorsa çalışma mantığı, işlem adımları, karşılaştırma, kullanım amacı, koşul ve karmaşıklık sor.",
         "Kaynaklar yalnızca konu adları veya çalışma yönergeleri içeriyorsa kaynak kartı üretme; varsa güvenli genel kavram bilgisi kullan ve bunu etiketle.",
-        "Her konu için belirtilen üst sınırdan fazla kart döndürme; yeterli açıklama yoksa az kart üret.",
+        "Her konu için verilen KART HEDEFİ kadar FARKLI, öğretici soru-cevap kartı üretmeyi dene. Bu bir zorunlu alt sınır değildir; kaynak yetersizse az üret.",
+        "Aynı tanımı farklı kelimelerle tekrar etme. Önemli noktaları sor: neden, nasıl, temel koşul, algoritma adımları, karşılaştırma, örnek, uygulama ve sık yapılan hata.",
+        "Yanıtları mümkün olduğunca 1-2 kısa cümle yaz; gereksiz giriş, uzun açıklama ve tekrar kullanma.",
+        "Her konu için en fazla verilen üst sınır kadar kart döndür ve önceden sorulmuş soruları tekrar yazma.",
         "Farklı bilgi içermeyen tekrar sorularını çıkar. Çıktıda sadece gerçek kaynak kodlarını kullan.",
         "konuId ve kaynakKodlari alanlarını tam olarak koru; kartı başka bir konuya taşıma.",
         'Sadece JSON döndür: {"kartlar":[{"konuId":"id","soru":"Kısa Türkçe soru?","cevap":"Kısa doğru yanıt.","bilgiTuru":"kaynak","kaynakKodlari":["K1"]},{"konuId":"id","soru":"Genel kavram sorusu?","cevap":"Temel doğru bilgi.","bilgiTuru":"genel","kaynakKodlari":[]}]}',
@@ -2663,7 +2666,11 @@ export const geminiIleHizliCalismaKartlariUret = async ({
     const prompt = [
         "Ders: " + String(dersAdi || "").slice(0, 200),
         ...konular.map((konu) => [
-            "[KONU] " + String(konu.konuId) + " | " + String(konu.baslik).slice(0, 200) + " | ÜST SINIR " + Math.min(8, konu.adet),
+            "[KONU] " + String(konu.konuId) + " | " + String(konu.baslik).slice(0, 200) +
+                " | KART HEDEFİ " + Math.min(8, konu.adet) + " | ÜST SINIR " + Math.min(8, konu.adet),
+            ...(konu.oncekiSorular?.length
+                ? ["[DAHA ÖNCE KAYDEDİLEN SORULAR — TEKRARLAMA] " + konu.oncekiSorular.join(" | ")]
+                : []),
             ...konu.kaynaklar.map((k) => (
                 "[" + k.kod + "] " + String(k.icerik || "").slice(0, 1500)
             )),
@@ -2676,7 +2683,7 @@ export const geminiIleHizliCalismaKartlariUret = async ({
         systemInstruction: sistem,
         timeoutMs: bagimliliklar.timeoutMs ?? 26_000,
         maxDeneme: 1,
-        maxOutputTokens: 8192,
+        maxOutputTokens: Math.min(8192, Math.max(2600, konular.reduce((toplam, konu) => toplam + Math.min(8, konu.adet), 0) * 190)),
         bekle: bagimliliklar.bekle || (() => Promise.resolve()),
         istekYonetimi: bagimliliklar.istekYonetimi || ortakGeminiIstekYonetimi,
     });
