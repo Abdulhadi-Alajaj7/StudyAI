@@ -463,3 +463,97 @@ test("Gemini ilk turda yalnız kart üretir, ikinci turda mevcut cevaplarla eksi
     assert.match(istekler[1].contents, /KAYDEDİLMİŞ KARTLAR/);
     assert.match(istekler[1].contents, /Veri madenciliği süreç çerçevesidir/);
 });
+
+
+test("Konuya özel kaynak grupları iki konu için ayrı metin/ID kullanır ve ikinci kapsam turunu atlar", async () => {
+    const v = servisKur({ uret: async ({ grup, konuHaritasi, kapsamKontrolu }) => {
+        assert.equal(kapsamKontrolu, undefined, "Konusal üretim gereksiz ikinci tur yapmamalı");
+        assert.deepEqual(konuHaritasi.map((k) => k.konuId), grup.konuIdleri);
+        return { kartlar: grup.kaynaklar.map((kaynak) => ({
+            konuId: kaynak.konuId,
+            soru: kaynak.konuId + " konusu için birinci önemli soru nedir?",
+            cevap: kaynak.konuId + " dersinde işlenen bilimsel bilgi.",
+            kaynakKodlari: [kaynak.kod], onem: 5,
+        })) };
+    } });
+    const { agac, konular } = konuHaritasiniOzetle(harita);
+    let haritaCagrisi = 0, modelCagrisi = 0;
+    const gercekUret = v.deps.uret;
+    v.deps.uret = async (girdi) => { modelCagrisi++; return gercekUret(girdi); };
+    v.deps.konuKaynaklariniGetir = async () => {
+        haritaCagrisi++;
+        const m = v.deps.MateryalModel.find();
+        const materyaller = await m.lean();
+        const kaynakOlustur = (kod, konuId, parcaIndex) => ({
+            kod, konuId, materyalId: materyaller[0]._id,
+            dosyaAdi: "Hafta.pdf", parcaIndex,
+        });
+        return {
+            esleme: {
+                surumImzasi: "v1-konu", toplamParcaSayisi: 4, eslesenParcaSayisi: 3,
+                eslesmeyenParcaIds: ["p4"], bosKonuIds: [],
+                embeddingiEksikParcaIds: [],
+            },
+            agac, konular, materyaller,
+            gruplar: [
+                { konuKaynakli: true, konuIdleri: ["a", "b"],
+                    konuHaritasi: [{ konuId: "a", baslik: "MCAR MAR MNAR" },
+                        { konuId: "b", baslik: "CRISP-DM" }],
+                    metin: "KONU a\n[K1] MCAR\nKONU b\n[K2] CRISP-DM",
+                    kaynaklar: [kaynakOlustur("K1", "a", 0), kaynakOlustur("K2", "b", 1)] },
+                { konuKaynakli: true, konuIdleri: ["c"],
+                    konuHaritasi: [{ konuId: "c", baslik: "k-NN" }],
+                    metin: "KONU c\n[K1] En yakın komşu",
+                    kaynaklar: [kaynakOlustur("K1", "c", 1)] },
+            ],
+        };
+    };
+    const sonuc = await haritaTabanliKartlariOlustur(v.args, v.deps);
+    assert.equal(sonuc.tamamlandi, true);
+    assert.equal(sonuc.kartlar.length, 3);
+    assert.equal(modelCagrisi, 2, "Bir request her grup için, ek kapsam turu olmamalı");
+    assert.equal(haritaCagrisi, 1);
+    assert.equal(sonuc.konuKaynakIndeksi.eslesmeyenParca, 1);
+    assert.equal(sonuc.islenenGrupSayisi, 2);
+    assert.equal(v.ders.kartKonuEslemeSurumImzasi, "v1-konu");
+    assert.equal(v.ders.kartHaritaZenginlestirmeTamamlandi, true);
+    const tekrar = await haritaTabanliKartlariOlustur(v.args, v.deps);
+    assert.equal(tekrar.kartlar.length, 3);
+    assert.equal(tekrar.yeniKartSayisi, 0);
+    assert.equal(modelCagrisi, 2);
+});
+
+test("Eski sistemin kartlarını silmeden yeni konu kaynağına geçer; öğrencinin durumu korunur", async () => {
+    const v = servisKur();
+    const eski = await haritaTabanliKartlariOlustur(v.args, v.deps);
+    assert.equal(eski.kartlar.length, 2);
+    v.kayitli[0].goruldu = true;
+    const eskiKimlik = String(v.kayitli[0]._id);
+    const { agac, konular } = konuHaritasiniOzetle(harita);
+    v.deps.konuKaynaklariniGetir = async () => {
+        const materyaller = await v.deps.MateryalModel.find().lean();
+        return {
+            esleme: { surumImzasi: "new-mapping", toplamParcaSayisi: 2,
+                eslesenParcaSayisi: 2, eslesmeyenParcaIds: [], bosKonuIds: [] },
+            agac, konular, materyaller,
+            gruplar: [{
+                konuKaynakli: true, konuIdleri: ["a"],
+                konuHaritasi: [{ konuId: "a", baslik: "MCAR" }],
+                metin: "KONU a\n[K1] Kaynağın başka önemli bilgisi",
+                kaynaklar: [{ kod: "K1", konuId: "a", materyalId: materyaller[0]._id,
+                    dosyaAdi: "Hafta_01.pdf", parcaIndex: 0 }],
+            }],
+        };
+    };
+    v.deps.uret = async ({ grup }) => ({ kartlar: [{
+        konuId: "a", soru: "Yeni sisteme ait farklı bir önemli bilgi nedir?",
+        cevap: "Ders kaynağına dayanan yeni açıklama.",
+        kaynakKodlari: [grup.kaynaklar[0].kod],
+    }] });
+    const sonuc = await haritaTabanliKartlariOlustur(v.args, v.deps);
+    assert.equal(sonuc.tamamlandi, true);
+    assert.equal(sonuc.kartlar.length, 3);
+    assert.equal(String(sonuc.kartlar[0]._id), eskiKimlik);
+    assert.equal(sonuc.kartlar[0].goruldu, true);
+    assert.equal(sonuc.islenenGrupSayisi, 1);
+});
