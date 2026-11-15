@@ -8,7 +8,8 @@
 const turkceKucult = (x) => String(x ?? "").toLocaleLowerCase("tr-TR");
 const sade = (x) => turkceKucult(x).normalize("NFKC")
     .replace(/[^\p{L}\p{N}\s]/gu, " ").replace(/\s+/g, " ").trim();
-const kelimeKumesi = (x) => new Set(sade(x).split(" ").filter((s) => s.length >= 3));
+// K1/K2, X/y ve 1/2 gibi ayırt edici kısa terim ve sayıları atlama.
+const kelimeKumesi = (x) => new Set(sade(x).split(" ").filter((s) => s.length >= 2 || /^\d+$/.test(s)));
 const benzerlik = (a, b) => {
     const sa = kelimeKumesi(a), sb = kelimeKumesi(b);
     if (!sa.size || !sb.size) return 0;
