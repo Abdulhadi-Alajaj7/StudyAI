@@ -18,6 +18,7 @@ import { zamanlanmisTemizlikleriCalistir } from "./services/geciciDersTemizlemeS
 import { baslangicIslemleriniKurtar } from "./services/baslangicKurtarmaService.js";
 import { kullanilmayanMetinParcalariniTemizle } from "./services/metinParcasiTemizlemeService.js";
 import { yarimKalanBaslikUretimleriniKapat } from "./services/dersAsistaniService.js";
+import { kartOtomatikUretimZamanlayicisiniBaslat } from "./services/kartOtomatikUretimService.js";
 
 const app = express();
 
@@ -67,6 +68,7 @@ const sunucuyuBaslat = async () => {
     }
 
     await zamanlanmisTemizlikleriCalistir();
+    kartOtomatikUretimZamanlayicisiniBaslat();
 
     setInterval(() => {
         void zamanlanmisTemizlikleriCalistir();
