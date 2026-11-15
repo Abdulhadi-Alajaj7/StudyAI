@@ -1,5 +1,5 @@
 import mongoose from "mongoose";
-import { dersGeneliKartlariOlustur } from "../services/dersKartService.js";
+import { kartOtomatikUretiminiBaslat } from "../services/kartOtomatikUretimService.js";
 import {
     calismaKartlariDurumunuGetir,
     calismaKartiDurumuGuncelle,
@@ -47,12 +47,13 @@ export const kartlariOlustur = async (req, res) => {
         return res.status(400).json({ hata: "Geçersiz ders kimliği." });
     }
     try {
-        // Kartlar yalnızca ders metinlerine dayanır; konu haritası kullanılmaz.
-        const sonuc = await dersGeneliKartlariOlustur({
+        // Tek tıkla kalıcı işi kuyruğa al. Gemini tamamlanana kadar HTTP
+        // bağlantısı açık tutulmaz; tarayıcı kapansa da backend devam eder.
+        const sonuc = await kartOtomatikUretiminiBaslat({
             kullaniciId: req.user._id,
             dersId: req.params.dersId,
         });
-        return res.status(sonuc.tamamlandi ? 201 : 202).json(sonuc);
+        return res.status(sonuc.tamamlandi ? 200 : 202).json(sonuc);
     } catch (hata) {
         return hataYaniti(res, hata);
     }
