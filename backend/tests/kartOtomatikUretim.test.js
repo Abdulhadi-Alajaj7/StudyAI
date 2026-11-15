@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import mongoose from "mongoose";
 import {
     kartOtomatikUretiminiBaslat, kartOtomatikUretiminiCalistir,
+    kartOtomatikUretimleriniTara,
 } from "../services/kartOtomatikUretimService.js";
 import { calismaKartlariDurumunuGetir } from "../services/calismaKartiService.js";
 
@@ -163,4 +164,38 @@ test("Üretimde gerçek ilerleme varsa geçici hatalar kalıcı sayılmaz", asyn
     });
     assert.equal(x.ders.kartDersOtomatikAktif, true);
     assert.equal(x.ders.kartDersDenemeSayisi, 1);
+});
+
+
+test("Sunucu yeniden açıldığında MongoDB'deki bekleyen işi otomatik kurtarır", async () => {
+    const x = kur();
+    x.ders.kartDersOtomatikAktif = true;
+    x.ders.kartDersSonrakiDeneme = new Date(Date.now() - 30_000);
+    const DersModel = {
+        ...x.DersModel,
+        find() {
+            return {
+                select() { return this; },
+                limit() { return this; },
+                lean: async () => [{ _id: x.args.dersId, kullaniciId: x.args.kullaniciId }],
+            };
+        },
+    };
+    let cagrilar = 0;
+    await kartOtomatikUretimleriniTara({
+        DersModel,
+        uret: async () => {
+            cagrilar++;
+            x.ders.kartDersTamamlandi = true;
+            return { tamamlandi: true, kartlar: [{ soru: "Kurtarılmış ders" }] };
+        },
+    });
+    // Tetikleyici görevi arka plana bırakır. Birkaç microtask sonra
+    // üretimden gelen tamamlandı durumu veritabanına yazılmış olmalı.
+    for (let i = 0; i < 10 && x.ders.kartDersOtomatikAktif; i++) {
+        await new Promise((resolve) => setImmediate(resolve));
+    }
+    assert.equal(cagrilar, 1);
+    assert.equal(x.ders.kartDersOtomatikAktif, false);
+    assert.equal(x.ders.kartDersTamamlandi, true);
 });
