@@ -115,6 +115,8 @@ const servisKur = ({ uret } = {}) => {
         kartUretimSonYenileme: null, kartKaynakSurumImzasi: "",
         kartHaritaSurumImzasi: "", kartHaritaToplamGrupSayisi: 0,
         kartHaritaIslenenGrupImzalari: [], kartHaritaTamamlandi: false,
+        kartHaritaZenginlestirmeTamamlandi: false,
+        kartHaritaEksikKapsamGruplari: [], kartHaritaKapsamTamamlananGrupImzalari: [],
     };
     const materyaller = [{
         _id: materyalId, aktifIslemeId: islemeId, dosyaAdi: "Hafta_01.pdf",
@@ -145,6 +147,9 @@ const servisKur = ({ uret } = {}) => {
                 Object.assign(ders, islem.$set || {});
                 for (const [key, value] of Object.entries(islem.$addToSet || {})) {
                     ders[key] = [...new Set([...(ders[key] || []), value])];
+                }
+                for (const [key, value] of Object.entries(islem.$push || {})) {
+                    ders[key] = [...(ders[key] || []), value];
                 }
                 return { matchedCount: 1 };
             },
@@ -191,11 +196,11 @@ test("İki bölümde 2 farklı kart üretir ve tekrardan çalıştırınca yeni 
     assert.equal(ilk.tamamlandi, true);
     assert.equal(ilk.kartlar.length, 2);
     assert.equal(ilk.islenenGrupSayisi, 2);
-    assert.equal(cagrilar, 4); // İlk tur 2 + otomatik kapsama kontrolü 2
+    assert.equal(cagrilar, 2); // Kapsam eksiği yok: gereksiz ikinci Gemini isteği yok
     const tekrar = await haritaTabanliKartlariOlustur(v.args, v.deps);
     assert.equal(tekrar.kartlar.length, 2);
     assert.equal(tekrar.yeniKartSayisi, 0);
-    assert.equal(cagrilar, 4); // Tamamlanan otomatik kontrol yeniden çalışmaz
+    assert.equal(cagrilar, 2); // Tamamlanan otomatik kontrol yeniden çalışmaz
 });
 
 test("İkinci bölüm hata verirse birinci kaydedilir; yeniden denemede sadece eksik bölüm işlenir", async () => {
@@ -247,7 +252,7 @@ test("Gemini 502 JSON hatasında yalnızca bir kez daha küçük yanıt istenir"
     const result = await haritaTabanliKartlariOlustur(v.args, v.deps);
     assert.equal(result.tamamlandi, true);
     assert.equal(result.kartlar.length, 2);
-    assert.equal(sayi, 5); // İlk tur 3 (502 yeniden deneme dahil) + kapsama kontrolü 2
+    assert.equal(sayi, 3); // İlk tur 3 (502 yeniden deneme dahil), gereksiz ek istek yok
 });
 
 test("Gemini 429 sonrasında sıradaki metin gruplarına yeni istek gönderilmez", async () => {
@@ -272,34 +277,98 @@ test("Gemini 429 sonrasında sıradaki metin gruplarına yeni istek gönderilmez
 });
 
 
-test("Az kartlı konular kullanıcıya sunulmadan otomatik incelenir, yeni önemli kart eklenir", async () => {
-    const odaklar = [];
-    const v = servisKur({ uret: async ({ grup, odakKonuIdleri }) => {
+test("1 kart olmasına rağmen Gemini eksik bilgi bildirmezse ek istek yapılmaz", async () => {
+    let cagrilar = 0;
+    const v = servisKur({ uret: async ({ grup }) => {
+        cagrilar++;
         const kod = grup.kaynaklar[0].kod;
-        if (odakKonuIdleri?.length) {
-            odaklar.push([...odakKonuIdleri]);
+        return { kartlar: [{
+            konuId: kod === "K1" ? "a" : "b",
+            soru: kod + " ilk temel bilgi nedir?",
+            cevap: "Kaynakla desteklenen yanıt.",
+            kaynakKodlari: [kod], onem: 5,
+        }], eksikOnemliNoktalar: [] };
+    } });
+    const sonuc = await haritaTabanliKartlariOlustur(v.args, v.deps);
+    assert.equal(sonuc.tamamlandi, true);
+    assert.equal(sonuc.kartlar.length, 2);
+    assert.equal(cagrilar, 2);
+    assert.equal(sonuc.kapsamKontroluYeniKartSayisi, 0);
+    assert.equal(v.ders.kartHaritaZenginlestirmeTamamlandi, true);
+});
+
+test("4 kartlı bir konuda önemli eksik bilgi bildirilirse otomatik eklenir", async () => {
+    const eksikIdleri = [];
+    let cagrilar = 0;
+    const v = servisKur({ uret: async ({ grup, eksikKavramlar }) => {
+        cagrilar++;
+        const kod = grup.kaynaklar[0].kod;
+        if (eksikKavramlar?.length) {
+            eksikIdleri.push(eksikKavramlar[0].konuId);
             return { kartlar: [{
-                konuId: kod === "K1" ? "a" : "b",
-                soru: "Ek önemli bilgi " + kod + " nedir?",
-                cevap: "Kaynakta yer alan ek bilgi.",
+                konuId: "a",
+                soru: "Eksik kalmış dördüncü önemli kavramın amacı nedir?",
+                cevap: "Metindeki önemli eksik mekanizmayı öğretir.",
                 kaynakKodlari: [kod], onem: 5,
+            }] };
+        }
+        return { kartlar: Array.from({ length: kod === "K1" ? 4 : 1 }, (_, i) => ({
+            konuId: kod === "K1" ? "a" : "b",
+            soru: kod + " öğretici soru " + (i + 1) + " nedir?",
+            cevap: "Farklı açıklama " + (i + 1) + ".",
+            kaynakKodlari: [kod], onem: 5,
+        })), eksikOnemliNoktalar: kod === "K1" ? [{
+            konuId: "a",
+            bilgi: "Kaynakta bulunan önemli ve henüz sorulmamış dördüncü mekanizma",
+            kaynakKodlari: [kod], onem: 5,
+        }] : [] };
+    } });
+    const sonuc = await haritaTabanliKartlariOlustur(v.args, v.deps);
+    assert.equal(sonuc.tamamlandi, true);
+    assert.equal(sonuc.kartlar.length, 6);
+    assert.equal(sonuc.kapsamKontroluYeniKartSayisi, 1);
+    assert.deepEqual(eksikIdleri, ["a"]);
+    assert.equal(cagrilar, 3); // İki ilk tur + yalnızca açık tespit edilen gruba bir çağrı.
+    assert.equal(v.ders.kartHaritaEksikKapsamGruplari.length, 2);
+    const tekrar = await haritaTabanliKartlariOlustur(v.args, v.deps);
+    assert.equal(tekrar.kartlar.length, 6);
+    assert.equal(cagrilar, 3); // Kapsam kontrolü tamamlandı, yeni çağrı yapılmaz.
+});
+
+test("Kapsam tamamlama 503 ile kesilirse ilk kartlar korunur, sadece kalan açıklar yeniden denenir", async () => {
+    let eksikDeneme = 0;
+    const v = servisKur({ uret: async ({ grup, eksikKavramlar }) => {
+        const kod = grup.kaynaklar[0].kod;
+        if (eksikKavramlar?.length) {
+            eksikDeneme++;
+            if (eksikDeneme === 1) throw Object.assign(new Error("unavailable"), { status: 503 });
+            return { kartlar: [{
+                konuId: "a",
+                soru: "Bir eksik kavramın ayrıntısı nedir?",
+                cevap: "Kaynağa dayalı ikinci açıklama.",
+                kaynakKodlari: [kod],
             }] };
         }
         return { kartlar: [{
             konuId: kod === "K1" ? "a" : "b",
-            soru: "İlk bilgi " + kod + " nedir?",
-            cevap: "İlk açıklama.", kaynakKodlari: [kod], onem: 5,
-        }] };
+            soru: "İlk kaynak kavramı " + kod + "?",
+            cevap: "Kaynağın ilk açıklaması.",
+            kaynakKodlari: [kod],
+        }], eksikOnemliNoktalar: kod === "K1" ? [{
+            konuId: "a", bilgi: "Kaynağın önemli ve henüz açıklanmayan ek kavramı",
+            kaynakKodlari: [kod], onem: 5,
+        }] : [] };
     } });
-    const sonuc = await haritaTabanliKartlariOlustur(v.args, v.deps);
-    assert.equal(sonuc.tamamlandi, true);
-    assert.equal(sonuc.kartlar.length, 4);
-    assert.equal(odaklar.length, 2);
-    assert.ok(odaklar.every((ids) => ids.includes("a") && ids.includes("b")));
-    assert.equal(v.ders.kartHaritaZenginlestirmeTamamlandi, true);
-    const tekrar = await haritaTabanliKartlariOlustur(v.args, v.deps);
-    assert.equal(tekrar.kartlar.length, 4);
-    assert.equal(odaklar.length, 2);
+    const ilk = await haritaTabanliKartlariOlustur(v.args, v.deps);
+    assert.equal(ilk.tamamlandi, false);
+    assert.equal(ilk.kartlar.length, 2);
+    assert.equal(ilk.islenenGrupSayisi, 2);
+    assert.equal(ilk.kapsamKontroluBekleyenGrupSayisi, 1);
+    const son = await haritaTabanliKartlariOlustur(v.args, v.deps);
+    assert.equal(son.tamamlandi, true);
+    assert.equal(son.kartlar.length, 3);
+    assert.equal(eksikDeneme, 2);
+    assert.equal(son.islenenGrupSayisi, 2);
 });
 
 test("Açık başka konu başlığıyla eşleşen kart yanlış konu altında kaydedilmez", () => {
