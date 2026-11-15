@@ -30,8 +30,9 @@ const kartlar = [
 test("Excel CSV Türkçe karakterleri, çok satırlı cevabı, kaynak adlarını bozmadan dışa aktarır", () => {
   const sonuc = calismaKartlariCsvOlustur(kartlar);
   assert.ok(sonuc.startsWith("\uFEFFsep=;\r\n"));
-  assert.match(sonuc, /"Konu";"Soru";"Cevap"/);
-  assert.match(sonuc, /"Veri Ön İşleme"/);
+  assert.match(sonuc, /"Sıra";"Soru";"Cevap"/);
+  assert.doesNotMatch(sonuc, /"Konu";/);
+  assert.doesNotMatch(sonuc, /"Veri Ön İşleme"/);
   assert.match(sonuc, /"MCAR, MAR ve MNAR/);
   assert.match(sonuc, /"Eksiklik mekanizmalarıdır\.\n""MCAR"" gözlemlerden bağımsızdır\."/);
   assert.match(sonuc, /"Hafta_03\.pdf"/);
@@ -39,7 +40,7 @@ test("Excel CSV Türkçe karakterleri, çok satırlı cevabı, kaynak adlarını
   assert.doesNotMatch(sonuc, /private-student-id|private-course-id|private-card-id/);
 });
 
-test("Excel formül enjeksiyonu soruda, cevapta ve konuda engellenir", () => {
+test("Excel formül enjeksiyonu cevapta engellenir ve konu metadata dışarı çıkmaz", () => {
   const sonuc = calismaKartlariCsvOlustur(kartlar);
   assert.match(sonuc, /"'=HYPERLINK/);
   assert.match(sonuc, /"'\+1\+2"/);
@@ -59,6 +60,8 @@ test("JSON tüm kartları korur, kaynakları aktarır, özel kimlikleri dışar�
   assert.ok(!sonuc.kartlar[0].kullaniciId);
   assert.ok(!sonuc.kartlar[0]._id);
   assert.ok(!sonuc.kartlar[0].dersId);
+  assert.equal(sonuc.kartlar[0].konu, undefined);
+  assert.equal(sonuc.kartlar[1].konu, undefined);
 });
 
 test("Boş kart listesi indirmeyi başlatmaz", () => {
