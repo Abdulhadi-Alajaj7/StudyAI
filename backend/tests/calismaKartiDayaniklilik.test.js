@@ -169,7 +169,7 @@ test("31 konuluk derste 6 konu sonrası 429, kayıtlar korunarak kalan 25 konu t
     assert.equal(sdkCagrisi, 3);
 });
 
-test("Hızlı mod 33 konuyu iki paralel Gemini çağrısıyla, 66 farklı kartla tamamlar", async () => {
+test("Hızlı mod 33 konuyu altı küçük Gemini partisine bölüp 66 farklı kartı kaydeder", async () => {
     let cagrilar = 0;
     const konular = Array.from({ length: 33 }, (_, i) => "Algoritma Konusu " + i);
     const v = veriOlustur({ konular });
@@ -181,7 +181,7 @@ test("Hızlı mod 33 konuyu iki paralel Gemini çağrısıyla, 66 farklı kartla
         ]) };
     };
     const sonuc = await calismaKartlariniHizliOlustur(v.args, v.deps);
-    assert.equal(cagrilar, 2);
+    assert.equal(cagrilar, 6);
     assert.equal(sonuc.kartlar.length, 66);
     assert.equal(sonuc.yeniKartSayisi, 66);
     assert.equal(sonuc.tamamlandi, true);
@@ -190,7 +190,7 @@ test("Hızlı mod 33 konuyu iki paralel Gemini çağrısıyla, 66 farklı kartla
     assert.equal(sonuc.hizliUretimYapildi, true);
     const yeniden = await calismaKartlariniHizliOlustur(v.args, v.deps);
     assert.equal(yeniden.yeniKartSayisi, 0);
-    assert.equal(cagrilar, 2);
+    assert.equal(cagrilar, 12);
     assert.equal((await calismaKartlariDurumunuGetir(v.args, v.deps)).hizliUretimYapildi, true);
 });
 
