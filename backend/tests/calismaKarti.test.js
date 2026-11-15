@@ -3,207 +3,91 @@ import assert from "node:assert/strict";
 import mongoose from "mongoose";
 import CalismaKarti from "../models/CalismaKarti.js";
 import {
-    konuListesiOlustur,
-    makulKartSayisiniBelirle,
-    konuKotalariniBelirle,
-    partiKaynaklariniOlustur,
-    kartAdaylariniDogrula,
-    kaynakMetnindenYedekKartOlustur,
-    konuOdakliIcerikSec,
-    sinirliParalelKartPartileri,
-    tekKartliKonulariOnarimIcinSec,
-} from "../services/kartUretimPlanlama.mjs";
+    dersKartGruplariniOlustur, dersKartlariniDogrula,
+    kartDersKaynakImzasi,
+} from "../services/dersKartPlanlama.mjs";
 
-test("Alt konu kimlikleri korunur", () => {
-    const harita = { anaKonular: [
-        { konuId: "a", baslik: "A", altKonular: [{ konuId: "a1", baslik: "A1" }] },
-        { konuId: "b", baslik: "B" },
-    ] };
-    assert.deepEqual(konuListesiOlustur(harita).map(k => k.konuId), ["a1", "b"]);
-});
-
-test("Ders genelinde 60 kart sınırı yoktur; konu başına 8 sınırı korunur", () => {
-    assert.equal(makulKartSayisiniBelirle({ konuSayisi: 500, karakterSayisi: 1000000 }), 910);
-    assert.equal(makulKartSayisiniBelirle({ konuSayisi: 1, karakterSayisi: 50 }), 0);
-    const konular = Array.from({ length: 20 }, (_, i) => ({
-        konuId: "konu-" + i, parcalar: [{}], karakterSayisi: 100000,
-    }));
-    const plan = konuKotalariniBelirle(konular, 160);
-    assert.equal(plan.reduce((toplam, k) => toplam + k.adet, 0), 160);
-    assert.ok(plan.every(k => k.adet <= 8));
-});
-
-test("Bir partide kaynak kodları tüm konular arasında benzersizdir", () => {
-    const gruplar = [
-        { konuId: "a", baslik: "Birinci", adet: 4, parcalar: [{ materyalId: "m1", parcaIndex: 0, icerik: "A".repeat(120) }] },
-        { konuId: "b", baslik: "İkinci", adet: 4, parcalar: [{ materyalId: "m2", parcaIndex: 1, icerik: "B".repeat(120) }] },
+const materyaller = [{ _id: "m1", aktifIslemeId: "v1", dosyaAdi: "Hafta1.pdf" },
+    { _id: "m2", aktifIslemeId: "v2", dosyaAdi: "Hafta2.pdf" }];
+test("Her ders metni hiçbir konu haritasına bakılmadan Gemini gruplarına alınır", () => {
+    const parcalar = [
+        { materyalId: "m1", islemeId: "v1", parcaIndex: 0,
+            icerik: "İlk bölüm " + "Veri türleri sayısal ve kategoriktir. ".repeat(75) },
+        { materyalId: "m2", islemeId: "v2", parcaIndex: 0,
+            icerik: "İkinci bölüm " + "Bayes teoremi koşullu olasılığı açıklar. ".repeat(88) },
     ];
-    const sonuc = partiKaynaklariniOlustur(gruplar, new Map([["m1", "ilk.pdf"], ["m2", "son.pdf"]]), p => p);
-    assert.equal(sonuc.length, 2);
-    assert.equal(sonuc[0].kaynaklar[0].kod, "K1");
-    assert.equal(sonuc[1].kaynaklar[0].kod, "K2");
-});
-
-test("Yabancı konu ve başka konuya ait kanıtlar reddedilir", () => {
-    const konular = [
-        { konuId: "a", baslik: "Birinci", adet: 2, kaynaklar: [{ kod: "K1", materyalId: "m1", dosyaAdi: "ilk.pdf", parcaIndex: 0 }] },
-        { konuId: "b", baslik: "İkinci", adet: 2, kaynaklar: [{ kod: "K2", materyalId: "m2", dosyaAdi: "son.pdf", parcaIndex: 0 }] },
-    ];
-    const sonuc = kartAdaylariniDogrula({
-        konular,
-        cevap: { kartlar: [
-            { konuId: "a", soru: "A nedir?", cevap: "Tanım A", kaynakKodlari: ["K1"] },
-            { konuId: "a", soru: "A nedir?", cevap: "Tekrar", kaynakKodlari: ["K1"] },
-            { konuId: "a", soru: "Yanlış kaynak?", cevap: "Yanlış", kaynakKodlari: ["K2"] },
-            { konuId: "uydurma", soru: "Yabancı?", cevap: "Olmaz", kaynakKodlari: ["K1"] },
-            { konuId: "b", soru: "B nedir?", cevap: "Tanım B", kaynakKodlari: ["K2"] },
-        ] },
+    const gruplar = dersKartGruplariniOlustur(parcalar, materyaller, {
+        grupKarakterLimiti: 1200, parcaKarakterLimiti: 700,
     });
-    assert.deepEqual(sonuc.map(k => k.soru), ["A nedir?", "B nedir?"]);
-    assert.equal(sonuc[0].kaynaklar[0].dosyaAdi, "ilk.pdf");
+    assert.ok(gruplar.length > 2);
+    assert.equal(gruplar.flatMap((g) => g.kaynaklar).filter((k) => k.materyalId === "m1")
+        .map((k) => k.icerik).join(""), parcalar[0].icerik);
+    assert.equal(gruplar.flatMap((g) => g.kaynaklar).filter((k) => k.materyalId === "m2")
+        .map((k) => k.icerik).join(""), parcalar[1].icerik);
+    assert.ok(gruplar.every((g) => g.kaynaklar.length > 0 &&
+        g.kaynaklar.every((k) => !("konuId" in k))));
+    assert.ok(gruplar.some((g) => g.metin.includes("Hafta1.pdf")));
+    assert.ok(gruplar.some((g) => g.metin.includes("Hafta2.pdf")));
 });
 
-test("Yanıtla istenen sayı aşılsa bile konu sınırı korunur", () => {
-    const konular = [{ konuId: "a", baslik: "A", adet: 2,
-        kaynaklar: [{ kod: "K1", materyalId: "m1", dosyaAdi: "m.pdf", parcaIndex: 1 }] }];
-    const cevap = { kartlar: Array.from({ length: 12 }, (_, i) => ({
-        konuId: "a", soru: "Soru " + i, cevap: "Cevap " + i, kaynakKodlari: ["K1"],
-    })) };
-    assert.equal(kartAdaylariniDogrula({ konular, cevap }).length, 2);
+test("Gemini 20 farklı öğretici soru yazarsa 8 kart kotası nedeniyle kesilmez", () => {
+    const kaynaklar = [{ kod: "K1", materyalId: "m1", dosyaAdi: "Hafta.pdf", parcaIndex: 0 }];
+    const hamKartlar = Array.from({ length: 20 }, (_, i) => ({
+        soru: "Dersin " + i + ". kavramı neyi açıklar?",
+        cevap: "Bilgi " + i + ".",
+        kaynakKodlari: ["K1"], konuId: "uydurulmus-konu",
+    }));
+    const { kartlar, gecersiz } = dersKartlariniDogrula({ hamKartlar, kaynaklar });
+    assert.equal(gecersiz, 0);
+    assert.equal(kartlar.length, 20);
+    assert.ok(kartlar.every((k) => !("konuId" in k) && !("konuBasligi" in k)));
 });
 
-test("KonuId eksik ama tek doğru kaynak kodu varsa Gemini kartı güvenle kurtarılır", () => {
-    const konular = [{
-        konuId: "alt-1", baslik: "Eksik Veri", adet: 3,
-        kaynaklar: [{ kod: "K7", materyalId: "m1", dosyaAdi: "hafta3.pdf", parcaIndex: 4 }],
-    }];
-    const kartlar = kartAdaylariniDogrula({
-        konular,
-        cevap: { kartlar: [{ soru: "Eksik veri nedir?", cevap: "Gözlemdeki boş değer.", kaynakKodlari: ["K7"] }] },
+test("İlave kartlar kaynakları doğrular, önceki soruları tekrar etmez", () => {
+    const kaynaklar = [{ kod: "K2", materyalId: "m1", dosyaAdi: "Kaynak.pdf", parcaIndex: 4 }];
+    const { kartlar, gecersiz, tekrar } = dersKartlariniDogrula({
+        kaynaklar,
+        mevcutKartlar: [{ konuId: "eski", soru: "CRISP-DM nedir?" }],
+        hamKartlar: [
+            { soru: "CRISP-DM nedir?", cevap: "Ders projesidir.", kaynakKodlari: ["K2"] },
+            { soru: "CRISP-DM hangi amaçla kullanılır?", cevap: "Proje yönetir.", kaynakKodlari: ["K999"] },
+            { soru: "KDD aşamaları neyi içerir?", cevap: "Veri ön işlemeden keşfe kadar süreci.", kaynakKodlari: ["K2"] },
+        ],
     });
     assert.equal(kartlar.length, 1);
-    assert.equal(kartlar[0].konuId, "alt-1");
-    assert.equal(kartlar[0].uretimYontemi, "gemini");
+    assert.equal(gecersiz, 1);
+    assert.equal(tekrar, 1);
+    assert.equal(kartlar[0].kaynaklar[0].parcaIndex, 4);
 });
 
-test("Ders slaytındaki başlığın ardından gelen açıklama yedek kart olur", () => {
-    const konu = {
-        konuId: "sub-siniflandirma", baslik: "Sınıflandırma", adet: 4,
-        kaynaklar: [{
-            kod: "K1", materyalId: "m1", dosyaAdi: "hafta5.pdf", parcaIndex: 2,
-            icerik: "Sınıflandırma Nedir?\nVeri kümesinde her örneğin bir sınıf etiketi vardır.\nAmaç yeni veya bilinmeyen örneğin sınıfını tahmin etmektir.",
-        }],
-    };
-    const kart = kaynakMetnindenYedekKartOlustur(konu);
-    assert.ok(kart);
-    assert.equal(kart.uretimYontemi, "kaynak");
-    assert.match(kart.cevap, /sınıf etiketi/);
-    assert.equal(kart.kaynaklar[0].dosyaAdi, "hafta5.pdf");
+test("Materyal değişince kurs sürümü değişir; konu haritasından bağımsızdır", () => {
+    const parcalar = [{ materyalId: "m1", islemeId: "v1", parcaIndex: 0, icerik: "MCAR açıklama" }];
+    const ilk = kartDersKaynakImzasi(materyaller, parcalar);
+    assert.notEqual(ilk, kartDersKaynakImzasi(materyaller, [
+        { ...parcalar[0], icerik: "MAR açıklama" },
+    ]));
+    assert.notEqual(ilk, kartDersKaynakImzasi([
+        { ...materyaller[0], aktifIslemeId: "v3" }, materyaller[1],
+    ], parcalar));
 });
 
-test("Kaynakta konuya dair sözcük veya yakın açıklama yoksa uydurma kart üretilmez", () => {
-    const konu = {
-        konuId: "c", baslik: "Naive Bayes", adet: 2,
-        kaynaklar: [{
-            kod: "K9", materyalId: "m1", dosyaAdi: "not.pdf", parcaIndex: 4,
-            icerik: "Yazılım mühendisliğinde tasarım farklı aşamalardan oluşur. Planlama ekip içinde dikkatli bir şekilde sürdürülür.",
-        }],
-    };
-    assert.equal(kaynakMetnindenYedekKartOlustur(konu), null);
-});
-
-test("Kısa sınav tekrarı notundaki gerçek bilgi korunarak kart yapılır", () => {
-    const kart = kaynakMetnindenYedekKartOlustur({
-        konuId: "array", baslik: "Array yapısı ve indeksleme",
-        adet: 4,
-        kaynaklar: [{
-            kod: "K1", materyalId: "m9", dosyaAdi: "09_Sinav_Oncesi_Hizli_Tekrar.txt",
-            parcaIndex: 0, icerik: "1. Array: İndeksle erişim hızlıdır. Tipik erişim O(1).\n2. Stack: LIFO - son giren ilk çıkar.",
-        }],
-    });
-    assert.ok(kart);
-    assert.match(kart.cevap, /İndeksle erişim hızlıdır/);
-    assert.equal(kart.uretimYontemi, "kaynak");
-});
-
-test("Yalnızca çalışın/öğrenin diyen tekrar şablonu yanlış bilgi kartına dönüşmez", () => {
-    const kart = kaynakMetnindenYedekKartOlustur({
-        konuId: "bubble", baslik: "Bubble Sort", adet: 3,
-        kaynaklar: [{
-            kod: "K1", materyalId: "m7", dosyaAdi: "07_Siralama_Algoritmalari.pptx",
-            parcaIndex: 0,
-            icerik: "Bubble Sort konusunun tanımını, temel işlemlerini ve kullanım alanlarını öğren. Çalışırken işlem adımlarını küçük bir örnek üzerinde uygula.",
-        }],
-    });
-    assert.equal(kart, null);
-});
-
-test("Uzun belgede başta değil, doğru başlığın yanındaki kanıt seçilir", () => {
-    const metin = "Başka ders bilgisi. ".repeat(100) +
-        "\nBinary Search\nBinary Search sıralı veride uygulanır ve O(log n) erişim sağlar.";
-    const secilen = konuOdakliIcerikSec(metin, "Binary Search", 400);
-    assert.match(secilen, /Binary Search sıralı veride/);
-    assert.ok(secilen.length <= 400);
-});
-
-test("Kaynağı olmayan kart yalnızca açıkça genel bilgi olarak etiketlenirse kabul edilir", () => {
-    const konular = [{ konuId: "k1", baslik: "Stack", adet: 3, kaynaklar: [{ kod: "K1", materyalId: "m1", dosyaAdi: "dosya.pdf", parcaIndex: 0 }] }];
-    const sonuc = kartAdaylariniDogrula({
-        konular, cevap: { kartlar: [
-            { konuId: "k1", soru: "Kaynak yok 1?", cevap: "A", kaynakKodlari: [] },
-            { konuId: "k1", soru: "Genel bilgi nedir?", cevap: "LIFO kuralı.", bilgiTuru: "genel", kaynakKodlari: [] },
-            { konuId: "k1", soru: "Uydurma dosya?", cevap: "B", bilgiTuru: "kaynak", kaynakKodlari: ["K999"] },
-        ] },
-    });
-    assert.equal(sonuc.length, 1);
-    assert.equal(sonuc[0].uretimYontemi, "genel");
-    assert.deepEqual(sonuc[0].kaynaklar, []);
-});
-
-test("Mongoose genel bilgi kartını kaynaksız kabul eder, kaynak kartını reddeder", async () => {
-    const temel = {
+test("Yeni kart modelinde konuId zorunlu değildir, kaynak ve öğrenci durumu korunur", async () => {
+    const kart = new CalismaKarti({
         kullaniciId: new mongoose.Types.ObjectId(),
         dersId: new mongoose.Types.ObjectId(),
-        konuId: "k1", konuBasligi: "Stack",
-        soru: "LIFO nedir?", cevap: "Son giren ilk çıkar.", kaynaklar: [],
-    };
-    await new CalismaKarti({ ...temel, uretimYontemi: "genel" }).validate();
-    await assert.rejects(new CalismaKarti({ ...temel, uretimYontemi: "gemini" }).validate());
-});
-
-test("Hızlı üretim partileri eşzamanlı en fazla iki istek gönderir; hata diğer partileri durdurmaz", async () => {
-    const indeksler = Array.from({ length: 11 }, (_, i) => i);
-    let aktif = 0;
-    let maksimum = 0;
-    const sonuc = await sinirliParalelKartPartileri(indeksler, async (sayi) => {
-        aktif += 1;
-        maksimum = Math.max(maksimum, aktif);
-        await new Promise((resolve) => setTimeout(resolve, 3));
-        aktif -= 1;
-        if (sayi === 4) throw Object.assign(new Error("quota"), { status: 429 });
-        return sayi * 2;
-    }, 10);
-    assert.equal(maksimum, 2);
-    assert.equal(sonuc.length, 11);
-    assert.equal(sonuc[4].status, "rejected");
-    assert.equal(sonuc[10].status, "fulfilled");
-    assert.equal(sonuc[10].value, 20);
-});
-
-test("Otomatik onarım yalnızca 0-1 kartlı, kaynakça daha zengin konuları önce alır", () => {
-    const konular = [
-        { konuId: "k1", baslik: "Az içerik", adet: 4, karakterSayisi: 200 },
-        { konuId: "k2", baslik: "Çok içerik", adet: 5, karakterSayisi: 18000 },
-        { konuId: "k3", baslik: "Yeterli kart", adet: 4, karakterSayisi: 3000 },
-        { konuId: "k4", baslik: "Henüz boş", adet: 4, karakterSayisi: 1000 },
-    ];
-    const eskiKartlar = [{ konuId: "k1", soru: "Soru 1" },
-        { konuId: "k2", soru: "Soru 2" },
-        { konuId: "k3", soru: "Soru 3" }];
-    const yeniKartlar = [{ konuId: "k3", soru: "Soru 4" }];
-    const eksikler = tekKartliKonulariOnarimIcinSec(konular, eskiKartlar, yeniKartlar);
-    assert.deepEqual(eksikler.map((k) => k.konuId), ["k4", "k2", "k1"]);
-    assert.equal(eksikler[0].adet, 4);
-    assert.equal(eksikler[1].adet, 5);
-    assert.deepEqual(eksikler[1].oncekiSorular, ["Soru 2"]);
+        soru: "Aykırı değer nasıl tespit edilir?",
+        cevap: "IQR ile incelenebilir.",
+        kaynaklar: [{
+            materyalId: new mongoose.Types.ObjectId(),
+            dosyaAdi: "Hafta3.pdf", parcaIndex: 8,
+        }],
+    });
+    await kart.validate();
+    assert.equal(kart.konuId, undefined);
+    assert.equal(kart.goruldu, false);
+    await assert.rejects(new CalismaKarti({
+        kullaniciId: new mongoose.Types.ObjectId(),
+        dersId: new mongoose.Types.ObjectId(),
+        soru: "Kaynağı olmayan soru?", cevap: "Yanıt", kaynaklar: [],
+    }).validate());
 });
