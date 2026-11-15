@@ -439,10 +439,12 @@ export const calismaKartlariniHizliOlustur = async ({ kullaniciId, dersId }, d =
             }
         }, 2);
         let basarisizPartiSayisi = 0;
+        let kotaAsildi = false;
         for (let i = 0; i < partiler.length; i += 1) {
             const sonuc = cevaplar[i];
             if (sonuc.status !== "fulfilled") {
                 basarisizPartiSayisi += 1;
+                if (Number(sonuc.reason?.status) === 429) kotaAsildi = true;
                 continue;
             }
             const dogrulanan = kartAdaylariniDogrula({
@@ -472,7 +474,7 @@ export const calismaKartlariniHizliOlustur = async ({ kullaniciId, dersId }, d =
         // Gerçek kullanıcı için işlemin makul sürede kalması amacıyla
         // onarım isteklerini ve toplam süreyi sınırla.
         const azamiOnarimPartisi = kalanSureMs < 25_000 ? 4 : kalanSureMs < 48_000 ? 2 : 0;
-        const onarimSecimi = eksikKonular.slice(0, azamiOnarimPartisi * 3);
+        const onarimSecimi = kotaAsildi ? [] : eksikKonular.slice(0, azamiOnarimPartisi * 3);
         const onarimKaynaklari = partiKaynaklariniOlustur(
             onarimSecimi.map((konu) => ({
                 ...konu,
