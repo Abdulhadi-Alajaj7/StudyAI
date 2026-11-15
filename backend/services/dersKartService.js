@@ -94,6 +94,16 @@ export const dersGeneliKartlariOlustur = async ({
         "Bu ders için kart üretimi devam ediyor.", 409, "KART_URETIM_DEVAM_EDIYOR"
     );
 
+    // Sunucu birden çok bölüm işlerken iki dakikalık kilidin yanlışlıkla
+    // bayatlamasını önle; her 30 saniyede token eşleşirse lease yenilenir.
+    const kalpAtisi = setInterval(() => {
+        void x.DersModel.updateOne({
+            _id: dersId, kullaniciId, kartUretimToken: token,
+            temizleniyor: { $ne: true },
+        }, { $currentDate: { kartUretimSonYenileme: true } }).catch(() => {});
+    }, 30_000);
+    kalpAtisi.unref?.();
+
     try {
         const kaynak = await dersKartKaynaklariniGetir(x, kullaniciId, dersId);
         const guncel = await dersGetir(x, kullaniciId, dersId);
@@ -208,6 +218,7 @@ export const dersGeneliKartlariOlustur = async ({
         return {
             kartlar, tamamlandi,
             dersKartTamamlandi: tamamlandi,
+            kotaEngeli: kota,
             toplamGrupSayisi: kaynak.gruplar.length,
             islenenGrupSayisi: islenen.size,
             yeniKartSayisi: yeniKart,
@@ -217,6 +228,7 @@ export const dersGeneliKartlariOlustur = async ({
             sureMs: Date.now() - bas,
         };
     } finally {
+        clearInterval(kalpAtisi);
         await kartKilidiniBirak(x.DersModel, kullaniciId, dersId, token);
     }
 };
