@@ -276,6 +276,86 @@ export const haritaTabanliKartlariOlustur = async ({ kullaniciId, dersId }, d = 
         if ((finalR.matchedCount ?? finalR.n) !== 1) {
             throw new HaritaKartiHatasi("Kart üretim durumu güncellenemedi.", 409);
         }
+        // Görünmeyen ikinci geçiş: ilk üretim eksiksiz bittiğinde, az kartlı
+        // konular için aynı ders metnini yeniden değerlendir. Sayı doldurma
+        // zorunluluğu yoktur; Gemini yalnızca kaynakta eksik kalan önemli
+        // bilgiler varsa ekler. Bu işlem bir kere yapılır ve kilit altında kalır.
+        let zenginlestirmeTamamlandi = Boolean(guncelDers.kartHaritaZenginlestirmeTamamlandi);
+        let zenginlestirmeYeniKartSayisi = 0;
+        if (tamamlandi && !zenginlestirmeTamamlandi && !kotaAsildi) {
+            const mevcut = await tumKartlar(x, kullaniciId, dersId);
+            const sayilar = new Map();
+            for (const kart of mevcut) {
+                const id = String(kart.konuId);
+                sayilar.set(id, (sayilar.get(id) || 0) + 1);
+            }
+            // 3 ve üzeri kartı olan konuları tekrar incelemek gereksiz maliyet.
+            // Ancak 1-2 kartlı konuların gerçekten eksik olup olmadığını
+            // Gemini belirler; 3 kart zorunlu alt sınır değildir.
+            const azKartli = konular.filter((k) => (sayilar.get(k.konuId) || 0) < 3);
+            if (!azKartli.length) {
+                zenginlestirmeTamamlandi = true;
+            } else {
+                const odakIdleri = azKartli.map((k) => k.konuId);
+                const oncekiler = [...mevcut];
+                let basarisiz = false;
+                // En fazla 3 metin grubu: dersin bütün metnini tekrar tekrar
+                // Gemini'ye göndermeden düşük kapsamalı konuları tarar.
+                // Metin grupları konuya göre filtrelenmez.
+                for (const grup of gruplar.slice(0, 3)) {
+                    try {
+                        const cevap = await x.uret({
+                            dersAdi: guncelDers.dersAdi,
+                            konuHaritasi: agac,
+                            grup,
+                            oncekiSorular: oncekiler,
+                            odakKonuIdleri: odakIdleri,
+                            kartLimiti: 24,
+                        });
+                        const kontrol = haritaKartlariniDogrula({
+                            hamKartlar: (cevap?.kartlar || []).filter((k) => odakIdleri.includes(String(k?.konuId))),
+                            konular, kaynaklar: grup.kaynaklar,
+                            oncekiKartlar: oncekiler, ayrinti: true,
+                        });
+                        if (kontrol.kartlar.length) {
+                            const sahip = await x.DersModel.findOne({
+                                _id: dersId, kullaniciId, kartUretimToken: token,
+                            }).select("_id").lean();
+                            if (!sahip) throw new HaritaKartiHatasi("Kart kilidi kaybedildi.", 409);
+                            await x.KartModel.bulkWrite(kontrol.kartlar.map((kart) => {
+                                const soruKimligi = imza(kart.soru.trim().toLocaleLowerCase("tr-TR"));
+                                return { updateOne: {
+                                    filter: { kullaniciId, dersId, konuId: kart.konuId, soruKimligi },
+                                    update: { $setOnInsert: { kullaniciId, dersId, ...kart, soruKimligi } },
+                                    upsert: true,
+                                } };
+                            }), { ordered: false });
+                            oncekiler.push(...kontrol.kartlar);
+                            zenginlestirmeYeniKartSayisi += kontrol.kartlar.length;
+                        }
+                    } catch (hata) {
+                        basarisiz = true;
+                        console.warn("[CalismaKartlari][zenginlestirme] Arka plan kontrolü tamamlanamadı", {
+                            status: Number(hata?.status) || 0,
+                            kod: String(hata?.kod || "BILINMIYOR").slice(0, 64),
+                        });
+                        // 429/503 sırasında yeni isteklere devam etme.
+                        if ([429, 503].includes(Number(hata?.status))) break;
+                    }
+                }
+                zenginlestirmeTamamlandi = !basarisiz;
+            }
+            if (zenginlestirmeTamamlandi) {
+                await x.DersModel.updateOne({
+                    _id: dersId, kullaniciId, kartUretimToken: token,
+                }, { $set: { kartHaritaZenginlestirmeTamamlandi: true } });
+            }
+            console.info("[CalismaKartlari][zenginlestirme] Otomatik kontrol", {
+                azKartliKonu: azKartli.length,
+                yeniKart: zenginlestirmeYeniKartSayisi,
+                tamamlandi: zenginlestirmeTamamlandi,
+            });
+        }
         const kartlar = await tumKartlar(x, kullaniciId, dersId);
         const kartliKonular = new Set(kartlar.map((kart) => String(kart.konuId)));
         const res = {
