@@ -239,3 +239,34 @@ export const sinirliParalelKartPartileri = async (partiler, islem, eszamanli = 2
     }));
     return sonuc;
 };
+
+
+/**
+ * Tek kartta kalan konuları ikinci, hedefli turda iyileştirmek için seç.
+ * Öğretici kaynak olmadan asla minimum kart sayısını zorunlu kılmaz.
+ */
+export const tekKartliKonulariOnarimIcinSec = (konular, eskiKartlar, yeniKartlar) => {
+    const tumKartlar = [...eskiKartlar, ...yeniKartlar];
+    const sayilar = new Map();
+    for (const kart of tumKartlar) {
+        const id = String(kart.konuId);
+        sayilar.set(id, (sayilar.get(id) || 0) + 1);
+    }
+    return konular.map((konu) => {
+        const id = String(konu.konuId);
+        const mevcut = sayilar.get(id) || 0;
+        const onceki = eskiKartlar.filter((kart) => String(kart.konuId) === id).length;
+        const hedef = Math.min(8, onceki + konu.adet);
+        if (mevcut > 1 || mevcut >= hedef || mevcut >= 8) return null;
+        return {
+            ...konu,
+            mevcutKartSayisi: mevcut,
+            adet: Math.min(8 - mevcut, hedef - mevcut),
+            oncekiSorular: tumKartlar.filter((kart) => String(kart.konuId) === id)
+                .map((kart) => String(kart.soru).slice(0, 140)).slice(0, 8),
+        };
+    }).filter(Boolean).sort((a, b) =>
+        a.mevcutKartSayisi - b.mevcutKartSayisi ||
+        String(a.konuId).localeCompare(String(b.konuId), "tr")
+    );
+};
