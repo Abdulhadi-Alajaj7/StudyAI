@@ -162,16 +162,6 @@ function DersCalismaKartlari() {
         <span className="ml-3 text-[10px] font-bold text-sky-400">YAKINDA</span>
       </div>
     </div>
-    {!yukleniyor && kartlar.length > 0 && (
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className={`text-xs ${ikincil}`}>Mevcut kartlarınız korunur. Eksik konular için yeni kartlar eklenebilir.</p>
-        <button type="button" disabled={olusturuluyor} onClick={olustur}
-          className="inline-flex items-center gap-2 rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-violet-500 disabled:opacity-50">
-          {olusturuluyor ? <ArrowPathIcon className="h-4 w-4 animate-spin" /> : <SparklesIcon className="h-4 w-4" />}
-          {olusturuluyor ? "Kartlar hazırlanıyor..." : "Kartları Zenginleştir"}
-        </button>
-      </div>
-    )}
     <div className="grid grid-cols-2 gap-3 lg:grid-cols-4" role="group" aria-label="Kart filtreleri">
       {FILTRELER.map(({ id, ad }) => <button type="button" key={id} onClick={() => filtreDegistir(id)}
         aria-pressed={filtre === id}
