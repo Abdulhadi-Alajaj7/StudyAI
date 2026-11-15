@@ -23,10 +23,10 @@ export const konuHaritasiniOzetle = (harita) => {
         const altlar = Array.isArray(ana.altKonular) ? ana.altKonular : [];
         const item = {
             konuId: String(ana.konuId || ""), baslik: String(ana.baslik || ""),
-            aciklama: String(ana.aciklama || "").slice(0, 420),
+            aciklama: String(ana.aciklama || ""),
             altKonular: altlar.map((alt) => ({
                 konuId: String(alt.konuId || ""), baslik: String(alt.baslik || ""),
-                aciklama: String(alt.aciklama || "").slice(0, 360),
+                aciklama: String(alt.aciklama || ""),
             })),
         };
         const konular = item.altKonular.length ? item.altKonular : [item];
