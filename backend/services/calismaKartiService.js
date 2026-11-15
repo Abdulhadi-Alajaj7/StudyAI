@@ -71,6 +71,15 @@ const kartlariGetir = (x, kullaniciId, dersId) => (
 );
 
 const uretimDurumunuOlustur = (ders, kartlar) => {
+    if (ders?.kartDersSurumImzasi) {
+        return {
+            kartlar,
+            tamamlandi: Boolean(ders.kartDersTamamlandi),
+            dersKartTamamlandi: Boolean(ders.kartDersTamamlandi),
+            toplamGrupSayisi: Number(ders.kartDersToplamGrupSayisi || 0),
+            islenenGrupSayisi: (ders.kartDersIslenenGrupImzalari || []).length,
+        };
+    }
     const hedef = ders?.kartUretimHedefKonuIds || [];
     const tamamlanan = new Set(ders?.kartTamamlananKonuIds || []);
     const atlanan = new Set(ders?.kartAtlananKonuIds || []);
@@ -79,6 +88,7 @@ const uretimDurumunuOlustur = (ders, kartlar) => {
     const atlananKonuSayisi = hedef.filter((id) => atlanan.has(id)).length;
     return {
         kartlar,
+        dersKartTamamlandi: false,
         // Eski sistemde üretilmiş kartları değiştirmeden koru.
         tamamlandi: toplamKonuSayisi
             ? islenenKonuSayisi === toplamKonuSayisi
