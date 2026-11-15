@@ -2708,6 +2708,7 @@ export const geminiIleHaritaTabanliKartUret = async ({
     konuHaritasi,
     grup,
     oncekiSorular = [],
+    kartLimiti = 48,
     modelAdi = process.env.GEMINI_KART_MODELI || process.env.GEMINI_TEST_MODELI || VARSAYILAN_GEMINI_MODELI,
 }, bagimliliklar = {}) => {
     if (!Array.isArray(konuHaritasi) || !konuHaritasi.length ||
@@ -2722,6 +2723,7 @@ export const geminiIleHaritaTabanliKartUret = async ({
         "SONRA her bilgi için konu haritasından en uygun TEK alt konunun konuId'sini seç.",
         "Alt konu yoksa ana konunun konuId'sini seç. Haritada olmayan konuId kesinlikle uydurma.",
         "Her konu için EN FAZLA 8 kart olabilir. Bu bir hedef veya zorunlu sayı değildir.",
+        "Tek yanıtın JSON olarak eksiksiz dönebilmesi için grup genelinde verilen kart limitini aşma.",
         "Önemine ve metindeki gerçek bilgi yoğunluğuna göre bazı konular için 1, 2, 3 veya daha fazla,",
         "önemli açıklama yoksa 0 kart da olabilir. Sayıyı doldurmak için tekrarlama ve bilgi uydurma.",
         "Tekrar etmeden önemli tanımları, yöntemleri, koşulları, farkları, aşamaları, kritik örnekleri ve hataları seç.",
@@ -2747,6 +2749,7 @@ export const geminiIleHaritaTabanliKartUret = async ({
                 soru: String(s.soru || "").slice(0, 160),
             }))),
         ] : []),
+        "BU METİN GRUBUNUN TOPLAM KART ÜST SINIRI (konu kotası değildir): " + Math.max(1, Math.min(48, Math.floor(kartLimiti) || 48)),
         "DERS METNİ (parçalar konu bazında SEÇİLMEDİ; metnin tümünü değerlendir):",
         grup.metin,
     ].join("\n\n");
