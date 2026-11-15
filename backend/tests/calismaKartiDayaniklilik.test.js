@@ -227,3 +227,43 @@ test("Hızlı mod mevcut soruları silmeden en fazla sekiz kartı saklar", async
     assert.equal(sonuc.kartlar[0].goruldu, true);
     assert.equal(sonuc.kartlar[0].yildizli, true);
 });
+
+test("41 kayıtlı kartlı 31 konuluk ders, sekiz kart sınırına uyarak en az 128 karta zenginleştirilir", async () => {
+    const v = veriOlustur({
+        konular: Array.from({ length: 31 }, (_, i) => "Veri Bilimi Kavramı " + (i + 1)),
+    });
+    for (let i = 0; i < 31; i += 1) {
+        for (let j = 0; j < (i < 10 ? 2 : 1); j += 1) {
+            const soru = "Önceden Kaydedilen Soru " + i + " " + j;
+            v.kartlar.push({
+                _id: new mongoose.Types.ObjectId(),
+                konuId: "k" + i, konuBasligi: "Veri Bilimi Kavramı " + (i + 1),
+                soru, cevap: "Eski kart cevabı",
+                soruKimligi: createHash("sha256").update(soru.toLocaleLowerCase("tr-TR")).digest("hex"),
+                goruldu: true, yildizli: j === 0,
+            });
+        }
+    }
+    let istekler = 0;
+    v.deps.hizliUret = async ({ konular }) => {
+        istekler += 1;
+        return { kartlar: konular.flatMap((konu) =>
+            Array.from({ length: konu.adet }, (_, i) => ({
+                konuId: konu.konuId,
+                soru: konu.baslik + " yeni kritik bilgi " + i + "?",
+                cevap: "Öğretici kaynak yanıtı " + i,
+                kaynakKodlari: [konu.kaynaklar[0].kod],
+            }))
+        ) };
+    };
+    const sonuc = await calismaKartlariniHizliOlustur(v.args, v.deps);
+    assert.equal(istekler, 6);
+    assert.ok(sonuc.kartlar.length >= 128, "Toplam kart sayısı 128'i aşmalıdır.");
+    assert.ok(sonuc.kartlar.length <= 31 * 8);
+    assert.equal(sonuc.kartlar.filter((kart) => kart.goruldu).length, 41);
+    const sayilar = new Map();
+    for (const kart of sonuc.kartlar) {
+        sayilar.set(kart.konuId, (sayilar.get(kart.konuId) || 0) + 1);
+    }
+    assert.ok([...sayilar.values()].every((adet) => adet <= 8));
+});
