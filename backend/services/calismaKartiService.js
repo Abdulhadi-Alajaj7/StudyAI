@@ -403,6 +403,7 @@ export const calismaKartlariniHizliOlustur = async ({ kullaniciId, dersId }, d =
             konuId: konu.konuId,
             baslik: konu.baslik,
             adet: konu.adet,
+            karakterSayisi: konu.karakterSayisi,
             oncekiSorular: konu.oncekiSorular,
             kaynaklar: kaynakHaritasi.get(String(konu.konuId)) || [],
         }));
@@ -474,7 +475,7 @@ export const calismaKartlariniHizliOlustur = async ({ kullaniciId, dersId }, d =
         // Gerçek kullanıcı için işlemin makul sürede kalması amacıyla
         // onarım isteklerini ve toplam süreyi sınırla.
         const azamiOnarimPartisi = kalanSureMs < 25_000 ? 4 : kalanSureMs < 48_000 ? 2 : 0;
-        const onarimSecimi = kotaAsildi ? [] : eksikKonular.slice(0, azamiOnarimPartisi * 3);
+        const onarimSecimi = kotaAsildi ? [] : eksikKonular.slice(0, azamiOnarimPartisi * 4);
         const onarimKaynaklari = partiKaynaklariniOlustur(
             onarimSecimi.map((konu) => ({
                 ...konu,
@@ -488,8 +489,8 @@ export const calismaKartlariniHizliOlustur = async ({ kullaniciId, dersId }, d =
             kaynaklar: kaynak2.get(String(konu.konuId)) || konu.kaynaklar,
         }));
         const onarimPartileri = [];
-        for (let i = 0; i < onarilacakKonular.length; i += 3) {
-            onarimPartileri.push(onarilacakKonular.slice(i, i + 3));
+        for (let i = 0; i < onarilacakKonular.length; i += 4) {
+            onarimPartileri.push(onarilacakKonular.slice(i, i + 4));
         }
         const onarimYanitlari = await sinirliParalelKartPartileri(
             onarimPartileri,
