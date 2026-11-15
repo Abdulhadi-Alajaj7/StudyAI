@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { haritaTabanliKartlariOlustur } from "../services/haritaTabanliKartService.js";
 import {
     calismaKartlariDurumunuGetir,
     calismaKartlariniOlustur,
@@ -58,7 +59,7 @@ export const kartlariOlustur = async (req, res) => {
         return res.status(400).json({ hata: "Geçersiz kart üretim ayarı." });
     }
     try {
-        const sonuc = hizli ? await calismaKartlariniHizliOlustur({
+        const sonuc = hizli ? await haritaTabanliKartlariOlustur({
             kullaniciId: req.user._id, dersId: req.params.dersId,
         }) : await calismaKartlariniOlustur({
             kullaniciId: req.user._id,
