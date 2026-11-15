@@ -2749,6 +2749,16 @@ export const geminiIleHaritaTabanliKartUret = async ({
     }
     const systemInstruction = [
         "Sen StudyAI için Türkçe üniversite çalışma kartları hazırlayan dikkatli bir eğitim uzmanısın.",
+        ...(grup.konuKaynakli ? [
+            "BU İSTEK KONU KAYNAKLI ÜRETİMDİR: Her KONU başlığının hemen altında yalnız o konuya bağlanan ders parçaları bulunur.",
+            "Her konu için ayrı ayrı tüm önemli tanım, aşama, fark, uygulama, formül, algoritma ve örnekleri değerlendir.",
+            "SORU ve CEVABI mutlaka ilgili KONU bloğunun konuId değerine bağla. Başka bloktan kaynak kodu kullanma.",
+            "İzin verilen konuId listesi dışında hiçbir kart üretme. Metinde açıklaması olmayan bilgi uydurma.",
+            "Bir konunun yalnız bir kartla tamamlanabileceği gibi yedi-sekiz ayrı önemli bilgi de bulunabilir.",
+            "EN FAZLA 8 KART / ALT KONU; zorunlu hedef/minimum YOK. Önemli bilgiler varsa sırf kısa yanıt diye atlama.",
+            "Yanıt vermeden önce her konu için önemli açıklamaların kapsanıp kapsanmadığını kontrol et.",
+            "Aynı soruyu birebir tekrar etme, farklı öğretici açıdan soru sormak serbesttir.",
+        ] : []),
         "Görevin, verilen ders metni ve TAM konu haritasından yüksek kaliteli, kaynağa dayalı soru-cevap kartları üretmek.",
         "Her kart için sorunun temel kavramını belirle ve gerçekten ilişkili bir alt konunun mevcut konuId'sini seç.",
         "Histogram/grafik görselleştirme konusuna, Bayes teoremi Naive Bayes konusuna aittir.",
@@ -2780,7 +2790,9 @@ export const geminiIleHaritaTabanliKartUret = async ({
     ].join("\n");
     const prompt = [
         "DERS: " + String(dersAdi || "").slice(0, 240),
-        "TAM KONU HARİTASI (bu listede olmayan konuId kullanma):",
+        grup.konuKaynakli
+            ? "BU GRUPTAKİ KONU HARİTASI (yalnızca bu konuId değerlerini kullan):"
+            : "TAM KONU HARİTASI (bu listede olmayan konuId kullanma):",
         JSON.stringify(konuHaritasi),
         ...(oncekiSorular.length ? [
             kapsamKontrolu
@@ -2794,7 +2806,9 @@ export const geminiIleHaritaTabanliKartUret = async ({
         ] : []),
         "BU METİN GRUBUNUN TOPLAM KART ÜST SINIRI (konu başına zorunlu sayı değil): " +
             Math.max(1, Math.min(48, Math.floor(kartLimiti) || 48)),
-        "DERS METNİ (konuya göre seçilmedi; bu bölümün tamamını değerlendir):",
+        grup.konuKaynakli
+            ? "KONU BAZINDA KAYNAKLAR (her başlığın altındaki K kodları yalnızca o konuya aittir):"
+            : "DERS METNİ (konuya göre seçilmedi; bu bölümün tamamını değerlendir):",
         grup.metin,
     ].join("\n\n");
     const { veri, tokenKullanimi } = await yapilandirilmisGeminiCagrisi({
