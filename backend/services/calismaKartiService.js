@@ -17,6 +17,7 @@ import {
     kartAdaylariniDogrula,
     kaynakMetnindenYedekKartOlustur,
     sinirliParalelKartPartileri,
+    tekKartliKonulariOnarimIcinSec,
 } from "./kartUretimPlanlama.mjs";
 
 export {
@@ -460,6 +461,75 @@ export const calismaKartlariniHizliOlustur = async ({ kullaniciId, dersId }, d =
             basarisizParti: basarisizPartiSayisi,
             toplamGeminiKarti: aiKartiSayisi,
             sureMs: Date.now() - baslangicParti,
+        });
+
+        // Tek kartta kalan önemli konulara aynı buton tıklamasında ikinci,
+        // küçük bir üretim hakkı ver. Kaynak/önceki soruları ekleyerek tekrarı önle.
+        const eksikKonular = tekKartliKonulariOnarimIcinSec(
+            kaynakliKonular, eskiKartlar, adaylar
+        );
+        const kalanSureMs = Date.now() - baslangic;
+        // Gerçek kullanıcı için işlemin makul sürede kalması amacıyla
+        // onarım isteklerini ve toplam süreyi sınırla.
+        const azamiOnarimPartisi = kalanSureMs < 25_000 ? 4 : kalanSureMs < 48_000 ? 2 : 0;
+        const onarimSecimi = eksikKonular.slice(0, azamiOnarimPartisi * 3);
+        const onarimKaynaklari = partiKaynaklariniOlustur(
+            onarimSecimi.map((konu) => ({
+                ...konu,
+                parcalar: konular.find((kaynak) => String(kaynak.konuId) === String(konu.konuId))?.parcalar || [],
+            })),
+            adlar, x.parcaSec, 3200
+        );
+        const kaynak2 = new Map(onarimKaynaklari.map((konu) => [String(konu.konuId), konu.kaynaklar]));
+        const onarilacakKonular = onarimSecimi.map((konu) => ({
+            ...konu,
+            kaynaklar: kaynak2.get(String(konu.konuId)) || konu.kaynaklar,
+        }));
+        const onarimPartileri = [];
+        for (let i = 0; i < onarilacakKonular.length; i += 3) {
+            onarimPartileri.push(onarilacakKonular.slice(i, i + 3));
+        }
+        const onarimYanitlari = await sinirliParalelKartPartileri(
+            onarimPartileri,
+            async (parti, i) => {
+                try {
+                    return await x.hizliUret({
+                        dersAdi: guncelDers.dersAdi,
+                        konular: parti,
+                    });
+                } catch (hata) {
+                    console.warn("[CalismaKartlari][onarim] Tek kartlı konu isteği başarısız", {
+                        parti: i + 1,
+                        status: Number(hata?.status) || 0,
+                        kod: String(hata?.kod || "BILINMIYOR").slice(0, 80),
+                    });
+                    throw hata;
+                }
+            }, 2
+        );
+        for (let i = 0; i < onarimPartileri.length; i += 1) {
+            const sonuc = onarimYanitlari[i];
+            if (sonuc.status !== "fulfilled") {
+                basarisizPartiSayisi += 1;
+                continue;
+            }
+            const dogrulanan = kartAdaylariniDogrula({
+                cevap: sonuc.value,
+                konular: onarimPartileri[i],
+                mevcutSorular: sorular,
+            });
+            adaylar.push(...dogrulanan);
+            aiKartiSayisi += dogrulanan.length;
+            if (dogrulanan.length > 0) apiBasarili = true;
+        }
+        const kalanTekKartli = tekKartliKonulariOnarimIcinSec(
+            kaynakliKonular, eskiKartlar, adaylar
+        ).length;
+        console.info("[CalismaKartlari][hizli] Konu kapsamı onarımı", {
+            baslangictaAzKartli: eksikKonular.length,
+            hedeflenenKonu: onarilacakKonular.length,
+            kalanAzKartli: kalanTekKartli,
+            sureMs: Date.now() - baslangic,
         });
 
         // Gemini boş dönerse veya bazı konuları atlarsa, yalnızca gerçek kaynak
