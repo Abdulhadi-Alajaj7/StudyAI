@@ -81,6 +81,7 @@ const dersSchema = new mongoose.Schema(
         kartHaritaToplamGrupSayisi: { type: Number, default: 0 },
         kartHaritaIslenenGrupImzalari: { type: [String], default: [] },
         kartHaritaTamamlandi: { type: Boolean, default: false },
+        kartHaritaZenginlestirmeTamamlandi: { type: Boolean, default: false },
         kartUretimToken: { type: mongoose.Schema.Types.ObjectId, default: null },
         kartUretimSonYenileme: { type: Date, default: null },
         temizleniyor: {
