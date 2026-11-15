@@ -1,11 +1,10 @@
 /**
  * Çalışma kartı dışa aktarımı: öğrenci kimliği ve veritabanı ID'si içermez.
- * Kaynak adı / konu / soru / cevap korunur. Mevcut filtreye bağlı değildir.
+ * Kaynak adı / soru / cevap korunur. Mevcut filtreye bağlı değildir.
  */
 
 const sutunlar = [
   ["Sıra", (_, i) => i + 1],
-  ["Konu", (k) => k.konuBasligi || ""],
   ["Soru", (k) => k.soru || ""],
   ["Cevap", (k) => k.cevap || ""],
   ["Bilgi Türü", (k) => ({
@@ -42,7 +41,6 @@ export const calismaKartlariJsonOlustur = (kartlar) => JSON.stringify({
   toplamKart: kartlar.length,
   kartlar: kartlar.map((kart, i) => ({
     sira: i + 1,
-    konu: kart.konuBasligi || "",
     soru: kart.soru || "",
     cevap: kart.cevap || "",
     bilgiTuru: ({
