@@ -247,7 +247,7 @@ test("Gemini 502 JSON hatasında yalnızca bir kez daha küçük yanıt istenir"
     const result = await haritaTabanliKartlariOlustur(v.args, v.deps);
     assert.equal(result.tamamlandi, true);
     assert.equal(result.kartlar.length, 2);
-    assert.equal(sayi, 3);
+    assert.equal(sayi, 5); // İlk tur 3 (502 yeniden deneme dahil) + kapsama kontrolü 2
 });
 
 test("Gemini 429 sonrasında sıradaki metin gruplarına yeni istek gönderilmez", async () => {
