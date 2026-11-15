@@ -23,7 +23,7 @@ function DersCalismaKartlari() {
   const [kartlar, setKartlar] = useState([]);
   const [yukleniyor, setYukleniyor] = useState(true);
   const [olusturuluyor, setOlusturuluyor] = useState(false);
-  const [uretim, setUretim] = useState({ tamamlandi: false, toplamKonuSayisi: 0, tamamlananKonuSayisi: 0 });
+  const [uretim, setUretim] = useState({ dersKartTamamlandi: false, toplamGrupSayisi: 0, islenenGrupSayisi: 0 });
   const [uretimMesaji, setUretimMesaji] = useState("");
   const uretimControllerRef = useRef(null);
   const [hata, setHata] = useState("");
@@ -44,7 +44,7 @@ function DersCalismaKartlari() {
     setYukleniyor(true);
     setHata("");
     setKartlar([]);
-    setUretim({ tamamlandi: false, toplamKonuSayisi: 0, tamamlananKonuSayisi: 0 });
+    setUretim({ dersKartTamamlandi: false, toplamGrupSayisi: 0, islenenGrupSayisi: 0 });
     setUretimMesaji("");
     setIndex(0);
     setCevapAcik(false);
@@ -122,7 +122,7 @@ function DersCalismaKartlari() {
     uretimControllerRef.current = controller;
     setOlusturuluyor(true);
     setHata("");
-    setUretimMesaji("Ders metni ve konu haritası birlikte inceleniyor. Kart sayısını Gemini içerik önemine göre seçiyor...");
+    setUretimMesaji("Ders materyallerinin tamamı inceleniyor. Önemli bilgilerden çalışma kartları hazırlanıyor...");
     try {
       const r = await api.hizliOlustur(dersId, controller.signal);
       if (controller.signal.aborted) return;
@@ -228,19 +228,17 @@ function DersCalismaKartlari() {
       </button>)}
     </div>
     {!yukleniyor && (olusturuluyor ||
-      (uretim.toplamGrupSayisi > 0 && !uretim.haritaTabanliTamamlandi) ||
-      (kartlar.length > 0 && !uretim.haritaTabanliTamamlandi)) && (
+      (uretim.toplamGrupSayisi > 0 && !uretim.dersKartTamamlandi) ||
+      (kartlar.length > 0 && !uretim.dersKartTamamlandi)) && (
       <div role="status" aria-live="polite" className={`flex flex-wrap items-center justify-between gap-3 rounded-xl border border-violet-400/30 bg-violet-500/10 px-4 py-3 text-sm ${metin}`}>
         <div className="flex items-center gap-2">
           {olusturuluyor && <ArrowPathIcon className="h-5 w-5 animate-spin text-violet-400" />}
-          <span>{uretimMesaji || (uretim.kapsamKontroluBekleyenGrupSayisi > 0
-            ? "Önemli bilgilerin kapsam kontrolü tamamlanamadı. Mevcut kartlar korunarak devam edilebilir."
-            : uretim.toplamGrupSayisi > 0
-              ? "Ders metninin bazı bölümleri henüz tamamlanmadı. Kayıtlı kartlar korunarak devam edilebilir."
-              : "Mevcut kartlarınız korunur. Yeni konu haritası tabanlı sistemle kart oluşturabilirsiniz.")}</span>
+          <span>{uretimMesaji || (uretim.toplamGrupSayisi > 0
+            ? "Ders metninin işlenmemiş bölümleri var. Mevcut kartlar korunarak devam edilebilir."
+            : "Dersin bütün materyallerinden çalışma kartları oluşturabilirsiniz. Mevcut kartlarınız korunur.")}</span>
         </div>
         {uretim.toplamGrupSayisi > 0 && <span className="text-xs font-semibold text-violet-400">
-          {uretim.kapsamKontroluBekleyenGrupSayisi > 0 ? `${uretim.kapsamKontroluBekleyenGrupSayisi} kapsam kontrolü bekliyor` : `${uretim.islenenGrupSayisi || 0} / ${uretim.toplamGrupSayisi} metin bölümü`}
+          {`${uretim.islenenGrupSayisi || 0} / ${uretim.toplamGrupSayisi} metin bölümü`}
         </span>}
         {!olusturuluyor && <button type="button" onClick={olustur}
           className="rounded-lg border border-violet-400/50 px-3 py-2 font-semibold text-violet-400 hover:bg-violet-500/10">
@@ -259,12 +257,12 @@ function DersCalismaKartlari() {
       <div className={`flex min-h-[380px] flex-col items-center justify-center rounded-2xl border p-8 text-center ${panel}`}>
         <RectangleStackIcon className="h-14 w-14 text-violet-400" />
         <h3 className="mt-5 text-xl font-bold">Bilgilerini kartlarla kalıcı hâle getir</h3>
-        <p className={`mt-3 max-w-lg text-sm leading-6 ${ikincil}`}>{uretim.haritaTabanliTamamlandi
-          ? "Kaynak metinleri incelendi ancak doğrulanabilir soru-cevap kartı bulunamadı. Konu haritası ve materyalleri kontrol edin."
-          : "Onaylanmış konu haritanız ve ders materyallerinizden her konuya uygun soru ve cevap kartları hazırlayalım."}</p>
+        <p className={`mt-3 max-w-lg text-sm leading-6 ${ikincil}`}>{uretim.dersKartTamamlandi
+          ? "Ders materyalleri incelendi ancak kaynaklı soru-cevap kartı bulunamadı. Yüklenen dosyaları kontrol edin."
+          : "Ders materyallerindeki önemli bilgileri kapsayan soru-cevap kartları hazırlayalım."}</p>
         <button type="button" disabled={olusturuluyor} onClick={olustur} className="mt-7 inline-flex items-center gap-2 rounded-xl bg-[#705CF5] px-6 py-3 font-semibold text-white hover:bg-[#6250DE] disabled:opacity-50">
           {olusturuluyor ? <ArrowPathIcon className="h-5 w-5 animate-spin" /> : <SparklesIcon className="h-5 w-5" />}
-          {olusturuluyor ? "Kartlar hazırlanıyor..." : uretim.toplamGrupSayisi > 0 && !uretim.haritaTabanliTamamlandi ? "Üretime Devam Et" : "Kartları Oluştur"}
+          {olusturuluyor ? "Kartlar hazırlanıyor..." : uretim.toplamGrupSayisi > 0 && !uretim.dersKartTamamlandi ? "Üretime Devam Et" : "Kartları Oluştur"}
         </button>
       </div> : !aktif ?
       <div className={`rounded-2xl border p-14 text-center ${panel}`}>
@@ -274,7 +272,7 @@ function DersCalismaKartlari() {
       </div> :
       <div className="mx-auto max-w-5xl space-y-4">
         <div className={`flex flex-wrap items-center justify-between gap-3 text-sm ${ikincil}`}>
-          <span className="min-w-0 break-words">{aktif.konuBasligi} {aktif.uretimYontemi === "kaynak" && <span className="ml-2 rounded-full border border-amber-400/40 px-2 py-0.5 text-[11px] text-amber-400">Kaynak metni</span>}
+          <span className="min-w-0 break-words">Ders Çalışma Kartı {aktif.uretimYontemi === "kaynak" && <span className="ml-2 rounded-full border border-amber-400/40 px-2 py-0.5 text-[11px] text-amber-400">Kaynak metni</span>}
             {aktif.uretimYontemi === "genel" && <span className="ml-2 rounded-full border border-indigo-400/40 px-2 py-0.5 text-[11px] text-indigo-400">Genel bilgi</span>}</span>
           <span className="shrink-0">Kart {aktifIndex + 1} / {filtrelenmis.length}</span>
         </div>
@@ -287,7 +285,7 @@ function DersCalismaKartlari() {
               aria-hidden={cevapAcik !== arka}
               inert={cevapAcik !== arka}>
               <div className="flex items-start justify-between gap-3">
-                <span className={`max-w-[85%] truncate text-xs font-medium ${ikincil}`}>{aktif.konuBasligi}</span>
+                <span className={`max-w-[85%] truncate text-xs font-medium ${ikincil}`}>Ders Çalışma Kartı</span>
                 {!arka && <button type="button" disabled={kaydediliyor} onClick={() => durum(aktif, { yildizli: !aktif.yildizli })}
                   aria-label={aktif.yildizli ? "Yıldızı kaldır" : "Yıldız ekle"}
                   className={`rounded-lg p-1.5 ${aktif.yildizli ? "text-amber-400" : ikincil}`}>
