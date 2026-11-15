@@ -469,10 +469,15 @@ test("Konuya özel kaynak grupları iki konu için ayrı metin/ID kullanır ve i
     const v = servisKur({ uret: async ({ grup, konuHaritasi, kapsamKontrolu }) => {
         assert.equal(kapsamKontrolu, undefined, "Konusal üretim gereksiz ikinci tur yapmamalı");
         assert.deepEqual(konuHaritasi.map((k) => k.konuId), grup.konuIdleri);
+        const sorular = {
+            a: ["MCAR eksik veri durumu nasıl tanımlanır?", "Eksik kayıtlar rastgele görülür."],
+            b: ["CRISP-DM modelleme süreci hangi aşamalarla ilerler?", "İş anlama ve veri hazırlığı yapılır."],
+            c: ["k-NN çoğunluk oylaması ile sınıfı nasıl seçer?", "En yakın komşu etiketlerine göre seçilir."],
+        };
         return { kartlar: grup.kaynaklar.map((kaynak) => ({
             konuId: kaynak.konuId,
-            soru: kaynak.konuId + " konusu için birinci önemli soru nedir?",
-            cevap: kaynak.konuId + " dersinde işlenen bilimsel bilgi.",
+            soru: sorular[kaynak.konuId][0],
+            cevap: sorular[kaynak.konuId][1],
             kaynakKodlari: [kaynak.kod], onem: 5,
         })) };
     } });
