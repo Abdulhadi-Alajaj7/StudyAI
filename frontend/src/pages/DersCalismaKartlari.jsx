@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useOutletContext, useParams } from "react-router-dom";
-import { RectangleStackIcon, ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon, ClockIcon, SparklesIcon, StarIcon } from "@heroicons/react/24/outline";
+import { RectangleStackIcon, ArrowPathIcon, ArrowDownTrayIcon, ChevronLeftIcon, ChevronRightIcon, ClockIcon, SparklesIcon, StarIcon } from "@heroicons/react/24/outline";
 import api from "../services/calismaKartlariApi.mjs";
 import { kullaniciHataMesaji } from "../utils/kullaniciHatasi.mjs";
+import { calismaKartlariDosyasiniIndir } from "../utils/calismaKartlariExport.mjs";
 
 const FILTRELER = [
   { id: "tum", ad: "Tüm Kartlar" },
@@ -30,6 +31,9 @@ function DersCalismaKartlari() {
   const [index, setIndex] = useState(0);
   const [cevapAcik, setCevapAcik] = useState(false);
   const [kaydediliyor, setKaydediliyor] = useState(false);
+  const [disaAktarMenuAcik, setDisaAktarMenuAcik] = useState(false);
+  const [disaAktariliyor, setDisaAktariliyor] = useState(false);
+  const disaAktarMenuRef = useRef(null);
   const islemRef = useRef(false);
   const panel = isDark ? "border-[#263653] bg-[#111D31]" : "border-[#E2E8F0] bg-white";
   const metin = isDark ? "text-[#F8FAFC]" : "text-[#0F172A]";
@@ -62,6 +66,40 @@ function DersCalismaKartlari() {
       .finally(() => { if (!controller.signal.aborted) setYukleniyor(false); });
     return () => { controller.abort(); uretimControllerRef.current?.abort(); };
   }, [dersId]);
+
+  useEffect(() => {
+    if (!disaAktarMenuAcik) return;
+    const disariTiklandi = (event) => {
+      if (!disaAktarMenuRef.current?.contains(event.target)) setDisaAktarMenuAcik(false);
+    };
+    const esc = (event) => {
+      if (event.key === "Escape") setDisaAktarMenuAcik(false);
+    };
+    document.addEventListener("pointerdown", disariTiklandi);
+    document.addEventListener("keydown", esc);
+    return () => {
+      document.removeEventListener("pointerdown", disariTiklandi);
+      document.removeEventListener("keydown", esc);
+    };
+  }, [disaAktarMenuAcik]);
+
+  const disaAktar = async (tur) => {
+    if (disaAktariliyor || !kartlar.length) return;
+    setDisaAktarMenuAcik(false);
+    setDisaAktariliyor(true);
+    setHata("");
+    try {
+      // Seçili filtre değil, dersin bütün kartları indirilir.
+      const r = await api.listele(dersId);
+      calismaKartlariDosyasiniIndir(r.data?.kartlar || [], tur);
+    } catch (e) {
+      setHata(e?.response
+        ? "Kartlar dışa aktarılamadı. Lütfen tekrar deneyin."
+        : "Dosya indirilemedi. Bağlantıyı ve tarayıcı indirme izinlerini kontrol edin.");
+    } finally {
+      setDisaAktariliyor(false);
+    }
+  };
 
   const sayilar = useMemo(() => ({
     tum: kartlar.length,
@@ -156,10 +194,38 @@ function DersCalismaKartlari() {
         <div className="rounded-2xl bg-violet-500/15 p-3"><RectangleStackIcon className="h-7 w-7 text-violet-400" /></div>
         <div><h2 className="text-[25px] font-bold">Çalışma Kartları</h2><p className={`text-[13px] ${ikincil}`}>Konularını hatırla, bilgini pekiştir.</p></div>
       </div>
-      <div className={`flex items-center gap-3 rounded-xl border px-5 py-3 ${panel}`}>
-        <ClockIcon className="h-5 w-5 text-violet-400" />
-        <div><p className="text-sm font-semibold">Bugünkü Tekrarlar</p><p className={`text-xs ${ikincil}`}>Tekrar planlaması henüz etkin değil.</p></div>
-        <span className="ml-3 text-[10px] font-bold text-sky-400">YAKINDA</span>
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="relative" ref={disaAktarMenuRef}>
+          <button type="button" disabled={yukleniyor || !kartlar.length || disaAktariliyor}
+            onClick={() => setDisaAktarMenuAcik(v => !v)}
+            aria-haspopup="menu" aria-expanded={disaAktarMenuAcik}
+            className={`inline-flex items-center gap-2 rounded-xl border px-4 py-3 text-sm font-semibold transition-colors hover:border-violet-400/60 disabled:cursor-not-allowed disabled:opacity-50 ${panel}`}>
+            {disaAktariliyor
+              ? <ArrowPathIcon className="h-5 w-5 animate-spin text-violet-400" />
+              : <ArrowDownTrayIcon className="h-5 w-5 text-violet-400" />}
+            {disaAktariliyor ? "İndiriliyor..." : "Kartları Dışa Aktar"}
+          </button>
+          {disaAktarMenuAcik && (
+            <div role="menu" aria-label="Dışa aktarma biçimi"
+              className={`absolute right-0 top-full z-30 mt-2 min-w-[215px] overflow-hidden rounded-xl border p-1 shadow-xl ${panel}`}>
+              <button type="button" role="menuitem" onClick={() => disaAktar("csv")}
+                className="w-full rounded-lg px-3 py-2.5 text-left text-sm hover:bg-violet-500/15">
+                <span className="block font-semibold">Excel (CSV)</span>
+                <span className={`block text-xs ${ikincil}`}>Tüm sorular ve cevaplar</span>
+              </button>
+              <button type="button" role="menuitem" onClick={() => disaAktar("json")}
+                className="w-full rounded-lg px-3 py-2.5 text-left text-sm hover:bg-violet-500/15">
+                <span className="block font-semibold">JSON</span>
+                <span className={`block text-xs ${ikincil}`}>Kaynaklar ve durum bilgileri</span>
+              </button>
+            </div>
+          )}
+        </div>
+        <div className={`flex items-center gap-3 rounded-xl border px-5 py-3 ${panel}`}>
+          <ClockIcon className="h-5 w-5 text-violet-400" />
+          <div><p className="text-sm font-semibold">Bugünkü Tekrarlar</p><p className={`text-xs ${ikincil}`}>Tekrar planlaması henüz etkin değil.</p></div>
+          <span className="ml-3 text-[10px] font-bold text-sky-400">YAKINDA</span>
+        </div>
       </div>
     </div>
     <div className="grid grid-cols-2 gap-3 lg:grid-cols-4" role="group" aria-label="Kart filtreleri">
