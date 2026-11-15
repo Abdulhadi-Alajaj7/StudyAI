@@ -191,11 +191,11 @@ test("İki bölümde 2 farklı kart üretir ve tekrardan çalıştırınca yeni 
     assert.equal(ilk.tamamlandi, true);
     assert.equal(ilk.kartlar.length, 2);
     assert.equal(ilk.islenenGrupSayisi, 2);
-    assert.equal(cagrilar, 2);
+    assert.equal(cagrilar, 4); // İlk tur 2 + otomatik kapsama kontrolü 2
     const tekrar = await haritaTabanliKartlariOlustur(v.args, v.deps);
     assert.equal(tekrar.kartlar.length, 2);
     assert.equal(tekrar.yeniKartSayisi, 0);
-    assert.equal(cagrilar, 2);
+    assert.equal(cagrilar, 4); // Tamamlanan otomatik kontrol yeniden çalışmaz
 });
 
 test("İkinci bölüm hata verirse birinci kaydedilir; yeniden denemede sadece eksik bölüm işlenir", async () => {
@@ -269,4 +269,35 @@ test("Gemini 429 sonrasında sıradaki metin gruplarına yeni istek gönderilmez
     assert.ok(sayi <= 2);
     assert.equal(result.islenenGrupSayisi, 0);
     assert.equal(result.toplamGrupSayisi, 8);
+});
+
+
+test("Az kartlı konular kullanıcıya sunulmadan otomatik incelenir, yeni önemli kart eklenir", async () => {
+    const odaklar = [];
+    const v = servisKur({ uret: async ({ grup, odakKonuIdleri }) => {
+        const kod = grup.kaynaklar[0].kod;
+        if (odakKonuIdleri?.length) {
+            odaklar.push([...odakKonuIdleri]);
+            return { kartlar: [{
+                konuId: kod === "K1" ? "a" : "b",
+                soru: "Ek önemli bilgi " + kod + " nedir?",
+                cevap: "Kaynakta yer alan ek bilgi.",
+                kaynakKodlari: [kod], onem: 5,
+            }] };
+        }
+        return { kartlar: [{
+            konuId: kod === "K1" ? "a" : "b",
+            soru: "İlk bilgi " + kod + " nedir?",
+            cevap: "İlk açıklama.", kaynakKodlari: [kod], onem: 5,
+        }] };
+    } });
+    const sonuc = await haritaTabanliKartlariOlustur(v.args, v.deps);
+    assert.equal(sonuc.tamamlandi, true);
+    assert.equal(sonuc.kartlar.length, 4);
+    assert.equal(odaklar.length, 2);
+    assert.ok(odaklar.every((ids) => ids.includes("a") && ids.includes("b")));
+    assert.equal(v.ders.kartHaritaZenginlestirmeTamamlandi, true);
+    const tekrar = await haritaTabanliKartlariOlustur(v.args, v.deps);
+    assert.equal(tekrar.kartlar.length, 4);
+    assert.equal(odaklar.length, 2);
 });
