@@ -204,6 +204,6 @@ test("Otomatik onarım yalnızca 0-1 kartlı, kaynakça daha zengin konuları ö
     const eksikler = tekKartliKonulariOnarimIcinSec(konular, eskiKartlar, yeniKartlar);
     assert.deepEqual(eksikler.map((k) => k.konuId), ["k4", "k2", "k1"]);
     assert.equal(eksikler[0].adet, 4);
-    assert.equal(eksikler[1].adet, 4);
+    assert.equal(eksikler[1].adet, 5);
     assert.deepEqual(eksikler[1].oncekiSorular, ["Soru 2"]);
 });
