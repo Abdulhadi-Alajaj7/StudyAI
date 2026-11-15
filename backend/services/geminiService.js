@@ -2656,6 +2656,8 @@ export const geminiIleHizliCalismaKartlariUret = async ({
         "Sadece tanım değil; kaynak destekliyorsa çalışma mantığı, işlem adımları, karşılaştırma, kullanım amacı, koşul ve karmaşıklık sor.",
         "Kaynaklar yalnızca konu adları veya çalışma yönergeleri içeriyorsa kaynak kartı üretme; varsa güvenli genel kavram bilgisi kullan ve bunu etiketle.",
         "Her konu için verilen KART HEDEFİ kadar FARKLI, öğretici soru-cevap kartı üretmeyi dene. Bu bir zorunlu alt sınır değildir; kaynak yetersizse az üret.",
+        "DENGE: Önce bütün konular için en az iki ayrı, gerçekten cevaplanabilir kart oluşturmaya çalış. Sonra daha zengin konulardaki üçüncü ve sonraki kartlara geç.",
+        "Bir konuya 6 kart verirken kaynakça yeterli olan başka bir konuya yalnızca 1 kart bırakma. Aynı soruyu farklı kelimelerle çoğaltma.",
         "Aynı tanımı farklı kelimelerle tekrar etme. Önemli noktaları sor: neden, nasıl, temel koşul, algoritma adımları, karşılaştırma, örnek, uygulama ve sık yapılan hata.",
         "Yanıtları mümkün olduğunca 1-2 kısa cümle yaz; gereksiz giriş, uzun açıklama ve tekrar kullanma.",
         "Her konu için en fazla verilen üst sınır kadar kart döndür ve önceden sorulmuş soruları tekrar yazma.",
