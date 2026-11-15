@@ -100,6 +100,11 @@ const dersSchema = new mongoose.Schema(
             default: [],
         },
         kartHaritaKapsamTamamlananGrupImzalari: { type: [String], default: [] },
+        // Yeni basit çalışma kartları: doğrudan ders kaynakları ile bağlantı.
+        kartDersSurumImzasi: { type: String, default: "" },
+        kartDersToplamGrupSayisi: { type: Number, default: 0 },
+        kartDersIslenenGrupImzalari: { type: [String], default: [] },
+        kartDersTamamlandi: { type: Boolean, default: false },
         kartUretimToken: { type: mongoose.Schema.Types.ObjectId, default: null },
         kartUretimSonYenileme: { type: Date, default: null },
         temizleniyor: {
