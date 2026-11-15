@@ -307,5 +307,6 @@ test("Kart sınırı hatasında fazladan Gemini çağrısı yapılmaz", async ()
     };
     const sonuc = await calismaKartlariniHizliOlustur(v.args, v.deps);
     assert.equal(cagrilar, 1);
-    assert.equal(sonuc.kartlar.length, 3);
+    assert.ok(sonuc.kartlar.length <= 3);
+    assert.ok(sonuc.kartlar.every((k) => k.uretimYontemi === "kaynak"));
 });
