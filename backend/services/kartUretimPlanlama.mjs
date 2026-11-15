@@ -215,3 +215,27 @@ export const kaynakMetnindenYedekKartOlustur = (konu, mevcutSorular = new Set())
         }],
     };
 };
+
+
+/**
+ * Büyük dersleri eşzamanlı ancak API'yi boğmadan işle.
+ * Sonuçlar istek sırasına göre geri döner. Bir partinin 429/502 hatası
+ * diğerlerinin kartlarını kaybettirmez.
+ */
+export const sinirliParalelKartPartileri = async (partiler, islem, eszamanli = 2) => {
+    if (!Array.isArray(partiler) || !partiler.length) return [];
+    const sonuc = new Array(partiler.length);
+    let sira = 0;
+    const calisanSayisi = Math.min(partiler.length, Math.max(1, Math.min(2, Math.floor(eszamanli) || 2)));
+    await Promise.all(Array.from({ length: calisanSayisi }, async () => {
+        while (sira < partiler.length) {
+            const indeks = sira++;
+            try {
+                sonuc[indeks] = { status: "fulfilled", value: await islem(partiler[indeks], indeks) };
+            } catch (hata) {
+                sonuc[indeks] = { status: "rejected", reason: hata };
+            }
+        }
+    }));
+    return sonuc;
+};
