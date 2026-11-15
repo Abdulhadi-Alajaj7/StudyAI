@@ -34,7 +34,7 @@ export const konuHaritasiniOzetle = (harita) => {
             if (!konu.konuId || !konu.baslik || tum.has(konu.konuId)) {
                 throw new Error("Konu haritasında geçersiz veya yinelenen konu kimliği.");
             }
-            tum.set(konu.konuId, { konuId: konu.konuId, baslik: konu.baslik });
+            tum.set(konu.konuId, { konuId: konu.konuId, baslik: konu.baslik, aciklama: konu.aciklama });
         }
         return item;
     });
@@ -112,6 +112,27 @@ export const dersMetniniGrupla = (metinParcalari, materyaller, {
  * Bir kaynağın başka bir konuda kullanılması yasak değildir: modelin görevi
  * tam da dersin bütün metnini okuyarak doğru konuyu seçmektir.
  */
+
+// Konu başlık/açıklamalarındaki açık teknik terimleri güvenli biçimde
+// karşılaştır. Bu kontrol yalnızca güçlü bir çelişkiyi işaretler; konu
+// tahmin etmez ve belirsiz durumlarda Gemini kararını korur.
+const konuUyumsuzlugu = (kart, secilen, konular) => {
+    const soru = sade(kart.soru);
+    const metin = sade(kart.soru + " " + kart.cevap);
+    const secilenMetin = sade(secilen.baslik + " " + (secilen.aciklama || ""));
+    // Tek kelimelik yaygın terimler değil, ayırt edici çok sözcüklü
+    // konu adları doğrudan soru içinde geçtiğinde yanlış eşleşmeyi engelle.
+    const diger = konular.filter((konu) => konu.konuId !== secilen.konuId)
+        .filter((konu) => {
+            const ad = sade(konu.baslik);
+            return ad.length >= 12 && ad.split(" ").length >= 2 &&
+                soru.includes(ad) && !secilenMetin.includes(ad);
+        });
+    if (diger.length !== 1) return false;
+    const ad = sade(diger[0].baslik);
+    return metin.includes(ad);
+};
+
 export const haritaKartlariniDogrula = ({ hamKartlar, konular, kaynaklar, oncekiKartlar = [],
     maksimum = 8, ayrinti = false }) => {
     const konularMap = new Map(konular.map((k) => [String(k.konuId), k]));
@@ -144,6 +165,7 @@ export const haritaKartlariniDogrula = ({ hamKartlar, konular, kaynaklar, onceki
             kodlar.some((k) => !kaynakMap.has(k))) {
             gecersiz += 1; continue;
         }
+        if (konuUyumsuzlugu({ soru, cevap }, konu, konular)) { gecersiz += 1; continue; }
         if ((sayac.get(id) || 0) >= maksimum) { limit += 1; continue; }
         const sq = sade(soru), ca = sade(cevap);
         const muadil = gorulen.some((onceki) => {
