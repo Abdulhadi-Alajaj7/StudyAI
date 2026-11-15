@@ -6,6 +6,7 @@ import {
 } from "../services/haritaTabanliKartPlanlama.mjs";
 import { haritaTabanliKartlariOlustur } from "../services/haritaTabanliKartService.js";
 import { geminiIleHaritaTabanliKartUret } from "../services/geminiService.js";
+import { eksikOnemliNoktalariDogrula } from "../services/kartKapsamKontrol.mjs";
 
 const query = (v) => ({
     select() { return this; }, sort() { return this; },
@@ -389,4 +390,55 @@ test("Açık başka konu başlığıyla eşleşen kart yanlış konu altında ka
     assert.equal(sonuc.gecersiz, 1);
     assert.equal(sonuc.kartlar.length, 2);
     assert.deepEqual(sonuc.kartlar.map(k => k.konuId), ["b", "a"]);
+});
+
+
+test("Kapsam açığı doğrulayıcısı kart sayısını hedef saymaz, yalnızca gerçek kaynaklı önemli bilgileri seçer", () => {
+    const konular = [{ konuId: "a", baslik: "CRISP-DM" }, { konuId: "b", baslik: "Python" }];
+    const kaynaklar = [{ kod: "K1", dosyaAdi: "hafta.pdf" }];
+    const kartlar = [
+        ...Array.from({ length: 4 }, (_, i) => ({ konuId: "a", soru: "Soru " + i })),
+        ...Array.from({ length: 8 }, (_, i) => ({ konuId: "b", soru: "Soru B" + i })),
+    ];
+    const adaylar = [
+        { konuId: "a", bilgi: "CRISP-DM Deployment aşamasının uygulanma gerekçesi", kaynakKodlari: ["K1"], onem: 5 },
+        { konuId: "a", bilgi: "CRISP-DM Deployment aşamasının uygulanma gerekçesi", kaynakKodlari: ["K1"], onem: 5 },
+        { konuId: "b", bilgi: "Önemli fakat konu sekiz kart sınırında", kaynakKodlari: ["K1"], onem: 5 },
+        { konuId: "a", bilgi: "Kaynak kodu uydurulmuş önemli bilgi", kaynakKodlari: ["K999"], onem: 5 },
+        { konuId: "a", bilgi: "Önemsiz ek bilgi", kaynakKodlari: ["K1"], onem: 2 },
+        { konuId: "olmayan", bilgi: "Haritada bulunmayan bir konu", kaynakKodlari: ["K1"], onem: 5 },
+    ];
+    assert.deepEqual(eksikOnemliNoktalariDogrula({ adaylar, konular, kaynaklar, kartlar }), [
+        adaylar[0],
+    ]);
+    assert.deepEqual(eksikOnemliNoktalariDogrula({
+        adaylar: [], konular, kaynaklar, kartlar: [{ konuId: "a" }],
+    }), []);
+});
+
+test("Gemini ilk turda eksik kavramları raporlar, tamamlamada yalnızca o kavramları hedefler", async () => {
+    const h = konuHaritasiniOzetle(harita);
+    const grup = {
+        metin: "[K1] DOSYA: hafta.pdf\nCRISP-DM için Deployment önemli bir aşamadır.",
+        kaynaklar: [{ kod: "K1", materyalId: "m1", dosyaAdi: "hafta.pdf", parcaIndex: 0 }],
+    };
+    const istekler = [];
+    const istemci = { models: { async generateContent(args) {
+        istekler.push(args);
+        return { text: JSON.stringify({ kartlar: [], eksikOnemliNoktalar: [{
+            konuId: "b", bilgi: "CRISP-DM Deployment işleminin neden gerekli olduğu",
+            kaynakKodlari: ["K1"], onem: 5,
+        }] }) };
+    } } };
+    const ilk = await geminiIleHaritaTabanliKartUret({
+        dersAdi: "Veri Bilimi", konuHaritasi: h.agac, grup,
+    }, { istemci, istekYonetimi: { yerAyir() { return () => {}; } } });
+    assert.equal(ilk.eksikOnemliNoktalar.length, 1);
+    assert.match(istekler[0].config.systemInstruction, /KAPSAM DENETİMİ/);
+    await geminiIleHaritaTabanliKartUret({
+        dersAdi: "Veri Bilimi", konuHaritasi: h.agac, grup,
+        eksikKavramlar: ilk.eksikOnemliNoktalar,
+    }, { istemci, istekYonetimi: { yerAyir() { return () => {}; } } });
+    assert.match(istekler[1].contents, /HEDEFLİ TAMAMLAMA/);
+    assert.match(istekler[1].contents, /Deployment işleminin neden gerekli olduğu/);
 });
