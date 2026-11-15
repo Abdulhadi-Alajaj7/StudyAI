@@ -78,6 +78,7 @@ const dersSchema = new mongoose.Schema(
         kartKaynakSurumImzasi: { type: String, default: "" },
         kartHizliUretimSurumImzasi: { type: String, default: "" },
         kartHaritaSurumImzasi: { type: String, default: "" },
+        kartKonuEslemeSurumImzasi: { type: String, default: "" },
         kartHaritaToplamGrupSayisi: { type: Number, default: 0 },
         kartHaritaIslenenGrupImzalari: { type: [String], default: [] },
         kartHaritaTamamlandi: { type: Boolean, default: false },
