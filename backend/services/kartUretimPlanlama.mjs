@@ -267,6 +267,7 @@ export const tekKartliKonulariOnarimIcinSec = (konular, eskiKartlar, yeniKartlar
         };
     }).filter(Boolean).sort((a, b) =>
         a.mevcutKartSayisi - b.mevcutKartSayisi ||
+        (Number(b.karakterSayisi) || 0) - (Number(a.karakterSayisi) || 0) ||
         String(a.konuId).localeCompare(String(b.konuId), "tr")
     );
 };
