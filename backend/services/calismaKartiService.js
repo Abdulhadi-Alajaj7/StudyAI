@@ -88,6 +88,9 @@ const uretimDurumunuOlustur = (ders, kartlar) => {
         atlananKonuSayisi,
         hizliUretimYapildi: Boolean(ders?.kartHizliUretimSurumImzasi &&
             ders.kartHizliUretimSurumImzasi === ders.kartKaynakSurumImzasi),
+        haritaTabanliTamamlandi: Boolean(ders?.kartHaritaTamamlandi),
+        toplamGrupSayisi: Number(ders?.kartHaritaToplamGrupSayisi || 0),
+        islenenGrupSayisi: (ders?.kartHaritaIslenenGrupImzalari || []).length,
     };
 };
 
