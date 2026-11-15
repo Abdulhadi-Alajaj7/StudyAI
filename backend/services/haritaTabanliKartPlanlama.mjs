@@ -162,7 +162,8 @@ export const haritaKartlariniDogrula = ({ hamKartlar, konular, kaynaklar, onceki
         const kodlar = Array.isArray(kart?.kaynakKodlari)
             ? [...new Set(kart.kaynakKodlari.map((k) => String(k)))] : [];
         if (!konu || !soru || !cevap || !kodlar.length ||
-            kodlar.some((k) => !kaynakMap.has(k))) {
+            kodlar.some((k) => !kaynakMap.has(k) ||
+                (kaynakMap.get(k).konuId && String(kaynakMap.get(k).konuId) !== id))) {
             gecersiz += 1; continue;
         }
         if (konuUyumsuzlugu({ soru, cevap }, konu, konular)) { gecersiz += 1; continue; }
