@@ -267,3 +267,45 @@ test("41 kayıtlı kartlı 31 konuluk ders, sekiz kart sınırına uyarak en az 
     }
     assert.ok([...sayilar.values()].every((adet) => adet <= 8));
 });
+
+
+test("Kartları Oluştur tek tıklamada bir kartta kalan konuları otomatik tamamlar", async () => {
+    const v = veriOlustur({ konular: ["Betimsel İstatistik", "MCAR MAR MNAR", "k-NN Karar Mekanizması"] });
+    let cagrilar = 0;
+    v.deps.hizliUret = async ({ konular }) => {
+        cagrilar += 1;
+        if (cagrilar === 1) {
+            return { kartlar: konular.map((konu) => ({
+                konuId: konu.konuId,
+                soru: konu.baslik + " ilk kavram nedir?",
+                cevap: "İlk açıklama.",
+                kaynakKodlari: [konu.kaynaklar[0].kod],
+            })) };
+        }
+        // İkinci çağrı yalnızca eksik konulara yapılır ve önceki soruları bilmelidir.
+        assert.ok(konular.every((konu) => konu.oncekiSorular.some((s) => s.includes("ilk kavram"))));
+        return { kartlar: konular.flatMap((konu) => [
+            { konuId: konu.konuId, soru: konu.baslik + " nasıl çalışır?", cevap: "Aşamaları açıklar.", kaynakKodlari: [konu.kaynaklar[0].kod] },
+            { konuId: konu.konuId, soru: konu.baslik + " ne zaman kullanılır?", cevap: "Uygun durumlarda kullanılır.", kaynakKodlari: [konu.kaynaklar[0].kod] },
+        ]) };
+    };
+    const sonuc = await calismaKartlariniHizliOlustur(v.args, v.deps);
+    assert.equal(cagrilar, 2);
+    assert.equal(sonuc.kartlar.length, 9);
+    const adetler = new Map();
+    for (const kart of sonuc.kartlar) adetler.set(kart.konuId, (adetler.get(kart.konuId) || 0) + 1);
+    assert.deepEqual([...adetler.values()], [3, 3, 3]);
+    assert.equal(sonuc.hizliUretimYapildi, true);
+});
+
+test("Kart sınırı hatasında fazladan Gemini çağrısı yapılmaz", async () => {
+    const v = veriOlustur({ konular: ["MCAR", "MAR", "MNAR"] });
+    let cagrilar = 0;
+    v.deps.hizliUret = async () => {
+        cagrilar += 1;
+        throw Object.assign(new Error("quota"), { status: 429, kod: "GEMINI_KOTA_ASIMI" });
+    };
+    const sonuc = await calismaKartlariniHizliOlustur(v.args, v.deps);
+    assert.equal(cagrilar, 1);
+    assert.equal(sonuc.kartlar.length, 3);
+});
