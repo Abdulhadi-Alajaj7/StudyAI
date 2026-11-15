@@ -299,10 +299,9 @@ export const haritaTabanliKartlariOlustur = async ({ kullaniciId, dersId }, d = 
                 const odakIdleri = azKartli.map((k) => k.konuId);
                 const oncekiler = [...mevcut];
                 let basarisiz = false;
-                // En fazla 3 metin grubu: dersin bütün metnini tekrar tekrar
-                // Gemini'ye göndermeden düşük kapsamalı konuları tarar.
-                // Metin grupları konuya göre filtrelenmez.
-                for (const grup of gruplar.slice(0, 3)) {
+                // Bütün metin grupları taranır; sonraki dosyalar atlanmaz.
+                // Konu bazlı kaynak elemesi yapılmaz.
+                for (const grup of gruplar) {
                     try {
                         const cevap = await x.uret({
                             dersAdi: guncelDers.dersAdi,
