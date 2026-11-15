@@ -207,6 +207,7 @@ export const dersGeneliKartlariOlustur = async ({
         const kartlar = await kartGetir(x, kullaniciId, dersId);
         return {
             kartlar, tamamlandi,
+            dersKartTamamlandi: tamamlandi,
             toplamGrupSayisi: kaynak.gruplar.length,
             islenenGrupSayisi: islenen.size,
             yeniKartSayisi: yeniKart,
