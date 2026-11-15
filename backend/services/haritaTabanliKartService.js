@@ -8,7 +8,7 @@ import CalismaKarti from "../models/CalismaKarti.js";
 import { kartKilidiniAl, kartKilidiniBirak } from "./calismaKartiLock.js";
 import { geminiIleHaritaTabanliKartUret } from "./geminiService.js";
 import { konuHaritasiniOzetle, dersMetniniGrupla, haritaKartlariniDogrula } from "./haritaTabanliKartPlanlama.mjs";
-import { eksikOnemliNoktalariDogrula } from "./kartKapsamKontrol.mjs";
+
 
 const imza = (s) => createHash("sha256").update(s).digest("hex");
 const kimlik = (s) => String(s);
@@ -100,19 +100,13 @@ const kartlariKaydet = async (x, { kullaniciId, dersId, token, kartlar }) => {
     await x.KartModel.bulkWrite(islemler, { ordered: false });
 };
 
-const kaydet = async (x, { kullaniciId, dersId, token, imzaliGrup, kartlar,
-    eksikKavramlar = [] }) => {
+const kaydet = async (x, { kullaniciId, dersId, token, imzaliGrup, kartlar }) => {
     await kartlariKaydet(x, { kullaniciId, dersId, token, kartlar });
-    // Kartlar ile ilk geçişin önemli bilgi açığı aynı checkpoint'te saklanır.
-    // Başarısız gruplar tekrar işlenebilir; tamamlanan gruplar yeniden Gemini'ye gitmez.
     const guncelle = await x.DersModel.updateOne({
         _id: dersId, kullaniciId, kartUretimToken: token,
         temizleniyor: { $ne: true },
     }, {
         $addToSet: { kartHaritaIslenenGrupImzalari: imzaliGrup.imza },
-        $push: { kartHaritaEksikKapsamGruplari: {
-            grupImzasi: imzaliGrup.imza, eksikKavramlar,
-        } },
         $currentDate: { kartUretimSonYenileme: true },
     });
     if ((guncelle.matchedCount ?? guncelle.n) !== 1) {
@@ -171,11 +165,32 @@ export const haritaTabanliKartlariOlustur = async ({ kullaniciId, dersId }, d = 
                     kartHaritaEksikKapsamGruplari: [],
                     kartHaritaKapsamTamamlananGrupImzalari: [],
                     kartHaritaZenginlestirmeTamamlandi: false,
+                    kartHaritaKapsamDenetimSurumu: 2,
                     kartHaritaTamamlandi: false,
                 },
             });
             if ((r.matchedCount ?? r.n) !== 1) {
                 throw new HaritaKartiHatasi("Kart üretim durumu başlatılamadı.", 409);
+            }
+        }
+
+        // Önceki kapsam denetimi kartlar üretirken boş "eksik bilgi" listesine
+        // güvendiğinden eksik konuları kaçırabildi. Eski 58/115 kartları
+        // DEĞİŞTİRMEDEN, yalnızca bağımsız kontrol turunu bir kez aç.
+        if (guncelDers.kartHaritaSurumImzasi &&
+            Number(guncelDers.kartHaritaKapsamDenetimSurumu || 0) < 2) {
+            const surumGecisi = await x.DersModel.updateOne({
+                _id: dersId, kullaniciId, kartUretimToken: token,
+                temizleniyor: { $ne: true },
+            }, {
+                $set: {
+                    kartHaritaKapsamDenetimSurumu: 2,
+                    kartHaritaZenginlestirmeTamamlandi: false,
+                    kartHaritaKapsamTamamlananGrupImzalari: [],
+                },
+            });
+            if ((surumGecisi.matchedCount ?? surumGecisi.n) !== 1) {
+                throw new HaritaKartiHatasi("Kapsam sürümü güncellenemedi.", 409);
             }
         }
 
@@ -238,14 +253,9 @@ export const haritaTabanliKartlariOlustur = async ({ kullaniciId, dersId }, d = 
                                 "KART_GECERSIZ_YANIT"
                             );
                         }
-                        const eksikKavramlar = eksikOnemliNoktalariDogrula({
-                            adaylar: cevap?.eksikOnemliNoktalar,
-                            konular, kaynaklar: grup.kaynaklar,
-                            kartlar: [...gorulenKartlar, ...kontrol.kartlar],
-                        });
                         await kaydet(x, {
                             kullaniciId, dersId, token, imzaliGrup: grup,
-                            kartlar: kontrol.kartlar, eksikKavramlar,
+                            kartlar: kontrol.kartlar,
                         });
                         gorulenKartlar.push(...kontrol.kartlar);
                         yeniKartSayisi += kontrol.kartlar.length;
@@ -257,7 +267,6 @@ export const haritaTabanliKartlariOlustur = async ({ kullaniciId, dersId }, d = 
                             gelenKart: cevap?.kartlar?.length || 0,
                             kaydedilenKart: kontrol.kartlar.length,
                             gecersizKart: kontrol.gecersiz, tekrar: kontrol.tekrar,
-                            eksikOnemliBilgi: eksikKavramlar.length,
                             sureMs: Date.now() - t0,
                         });
                     });
@@ -297,86 +306,128 @@ export const haritaTabanliKartlariOlustur = async ({ kullaniciId, dersId }, d = 
         if ((finalR.matchedCount ?? finalR.n) !== 1) {
             throw new HaritaKartiHatasi("Kart üretim durumu güncellenemedi.", 409);
         }
-        // İkinci turu kart sayısı DEĞİL, ilk üretimin kaynaklı kapsam denetimi açar.
-        // 1 kartlı konu yeterliyse ek çağrı yok; 4-7 kartlı bir konu için önemli
-        // bilgi eksiği varsa tamamlama yapılabilir. Bütün metinleri yeniden
-        // otomatik taramak yerine yalnızca eksik bildirilen gruplar incelenir.
-        let zenginlestirmeTamamlandi = Boolean(guncelDers.kartHaritaZenginlestirmeTamamlandi);
+        // Gemini'nin ilk kart üretimi sırasında bildirdiği boş "eksik bilgi"
+        // listesi yeterlilik kanıtı değildir. İLK üretim ve bağımsız içerik
+        // incelemesi AYRI Gemini istekleridir. Her ders metni grubu yalnızca
+        // bir kez denetlenir. 1 veya 6 kartlı konu fark etmeksizin, yeni
+        // önemli bilgi yoksa hiç kart eklenmez; üst sınır 8 korunur.
+        let zenginlestirmeTamamlandi = Boolean(
+            guncelDers.kartHaritaZenginlestirmeTamamlandi &&
+            Number(guncelDers.kartHaritaKapsamDenetimSurumu || 0) >= 2
+        );
         let zenginlestirmeYeniKartSayisi = 0;
         let kapsamBekleyen = 0;
         if (tamamlandi && !zenginlestirmeTamamlandi && !kotaAsildi) {
             const sonDers = await dersDurumunuGetir(x, kullaniciId, dersId);
-            const tamamlanan = new Set(sonDers.kartHaritaKapsamTamamlananGrupImzalari || []);
-            const kayitlar = sonDers.kartHaritaEksikKapsamGruplari || [];
-            const bekleyen = kayitlar.filter((kayit) =>
-                kayit.eksikKavramlar?.length > 0 && !tamamlanan.has(String(kayit.grupImzasi)));
+            const tamamlanan = new Set(
+                Number(guncelDers.kartHaritaKapsamDenetimSurumu || 0) >= 2
+                    ? (sonDers.kartHaritaKapsamTamamlananGrupImzalari || [])
+                    : []
+            );
+            const bekleyen = gruplar.filter((grup) => !tamamlanan.has(grup.imza));
             const oncekiler = await tumKartlar(x, kullaniciId, dersId);
             let basarisiz = false;
-            for (const kayit of bekleyen) {
-                const grup = gruplar.find((g) => g.imza === String(kayit.grupImzasi));
-                if (!grup) { basarisiz = true; break; }
-                try {
-                    const eksikKavramlar = eksikOnemliNoktalariDogrula({
-                        adaylar: kayit.eksikKavramlar, konular,
-                        kaynaklar: grup.kaynaklar, kartlar: oncekiler,
-                    });
-                    if (eksikKavramlar.length) {
+            let auditIndex = 0;
+            let auditKayitSirasi = Promise.resolve();
+            const auditKaydet = (fn) => {
+                const islem = auditKayitSirasi.then(fn);
+                auditKayitSirasi = islem.catch(() => {});
+                return islem;
+            };
+            const kontrolIscisi = async () => {
+                while (auditIndex < bekleyen.length && !kotaAsildi) {
+                    const grup = bekleyen[auditIndex++];
+                    const t0 = Date.now();
+                    try {
                         const cevap = await x.uret({
-                            dersAdi: guncelDers.dersAdi, konuHaritasi: agac,
-                            grup, oncekiSorular: oncekiler,
-                            eksikKavramlar,
-                            kartLimiti: Math.min(12, eksikKavramlar.length * 2),
+                            dersAdi: guncelDers.dersAdi,
+                            konuHaritasi: agac,
+                            grup,
+                            oncekiSorular: oncekiler,
+                            kapsamKontrolu: true,
+                            kartLimiti: 24,
                         });
-                        const idler = new Set(eksikKavramlar.map((k) => k.konuId));
-                        const kontrol = haritaKartlariniDogrula({
-                            hamKartlar: (cevap?.kartlar || []).filter((k) =>
-                                idler.has(String(k?.konuId))),
-                            konular, kaynaklar: grup.kaynaklar,
-                            oncekiKartlar: oncekiler, ayrinti: true,
+                        if (!Array.isArray(cevap?.kartlar)) {
+                            throw new HaritaKartiHatasi(
+                                "Kapsam kontrolü geçerli kart listesi döndürmedi.", 502,
+                                "KAPSAM_GECERSIZ_YANIT"
+                            );
+                        }
+                        await auditKaydet(async () => {
+                            const kontrol = haritaKartlariniDogrula({
+                                hamKartlar: cevap.kartlar,
+                                konular, kaynaklar: grup.kaynaklar,
+                                oncekiKartlar: oncekiler, ayrinti: true,
+                            });
+                            // Tümü geçersiz bir yanıtı tamamlandı sanma.
+                            if (cevap.kartlar.length && !kontrol.kartlar.length &&
+                                kontrol.gecersiz && !kontrol.tekrar && !kontrol.limit) {
+                                throw new HaritaKartiHatasi(
+                                    "Kapsam kontrolü yanlış konu/kaynak kodları döndürdü.",
+                                    502, "KAPSAM_GECERSIZ_YANIT"
+                                );
+                            }
+                            await kartlariKaydet(x, {
+                                kullaniciId, dersId, token, kartlar: kontrol.kartlar,
+                            });
+                            oncekiler.push(...kontrol.kartlar);
+                            zenginlestirmeYeniKartSayisi += kontrol.kartlar.length;
+                            const sonuc = await x.DersModel.updateOne({
+                                _id: dersId, kullaniciId, kartUretimToken: token,
+                                temizleniyor: { $ne: true },
+                            }, {
+                                $addToSet: {
+                                    kartHaritaKapsamTamamlananGrupImzalari: grup.imza,
+                                },
+                            });
+                            if ((sonuc.matchedCount ?? sonuc.n) !== 1) {
+                                throw new HaritaKartiHatasi(
+                                    "Kapsam denetimi ilerlemesi kaydedilemedi.", 409
+                                );
+                            }
+                            tamamlanan.add(grup.imza);
+                            console.info("[CalismaKartlari][kapsam] Bağımsız grup kontrolü", {
+                                grup: grup.sira, toplamGrup: gruplar.length,
+                                adayKart: cevap.kartlar.length,
+                                eklenenKart: kontrol.kartlar.length,
+                                gecersizKart: kontrol.gecersiz,
+                                tekrarKart: kontrol.tekrar,
+                                sureMs: Date.now() - t0,
+                            });
                         });
-                        await kartlariKaydet(x, {
-                            kullaniciId, dersId, token, kartlar: kontrol.kartlar,
+                    } catch (hata) {
+                        basarisiz = true;
+                        if ([429, 503].includes(Number(hata?.status))) kotaAsildi = true;
+                        console.warn("[CalismaKartlari][kapsam] İnceleme tamamlanamadı", {
+                            grup: grup.sira, toplamGrup: gruplar.length,
+                            status: Number(hata?.status) || 0,
+                            kod: String(hata?.kod || "BILINMIYOR").slice(0, 64),
+                            sureMs: Date.now() - t0,
                         });
-                        oncekiler.push(...kontrol.kartlar);
-                        zenginlestirmeYeniKartSayisi += kontrol.kartlar.length;
                     }
-                    const sonuc = await x.DersModel.updateOne({
-                        _id: dersId, kullaniciId, kartUretimToken: token,
-                        temizleniyor: { $ne: true },
-                    }, {
-                        $addToSet: { kartHaritaKapsamTamamlananGrupImzalari: grup.imza },
-                    });
-                    if ((sonuc.matchedCount ?? sonuc.n) !== 1) {
-                        throw new HaritaKartiHatasi("Kapsam kontrolü kaydedilemedi.", 409);
-                    }
-                    tamamlanan.add(grup.imza);
-                } catch (hata) {
-                    basarisiz = true;
-                    if (Number(hata?.status) === 429) kotaAsildi = true;
-                    console.warn("[CalismaKartlari][kapsam] Kaynaklı eksik bilgi tamamlanamadı", {
-                        grup: grup.sira,
-                        status: Number(hata?.status) || 0,
-                        kod: String(hata?.kod || "BILINMIYOR").slice(0, 64),
-                    });
-                    // Kota veya servis yoğunluğu devam ederken yeni istek gönderme.
-                    if ([429, 503].includes(Number(hata?.status))) break;
                 }
-            }
-            kapsamBekleyen = bekleyen.filter((kayit) =>
-                !tamamlanan.has(String(kayit.grupImzasi))).length;
+            };
+            await Promise.all(Array.from(
+                { length: Math.min(2, bekleyen.length) }, () => kontrolIscisi()
+            ));
+            kapsamBekleyen = gruplar.filter((g) => !tamamlanan.has(g.imza)).length;
             zenginlestirmeTamamlandi = !basarisiz && kapsamBekleyen === 0;
             if (zenginlestirmeTamamlandi) {
                 const sonuc = await x.DersModel.updateOne({
                     _id: dersId, kullaniciId, kartUretimToken: token,
                     temizleniyor: { $ne: true },
-                }, { $set: { kartHaritaZenginlestirmeTamamlandi: true } });
+                }, {
+                    $set: {
+                        kartHaritaKapsamDenetimSurumu: 2,
+                        kartHaritaZenginlestirmeTamamlandi: true,
+                    },
+                });
                 if ((sonuc.matchedCount ?? sonuc.n) !== 1) {
-                    throw new HaritaKartiHatasi("Kapsam kontrolü durumu kaydedilemedi.", 409);
+                    throw new HaritaKartiHatasi("Kapsam denetimi durumu kaydedilemedi.", 409);
                 }
             }
-            console.info("[CalismaKartlari][kapsam] Otomatik önemli bilgi denetimi", {
-                eksikBildirenGrup: kayitlar.filter((k) => k.eksikKavramlar?.length).length,
-                kalanGrup: kapsamBekleyen,
+            console.info("[CalismaKartlari][kapsam] Ders denetimi", {
+                toplamGrup: gruplar.length, kalanGrup: kapsamBekleyen,
                 yeniKart: zenginlestirmeYeniKartSayisi,
                 tamamlandi: zenginlestirmeTamamlandi,
             });
