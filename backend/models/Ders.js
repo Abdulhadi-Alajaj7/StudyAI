@@ -105,6 +105,11 @@ const dersSchema = new mongoose.Schema(
         kartDersToplamGrupSayisi: { type: Number, default: 0 },
         kartDersIslenenGrupImzalari: { type: [String], default: [] },
         kartDersTamamlandi: { type: Boolean, default: false },
+        // İstemciden bağımsız otomatik kart üretimi için kalıcı iş durumu.
+        kartDersOtomatikAktif: { type: Boolean, default: false },
+        kartDersSonrakiDeneme: { type: Date, default: null },
+        kartDersDenemeSayisi: { type: Number, default: 0 },
+        kartDersOtomatikHataKodu: { type: String, default: "" },
         kartUretimToken: { type: mongoose.Schema.Types.ObjectId, default: null },
         kartUretimSonYenileme: { type: Date, default: null },
         temizleniyor: {
