@@ -502,6 +502,8 @@ export const calismaKartlariniHizliOlustur = async ({ kullaniciId, dersId }, d =
             }), { ordered: false });
         }
         const tumKartlar = await kartlariGetir(x, kullaniciId, dersId);
+        const basariliHizliSurum = (aiKartiSayisi > 0 ||
+            guncelDers.kartHizliUretimSurumImzasi === imza) && basarisizPartiSayisi === 0;
         console.info("[CalismaKartlari][hizli] Kayıt sonucu", {
             mevcutKart: eskiKartlar.length,
             yeniKart: tumKartlar.length - eskiKartlar.length,
@@ -520,7 +522,7 @@ export const calismaKartlariniHizliOlustur = async ({ kullaniciId, dersId }, d =
         }, {
             $set: {
                 kartKaynakSurumImzasi: imza,
-                kartHizliUretimSurumImzasi: aiKartiSayisi > 0 && basarisizPartiSayisi === 0 ? imza : "",
+                kartHizliUretimSurumImzasi: basariliHizliSurum ? imza : "",
                 kartUretimHedefKonuIds: hedef,
                 kartTamamlananKonuIds: tamamlanan,
                 kartAtlananKonuIds: atlanan,
@@ -535,7 +537,7 @@ export const calismaKartlariniHizliOlustur = async ({ kullaniciId, dersId }, d =
             toplamKonuSayisi: hedef.length,
             tamamlananKonuSayisi: hedef.length,
             atlananKonuSayisi: atlanan.length,
-            hizliUretimYapildi: aiKartiSayisi > 0 && basarisizPartiSayisi === 0,
+            hizliUretimYapildi: basariliHizliSurum,
             yeniKartSayisi: tumKartlar.length - eskiKartlar.length,
             partiGeminiKartiSayisi: aiKartiSayisi,
             partiKaynakKartiSayisi: adaylar.length - aiKartiSayisi,
