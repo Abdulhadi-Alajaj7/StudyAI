@@ -269,7 +269,7 @@ test("email değişimi eski adresi korur, yalnız hash saklar; onay adres/token/
     assert.equal(d.doc.emailDegisimSonTarih.getTime(), simdi + 60_000);
     assert.match(d.mesajlar[0].mesaj.html, /E-posta Adresimi Onayla/);
     assert.match(d.mesajlar[0].mesaj.html, /1 dakika/);
-    assert.equal(d.doc.emailDegisimTokenHash, tokenHashle(`email-degisim:u:${token}`));
+    assert.equal(d.doc.emailDegisimTokenHash, tokenHashle(`email-degisim-v2:${token}`));
     assert.ok(!JSON.stringify(d.doc).includes(token)); assert.match(d.mesajlar[0].mesaj.text, /eposta-dogrula/);
     const r = await Promise.allSettled([d.servis.dogrula({ kullanici: kopya(d.doc), token }), d.servis.dogrula({ kullanici: kopya(d.doc), token })]);
     assert.equal(r.filter(x => x.status === "fulfilled").length, 1);
@@ -277,13 +277,11 @@ test("email değişimi eski adresi korur, yalnız hash saklar; onay adres/token/
     assert.equal(d.doc.emailDegisimTokenHash, undefined); assert.equal(d.doc.bekleyenEmail, undefined);
 });
 
-test("email token'ı kullanıcıya, süreye ve oturum sürümüne bağlıdır; şifre sıfırlama token'ı kullanılamaz", async () => {
-    for (const durum of ["yabanci", "sure", "oturum", "bozuk", "reset"]) {
+test("email tokenı süreye ve alana bağlıdır; şifre sıfırlama tokenı kullanılamaz", async () => {
+    for (const durum of ["sure", "bozuk", "reset"]) {
         const d = emailDuzenegi(); await d.servis.iste(d.girdi());
         const kullanici = kopya(d.doc); let t = token;
-        if (durum === "yabanci") kullanici._id = "baska";
         if (durum === "sure") d.ilerlet(60_001);
-        if (durum === "oturum") d.doc.oturumSurumu = 1;
         if (durum === "bozuk") t = "bozuk";
         if (durum === "reset") d.doc.emailDegisimTokenHash = tokenHashle(token);
         await assert.rejects(d.servis.dogrula({ kullanici, token: t }), { kod: "EMAIL_BAGLANTISI_GECERSIZ" });
@@ -327,7 +325,7 @@ test("profil kaydı yalnız adı değiştirirken doğrulama bekleyen adresi yan�
     assert.equal(r.statusCode, 200); assert.equal(r.body.kullanici.bekleyenEmail, "yeni@example.test");
 });
 
-test("profil isteği e-posta doğrulama servisine aktarılır; onay yeni oturum cookie'si verir", async t => {
+test("profil isteği e-posta doğrulama servisine aktarılır; onay oturum açmaz", async t => {
     t.mock.method(emailDegisimServisi, "iste", async g => {
         assert.equal(g.email, "yeni@example.test"); assert.equal(g.authTime, 123);
         return { _id: "u", email: "eski@example.test", kullaniciAdi: "Ad" };
@@ -335,9 +333,9 @@ test("profil isteği e-posta doğrulama servisine aktarılır; onay yeni oturum 
     const r = resOlustur(); await profilGuncelle({ user: { _id: "u", email: "eski@example.test" }, body: { email: "yeni@example.test" }, authTime: 123 }, r);
     assert.equal(r.body.kullanici.email, "eski@example.test");
     t.mock.method(emailDegisimServisi, "dogrula", async () => ({ _id: "u", email: "yeni@example.test", oturumSurumu: 2 }));
-    const onay = resOlustur(); await emailDegisiminiDogrula({ user: { _id: "u" }, body: { token } }, onay);
-    assert.equal(onay.body.kullanici.email, "yeni@example.test");
-    assert.equal(jwt.verify(onay.cookies[0][1], process.env.JWT_SECRET).oturumSurumu, 2);
+    const onay = resOlustur(); await emailDegisiminiDogrula({ body: { token } }, onay);
+    assert.equal(onay.statusCode, 200); assert.equal(onay.cookies.length, 0);
+    assert.equal(onay.silinen[0], "token"); assert.equal(onay.body.kullanici, undefined);
 });
 
 test("e-posta bağlantısı 59. saniyede çalışır, 60. saniyeden sonra geçersizdir; giriş tazeliği 15 dakika kalır", async () => {
@@ -351,4 +349,31 @@ test("e-posta bağlantısı 59. saniyede çalışır, 60. saniyeden sonra geçer
     gec.ilerlet(60_000);
     await assert.rejects(gec.servis.dogrula({ kullanici: kopya(gec.doc), token }), { kod: "EMAIL_BAGLANTISI_GECERSIZ" });
     assert.equal(gec.doc.email, "ogrenci@example.test");
+});
+
+test("yeni e-posta doğrulaması oturumsuz çalışır, tokenı yalnız bir kez tüketir", async () => {
+    const d = emailDuzenegi();
+    await d.servis.iste(d.girdi());
+    const r = await Promise.allSettled([d.servis.dogrula({ token }), d.servis.dogrula({ token })]);
+    assert.equal(r.filter(x => x.status === "fulfilled").length, 1);
+    assert.equal(d.doc.email, "yeni@example.test");
+    assert.equal(d.doc.bekleyenEmail, undefined);
+    assert.equal(d.doc.oturumSurumu, 1);
+    await assert.rejects(d.servis.dogrula({ token }), { kod: "EMAIL_BAGLANTISI_GECERSIZ" });
+});
+
+test("e-posta onayında oturum gerekmiyor; origin, token ve hız sınırı korunuyor", async t => {
+    const route = authRoutes.stack.find(s => s.route?.path === "/email-change/verify")?.route;
+    assert.ok(route);
+    assert.ok(!route.stack.some(s => s.handle === kimlikDogrula));
+    assert.ok(route.stack.some(s => s.handle === authOriginKontrolu));
+    t.mock.method(AuthIstekSiniri, "findOneAndUpdate", async () => ({}));
+    t.mock.method(emailDegisimServisi, "dogrula", async ({ token: g }) => {
+        assert.equal(g, token);
+        return { email: "yeni@example.test" };
+    });
+    const r = await rotayiCalistir("/email-change/verify", { body: { token }, cookies: {} });
+    assert.equal(r.statusCode, 200);
+    assert.equal(r.cookies.length, 0);
+    assert.equal(r.silinen[0], "token");
 });

@@ -141,9 +141,10 @@ export const profilGuncelle = async (req, res) => {
 
 export const emailDegisiminiDogrula = async (req, res) => {
   try {
-    const kullanici = await emailDegisimServisi.dogrula({ kullanici: req.user, token: req.body.token });
-    oturumCookieGonder(res, oturumTokeniOlustur(kullanici));
-    res.json({ basarili: true, kullanici: kullaniciyiSun(kullanici), mesaj: "E-posta adresiniz doğrulandı ve güncellendi." });
+    await emailDegisimServisi.dogrula({ token: req.body.token });
+    // Tek kullanımlık token onay verir ancak kullanıcıyı otomatik oturum açmaz.
+    res.clearCookie("token", oturumCookieAyarlari());
+    res.json({ basarili: true, mesaj: "E-posta adresiniz doğrulandı ve güncellendi. Yeni adresinizle giriş yapabilirsiniz." });
   } catch (hata) {
     const izinli = ["EMAIL_BAGLANTISI_GECERSIZ", "EMAIL_KULLANILAMIYOR"].includes(hata.kod);
     res.status(izinli ? hata.status : 503).json({ kod: izinli ? hata.kod : "AUTH_GECICI_HATA", hata: izinli ? hata.message : "E-posta adresi şu anda doğrulanamıyor." });

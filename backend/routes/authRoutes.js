@@ -79,7 +79,8 @@ router.post("/reset-password/:token", authOriginKontrolu,
 ========================= */
 
 router.get("/profil", kimlikDogrula, profilGetir);
-router.post("/email-change/verify", authOriginKontrolu, kimlikDogrula,
+// Tek kullanımlık doğrulama bağlantısı oturum gerektirmez; origin ve hız sınırı korunur.
+router.post("/email-change/verify", authOriginKontrolu,
     authIstekSiniri({ kapsam: "email-dogrula", maksimum: 10 }),
     body("token").isString().withMessage("Doğrulama bağlantısı geçersiz.").bail().matches(/^[a-f0-9]{64}$/).withMessage("Doğrulama bağlantısı geçersiz."),
     girdiyiKontrolEt, emailDegisiminiDogrula);

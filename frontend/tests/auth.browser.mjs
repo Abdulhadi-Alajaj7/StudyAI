@@ -63,7 +63,7 @@ const q=new URLSearchParams(location.search);localStorage.setItem('studyai-theme
                 else { assert.equal(body.yeniSifre, body.yeniSifreTekrar); data = { basarili: true }; }
             } else if (u.pathname === "/auth/email-change/verify") {
                 emailSayisi++; if (body.token === "b".repeat(64)) { status = 400; data = { kod: "EMAIL_BAGLANTISI_GECERSIZ" }; }
-                else { kullanici.email = kullanici.bekleyenEmail || "yeni@example.test"; delete kullanici.bekleyenEmail; data = { kullanici }; }
+                else { kullanici.email = kullanici.bekleyenEmail || "yeni@example.test"; delete kullanici.bekleyenEmail; oturum = false; data = { basarili: true }; }
             } else if (u.pathname === "/auth/kayit") { kayitSayisi++; hesapDogrulandi = false; oturum = false; status = 201; data = { epostaGonderildi: true, mesaj: "Hesabınızı aktifleştirmek için e-posta adresinize gönderilen doğrulama bağlantısına tıklayın." }; }
             else if (u.pathname === "/auth/verify-email") { kayitDogrulamaSayisi++;
                 if (hesapDogrulandi || body.token === "b".repeat(64)) { status = 400; data = { kod: "KAYIT_DOGRULAMA_GECERSIZ" }; }
@@ -106,9 +106,12 @@ const q=new URLSearchParams(location.search);localStorage.setItem('studyai-theme
     await ac("/panel/profil", "light"); await bekle("document.getElementById('email')?.value==='yeni@example.test'");
     assert.ok(await evaluate("document.documentElement.scrollWidth<=innerWidth"));
     const mobil = join(tmpdir(), "studyai-profil-mobil.png"); await writeFile(mobil, Buffer.from((await cdp("Page.captureScreenshot", { format: "png" })).data, "base64"));
-    oturum = false; await ac(`/eposta-dogrula/${"a".repeat(64)}`); await bekle("document.body.innerText.includes('Giriş Yap ve Devam Et')"); assert.equal(emailSayisi, 0);
-    await tikla("Giriş Yap ve Devam Et"); await bekle("document.getElementById('sifre')"); await doldur("email", "ahmet@example.test"); await doldur("sifre", "Eski123!"); await tikla("Giriş Yap");
-    await bekle("document.body.innerText.includes('doğrulandı ve güncellendi')"); assert.equal(emailSayisi, 1, "Girişten sonra ikinci onay butonu olmadan doğrulanmalı");
+    oturum = false; await ac(`/eposta-dogrula/${"a".repeat(64)}`);
+    await bekle("document.body.innerText.includes('doğrulandı ve güncellendi')");
+    assert.equal(emailSayisi, 1, "Oturum olmadan tek POST ile doğrulanmalı");
+    assert.equal(oturum, false, "E-posta bağlantısı oturum açmamalı");
+    await tikla("Giriş Yap"); await bekle("document.getElementById('sifre')");
+    await doldur("email", "yeni@example.test"); await doldur("sifre", "Eski123!"); await tikla("Giriş Yap");
     await ac("/panel/profil"); await bekle("document.getElementById('email')?.value==='yeni@example.test'"); await tikla("Çıkış Yap"); await bekle("document.getElementById('sifre')"); assert.equal(oturum, false);
     await ac("/sifremi-unuttum"); await bekle("document.getElementById('email')");
     assert.ok(await evaluate("document.documentElement.scrollWidth<=innerWidth"));
