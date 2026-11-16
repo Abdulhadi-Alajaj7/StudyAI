@@ -266,6 +266,9 @@ const emailDuzenegi = () => {
 test("email değişimi eski adresi korur, yalnız hash saklar; onay adres/token/oturum sürümünü atomik değiştirir", async () => {
     const d = emailDuzenegi(); await d.servis.iste(d.girdi());
     assert.equal(d.doc.email, "ogrenci@example.test"); assert.equal(d.doc.bekleyenEmail, "yeni@example.test");
+    assert.equal(d.doc.emailDegisimSonTarih.getTime(), simdi + 60_000);
+    assert.match(d.mesajlar[0].mesaj.html, /E-posta Adresimi Onayla/);
+    assert.match(d.mesajlar[0].mesaj.html, /1 dakika/);
     assert.equal(d.doc.emailDegisimTokenHash, tokenHashle(`email-degisim:u:${token}`));
     assert.ok(!JSON.stringify(d.doc).includes(token)); assert.match(d.mesajlar[0].mesaj.text, /eposta-dogrula/);
     const r = await Promise.allSettled([d.servis.dogrula({ kullanici: kopya(d.doc), token }), d.servis.dogrula({ kullanici: kopya(d.doc), token })]);
@@ -279,7 +282,7 @@ test("email token'ı kullanıcıya, süreye ve oturum sürümüne bağlıdır; �
         const d = emailDuzenegi(); await d.servis.iste(d.girdi());
         const kullanici = kopya(d.doc); let t = token;
         if (durum === "yabanci") kullanici._id = "baska";
-        if (durum === "sure") d.ilerlet(900_000);
+        if (durum === "sure") d.ilerlet(60_001);
         if (durum === "oturum") d.doc.oturumSurumu = 1;
         if (durum === "bozuk") t = "bozuk";
         if (durum === "reset") d.doc.emailDegisimTokenHash = tokenHashle(token);
@@ -335,4 +338,17 @@ test("profil isteği e-posta doğrulama servisine aktarılır; onay yeni oturum 
     const onay = resOlustur(); await emailDegisiminiDogrula({ user: { _id: "u" }, body: { token } }, onay);
     assert.equal(onay.body.kullanici.email, "yeni@example.test");
     assert.equal(jwt.verify(onay.cookies[0][1], process.env.JWT_SECRET).oturumSurumu, 2);
+});
+
+test("e-posta bağlantısı 59. saniyede çalışır, 60. saniyeden sonra geçersizdir; giriş tazeliği 15 dakika kalır", async () => {
+    const basarili = emailDuzenegi();
+    await basarili.servis.iste({ ...basarili.girdi(), authTime: (simdi - 14 * 60_000) / 1000 });
+    basarili.ilerlet(59_000);
+    await basarili.servis.dogrula({ kullanici: kopya(basarili.doc), token });
+    assert.equal(basarili.doc.email, "yeni@example.test");
+    const gec = emailDuzenegi();
+    await gec.servis.iste(gec.girdi());
+    gec.ilerlet(60_000);
+    await assert.rejects(gec.servis.dogrula({ kullanici: kopya(gec.doc), token }), { kod: "EMAIL_BAGLANTISI_GECERSIZ" });
+    assert.equal(gec.doc.email, "ogrenci@example.test");
 });

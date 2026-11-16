@@ -71,3 +71,10 @@ export const kayitDogrulamaEpostasi = link => markaliGuvenlikEpostasi(link, {
     aciklama: "StudyAI'ye hoş geldiniz. Hesabınızı aktifleştirmek için e-posta adresinizi aşağıdaki bağlantıdan doğrulayın. Kayıt anından itibaren 1 saat içinde doğrulayın; yeniden gönderim süreyi uzatmaz.",
     not: "Bu hesabı siz oluşturmadıysanız bu e-postayı dikkate almayabilirsiniz. Doğrulanmayan hesaplar 1 saat dolduktan sonra temizlenir.",
 });
+
+export const emailDegisimDogrulamaEpostasi = link => markaliGuvenlikEpostasi(link, {
+    baslik: "Yeni E-posta Adresinizi Onaylayın", buton: "E-posta Adresimi Onayla",
+    konu: "E-posta Değişikliği", sure: "1 dakika",
+    aciklama: "StudyAI hesabınızın e-posta adresini değiştirmek için istek aldık. Yeni adresinizi onaylamak için aşağıdaki butona tıklayın. Oturumunuz açıksa onay otomatik tamamlanır.",
+    not: "Bu değişikliği siz istemediyseniz bu e-postayı dikkate almayın. Onay verilmezse hesabınızın mevcut e-posta adresi değişmez.",
+});

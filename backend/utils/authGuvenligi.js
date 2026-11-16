@@ -15,8 +15,12 @@ export const oturumTokeniOlustur = kullanici => jwt.sign({ id: String(kullanici.
 export const oturumCookieGonder = (res, token) => res.cookie("token", token, {
     ...oturumCookieAyarlari(), maxAge: 7 * 24 * 60 * 60 * 1000,
 });
-export const kullaniciyiSun = k => ({ id: k.id || String(k._id), _id: String(k._id), kullaniciAdi: k.kullaniciAdi, email: k.email,
-    bekleyenEmail: new Date(k.emailDegisimSonTarih).getTime() > Date.now() ? k.bekleyenEmail : undefined });
+export const kullaniciyiSun = k => {
+    const bekliyor = Boolean(k.bekleyenEmail) && new Date(k.emailDegisimSonTarih).getTime() > Date.now();
+    return { id: k.id || String(k._id), _id: String(k._id), kullaniciAdi: k.kullaniciAdi, email: k.email,
+        bekleyenEmail: bekliyor ? k.bekleyenEmail : undefined,
+        emailDegisimSonTarih: bekliyor ? k.emailDegisimSonTarih : undefined };
+};
 
 // Tarayıcı cookie'si ile yapılan auth yazımlarında CORS tek başına CSRF koruması değildir.
 export const authOriginKontrolu = (req, res, next) => {

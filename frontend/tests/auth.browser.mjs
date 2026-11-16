@@ -108,7 +108,7 @@ const q=new URLSearchParams(location.search);localStorage.setItem('studyai-theme
     const mobil = join(tmpdir(), "studyai-profil-mobil.png"); await writeFile(mobil, Buffer.from((await cdp("Page.captureScreenshot", { format: "png" })).data, "base64"));
     oturum = false; await ac(`/eposta-dogrula/${"a".repeat(64)}`); await bekle("document.body.innerText.includes('Giriş Yap ve Devam Et')"); assert.equal(emailSayisi, 0);
     await tikla("Giriş Yap ve Devam Et"); await bekle("document.getElementById('sifre')"); await doldur("email", "ahmet@example.test"); await doldur("sifre", "Eski123!"); await tikla("Giriş Yap");
-    await bekle("document.body.innerText.includes('Onayladığınızda')"); assert.equal(emailSayisi, 0, "GET token tüketmez"); await tikla("E-posta Adresini Doğrula"); await bekle("document.body.innerText.includes('doğrulandı ve güncellendi')"); assert.equal(emailSayisi, 1);
+    await bekle("document.body.innerText.includes('doğrulandı ve güncellendi')"); assert.equal(emailSayisi, 1, "Girişten sonra ikinci onay butonu olmadan doğrulanmalı");
     await ac("/panel/profil"); await bekle("document.getElementById('email')?.value==='yeni@example.test'"); await tikla("Çıkış Yap"); await bekle("document.getElementById('sifre')"); assert.equal(oturum, false);
     await ac("/sifremi-unuttum"); await bekle("document.getElementById('email')");
     assert.ok(await evaluate("document.documentElement.scrollWidth<=innerWidth"));

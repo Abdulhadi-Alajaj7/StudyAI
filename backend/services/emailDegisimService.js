@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import Kullanici from "../models/Kullanici.js";
 import { epostaServisi } from "./epostaService.js";
+import { emailDegisimDogrulamaEpostasi } from "./epostaSablonlari.js";
 import { oturumSurumuFiltresi, tokenHashle, sifirlamaTokeniGecerliMi } from "../utils/authGuvenligi.js";
 
 const hata = (mesaj, kod, status = 400) => Object.assign(new Error(mesaj), { kod, status });
@@ -17,15 +18,15 @@ export const emailDegisimServisiOlustur = ({ Model = Kullanici, eposta = epostaS
             ...oturumSurumuFiltresi(kullanici.oturumSurumu ?? 0),
             $and: [{ $or: [{ emailDegisimSonIstek: { $exists: false } }, { emailDegisimSonIstek: { $lte: new Date(zaman - 60_000) } }] }],
         }, { $set: { kullaniciAdi: kullaniciAdi ?? kullanici.kullaniciAdi, bekleyenEmail: email,
-            emailDegisimTokenHash: hash, emailDegisimSonTarih: new Date(zaman + 15 * 60_000), emailDegisimSonIstek: new Date(zaman) } },
+            emailDegisimTokenHash: hash, emailDegisimSonTarih: new Date(zaman + 60_000), emailDegisimSonIstek: new Date(zaman) } },
         { new: true, runValidators: true }).select("+bekleyenEmail +emailDegisimSonTarih");
         if (!guncel) throw hata("Hesap bilgileriniz değişmiş veya kısa süre önce bağlantı istenmiş. Sayfayı yenileyip bir dakika sonra tekrar deneyin.", "EMAIL_DEGISIM_BEKLE", 409);
         const temizle = () => Model.updateOne({ _id: kullanici._id, emailDegisimTokenHash: hash },
             { $unset: { bekleyenEmail: 1, emailDegisimTokenHash: 1, emailDegisimSonTarih: 1 } });
         const link = `${ayar.clientUrl}/eposta-dogrula/${token}`;
-        if (!eposta.sirayaAl({ to: email, subject: "StudyAI — Yeni E-posta Adresini Doğrula",
-            text: `Yeni e-posta adresinizi doğrulamak için: ${link}\nBağlantı 15 dakika geçerlidir. Doğrulayana kadar mevcut adresiniz korunur.`,
-            html: `<p>Yeni e-posta adresinizi doğrulayın:</p><p><a href="${link}">E-posta Adresini Doğrula</a></p><p>Bağlantı 15 dakika geçerlidir. Doğrulayana kadar mevcut adresiniz korunur.</p>`,
+        const icerik = emailDegisimDogrulamaEpostasi(link);
+        if (!eposta.sirayaAl({ to: email, subject: "StudyAI — E-posta Değişikliği Onayı",
+            ...icerik,
         }, temizle)) {
             await temizle(); throw hata("E-posta servisi şu anda yoğun. Daha sonra tekrar deneyin.", "AUTH_GECICI_HATA", 503);
         }

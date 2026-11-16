@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { sifreSifirlamaEpostasi } from "../services/epostaSablonlari.js";
+import { sifreSifirlamaEpostasi, emailDegisimDogrulamaEpostasi } from "../services/epostaSablonlari.js";
 import { epostaServisiOlustur } from "../services/epostaService.js";
 import { sifreSifirlamaServisiOlustur } from "../services/sifreSifirlamaService.js";
 import { tokenHashle } from "../utils/authGuvenligi.js";
@@ -45,4 +45,15 @@ test("gönderim akışı aynı token/15 dakika/göndereni kullanır; SMTP yalnı
     assert.equal(gonderilen.from, '"StudyAI" <mock@example.test>');
     assert.equal(gonderilen.to, "ogrenci@example.test");
     assert.equal(gonderilen.html, mesaj.html); assert.equal(gonderilen.text, mesaj.text);
+});
+
+test("e-posta değişikliği marka şablonunu kullanır; Türkçe buton ve 1 dakika uyarısı içerir", () => {
+    const url = "https://studyai.example.test/eposta-dogrula/" + token;
+    const { html, text } = emailDegisimDogrulamaEpostasi(url);
+    for (const ifade of ["StudyAI", "Akıllı Öğrenme Platformu", "E-posta Adresimi Onayla", "1 dakika", "mevcut e-posta adresi"]) {
+        assert.ok(html.includes(ifade) && text.includes(ifade), ifade);
+    }
+    assert.deepEqual([...html.matchAll(/href="([^"]+)"/g)].map(m => m[1]), [url, url]);
+    assert.match(html, /max-width:640px/);
+    assert.doesNotMatch(html, /<script|<iframe|<img/i);
 });

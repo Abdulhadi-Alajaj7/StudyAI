@@ -22,6 +22,7 @@ export default function Profil() {
     const [sifreHata, setSifreHata] = useState(""), [sifreMesaj, setSifreMesaj] = useState("");
     const [mesgul, setMesgul] = useState(""), [yukleniyor, setYukleniyor] = useState(true);
     const [yenileme, setYenileme] = useState(0), [girisGerekli, setGirisGerekli] = useState(false);
+    const [kalanSure, setKalanSure] = useState(null);
     const kilit = useRef(false);
     useEffect(() => {
         const c = new AbortController();
@@ -32,6 +33,26 @@ export default function Profil() {
             .finally(() => { if (!c.signal.aborted) setYukleniyor(false); });
         return () => c.abort();
     }, [kullaniciGuncelle, yenileme]);
+    useEffect(() => {
+        const bekleyen = kullanici?.bekleyenEmail;
+        const bitis = new Date(kullanici?.emailDegisimSonTarih).getTime();
+        if (!bekleyen || !Number.isFinite(bitis)) {
+            setKalanSure(null);
+            return undefined;
+        }
+        const kontrol = () => {
+            const saniye = Math.max(0, Math.ceil((bitis - Date.now()) / 1000));
+            setKalanSure(saniye);
+            if (saniye === 0) {
+                setKullanici(k => k?.bekleyenEmail === bekleyen
+                    ? { ...k, bekleyenEmail: undefined, emailDegisimSonTarih: undefined } : k);
+                setForm(f => f.email === bekleyen ? { ...f, email: kullanici.email } : f);
+            }
+        };
+        kontrol();
+        const saat = setInterval(kontrol, 1000);
+        return () => clearInterval(saat);
+    }, [kullanici?.bekleyenEmail, kullanici?.emailDegisimSonTarih, kullanici?.email]);
     const tema = isDark ? "border-[#26334A] bg-[#111B2D]" : "border-[#E2E8F0] bg-white";
     const ikincil = isDark ? "text-slate-400" : "text-slate-500";
     const input = `h-11 w-full rounded-lg border px-4 text-sm outline-none transition focus:border-violet-400 focus:ring-2 focus:ring-violet-500/15 ${isDark ? "border-[#465879] bg-[#0C1525] text-slate-100" : "border-slate-300 bg-white text-slate-900"}`;
@@ -76,7 +97,7 @@ export default function Profil() {
                 <form onSubmit={kaydet} className="space-y-4">
                     <div><label htmlFor="kullaniciAdi" className="mb-2 block text-sm font-medium">Kullanıcı Adı</label><input className={input} id="kullaniciAdi" autoComplete="nickname" required minLength={3} maxLength={100} value={form.kullaniciAdi} onChange={e => setForm({ ...form, kullaniciAdi: e.target.value })} disabled={!!mesgul} /></div>
                     <div><label htmlFor="email" className="mb-2 block text-sm font-medium">E-posta Adresi</label><input id="email" className={input} type="email" autoComplete="email" required maxLength={254} value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} disabled={!!mesgul} /></div>
-                    {kullanici.bekleyenEmail && <p role="status" className="text-sm text-amber-500">{kullanici.bekleyenEmail} için doğrulama bekleniyor. Mevcut adresiniz korunuyor.</p>}
+                    {kullanici.bekleyenEmail && <p role="status" className="text-sm text-amber-500">{kullanici.bekleyenEmail} için doğrulama bekleniyor. Mevcut adresiniz korunuyor.{kalanSure !== null && ` Kalan süre: ${Math.floor(kalanSure / 60).toString().padStart(2, "0")}:${(kalanSure % 60).toString().padStart(2, "0")}`}</p>}
                     {hata && <p role="alert" className="text-sm text-red-500">{hata}</p>}
                     {girisGerekli && <Link to="/" className="text-sm text-violet-400 underline">Yeniden Giriş Yap</Link>}
                     {mesaj && <p role="status" className="text-sm text-emerald-500">{mesaj}</p>}
