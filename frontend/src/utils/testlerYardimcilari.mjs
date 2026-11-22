@@ -1,5 +1,5 @@
 export const TEST_KAPSAMLARI = ["tum_ders", "materyal", "konu"];
-export const TEST_SORU_SAYILARI = [5, 10, 15, 20];
+export const TEST_SORU_SAYILARI = [10, 15, 20];
 export const TEST_ZORLUKLARI = ["kolay", "orta", "zor", "karisik"];
 
 const kapsamEtiketleri = {
@@ -45,6 +45,28 @@ export const testOlusturmaGirdisiOlustur = ({
     }
     return { kapsamTuru, soruSayisi: sayi, zorluk };
 };
+
+// Geçici test denetim çıktısı; doğru cevap ve açıklama kesinlikle aktarılmaz.
+export const testDenetimVerisiniOlustur = (test, konular = []) => ({
+    testId: String(test?._id || ""),
+    konu: String(test?.konuBasligi || ""),
+    soruSayisi: Number(test?.soruSayisi || 0),
+    sorular: (test?.sorular || []).map((soru, index) => ({
+        sira: index + 1,
+        soru: String(soru?.metin || ""),
+        secenekler: (soru?.secenekler || []).map((secenek) => ({
+            anahtar: secenek.anahtar,
+            metin: secenek.metin,
+        })),
+        konuId: String(soru?.konuId || ""),
+        konuBasligi: String(soru?.konuBasligi || konular.find(
+            (konu) => konu.konuId === soru?.konuId
+        )?.baslik || "Belirtilmedi"),
+        kaynakDosyalari: [...new Set(
+            (soru?.kaynaklar || []).map((kaynak) => kaynak.dosyaAdi).filter(Boolean)
+        )],
+    })),
+});
 
 export const testOlusturmaButonuDevreDisiMi = ({
     sayfaYukleniyor,
