@@ -48,3 +48,13 @@ Her soru, seçilen ana konunun bir alt konusuna (veya doğrudan seçilen yaprak 
 - `GEMINI_TEST_DENETIM_MODELI`: istenirse bağımsız kalite denetimi için ayrı model; ayarlanmazsa test modelini kullanır.
 
 Eşikler gerçek öğrenci materyallerinde yanlış pozitif ve kaçan tekrar oranları ölçülerek değiştirilmelidir. Başarılı CI, gerçek Gemini servisinde bütün soruların doğru olacağını garanti etmez.
+
+## Gemini öğretmen: harita ve metin parçaları
+
+- Yeni konu haritası oluşturulurken nihai konu ID'leri belirlendikten sonra Gemini tüm aktif metin parçalarını ilgili ana/alt konulara sınıflandırır.
+- Her aktif parça en az bir geçerli konu ID'sine bağlanır. Birden fazla konuyu gerçekten kapsayan parçalara çoklu etiket verilebilir; başlık ve genel içerikler ana konuya bağlanabilir.
+- Sınıflandırma, materyal ID + aktif işleme sürümü + parça indeksi ile haritaya kaydedilir. Bilinmeyen ID, eksik parça veya tekrar eden parça varsa harita hazır olarak yayımlanmaz.
+- Test oluştururken yeni haritalarda doğrudan bu eşleştirmeler kullanılır; her testte yeniden geniş çaplı semantik arama yapılmaz. Önceden oluşturulmuş eski haritalarda embedding tabanlı eski yöntem korunur.
+- Incremental materyal güncellemesinde tüm aktif parçalar yeni haritaya yeniden atanır; materyal silme gibi durumlarda eski atamalar geçersiz kılınır.
+- Alt konu testi 5 veya 10; ana konu testi 10, 15 veya 20 soruya izin verir. Her alt konu için en az bir soru şartı devam eder.
+- Bu yaklaşımın gerçek API gecikmesini azaltacağı henüz ölçülmemiştir. Gemini'nin sınıflandırma doğruluğu da otomatik olarak garanti edilmez.
