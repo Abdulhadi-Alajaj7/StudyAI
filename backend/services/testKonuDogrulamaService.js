@@ -9,6 +9,8 @@ const ayarlarGetir = () => ({
     minimumSkor: sayiyiSinirla(process.env.TEST_SORU_KONU_MIN_SKOR, 0.43),
     rakipFarki: sayiyiSinirla(process.env.TEST_SORU_KONU_RAKIP_FARKI, 0.06),
     rakipMinimumSkor: sayiyiSinirla(process.env.TEST_SORU_KONU_RAKIP_MIN_SKOR, 0.55),
+    tekrarEsik: sayiyiSinirla(process.env.TEST_SORU_TEKRAR_ESIK, 0.89),
+    ayniCevapTekrarEsik: sayiyiSinirla(process.env.TEST_AYNI_CEVAP_TEKRAR_ESIK, 0.80),
 });
 
 const kimlik = (deger) => String(deger || "").trim();
@@ -17,6 +19,12 @@ const konuMetniOlustur = (konu) => [
     `Öğrenme konusu: ${konu.baslik || ""}.`,
     konu.aciklama ? `Öğrenme hedefi ve kapsamı: ${konu.aciklama}.` : "",
 ].filter(Boolean).join(" ");
+
+const normalizeCevap = (deger) => String(deger || "").toLocaleLowerCase("tr")
+    .normalize("NFKC").replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+
+const soruCevabi = (soru) => normalizeCevap((soru.secenekler || [])
+    .find((secenek) => secenek.anahtar === soru.dogruCevap)?.metin);
 
 const soruMetniOlustur = (soru) => {
     const dogruSecenek = (soru.secenekler || []).find(
@@ -82,10 +90,11 @@ export const testKonuDogrulayicisiOlustur = ({
         return vektorler;
     };
 
-    return async ({ sorular = [] } = {}) => {
+    return async ({ sorular = [], oncekiSorular = [] } = {}) => {
         if (!sorular.length) return [];
         const vektorler = await konuVektorleriniGetir();
-        const metinler = sorular.map(soruMetniOlustur);
+        const tumSorular = [...oncekiSorular, ...sorular];
+        const metinler = tumSorular.map(soruMetniOlustur);
         const yeniMetinler = [...new Set(metinler.filter((metin) => !soruVektorOnbellegi.has(metin)))];
         if (yeniMetinler.length) {
             const yeniVektorler = await embeddingUret(yeniMetinler, { tur: "sorgu" });
@@ -98,7 +107,8 @@ export const testKonuDogrulayicisiOlustur = ({
         }
 
         return sorular.map((soru, index) => {
-            const soruVektoru = soruVektorOnbellegi.get(metinler[index]);
+            const gercekIndeks = oncekiSorular.length + index;
+            const soruVektoru = soruVektorOnbellegi.get(metinler[gercekIndeks]);
             const sonuclar = benzersizKonular.map((konu, sira) => ({
                 ...konu,
                 skor: benzerlikHesapla(soruVektoru, vektorler[sira]),
@@ -114,12 +124,34 @@ export const testKonuDogrulayicisiOlustur = ({
                 rakipSkor >= ayarlar.rakipMinimumSkor &&
                 hedefSkor != null &&
                 rakipSkor - hedefSkor >= ayarlar.rakipFarki;
+            // Aynı bilginin yalnızca farklı sözcüklerle yeniden sorulmasını
+            // yakala. Önceki partilerle karşılaştırma da yapılır.
+            const cevap = soruCevabi(soru);
+            let tekrar = null;
+            for (let oncekiIndeks = 0; oncekiIndeks < gercekIndeks; oncekiIndeks++) {
+                const onceki = tumSorular[oncekiIndeks];
+                if (!onceki || String(onceki.konuId || "") !== hedefKonuId) continue;
+                const oncekiVektor = soruVektorOnbellegi.get(metinler[oncekiIndeks]);
+                const skor = benzerlikHesapla(soruVektoru, oncekiVektor);
+                const ayniCevap = cevap.length >= 3 && cevap === soruCevabi(onceki);
+                if (
+                    Number.isFinite(skor) &&
+                    (skor >= (ayarlar.tekrarEsik ?? 0.89) ||
+                        (ayniCevap && skor >= (ayarlar.ayniCevapTekrarEsik ?? 0.80)))
+                ) {
+                    tekrar = { indeks: oncekiIndeks, skor };
+                    break;
+                }
+            }
             return {
                 soruIndeksi: index,
                 konuId: hedefKonuId,
-                gecerli: !yetersiz && !belirginRakip,
-                neden: belirginRakip ? "BASKA_KONU_BELIRGIN_USTUN"
-                    : (yetersiz ? "HEDEF_BENZERLIK_DUSUK" : "UYGUN"),
+                gecerli: !yetersiz && !belirginRakip && !tekrar,
+                neden: tekrar ? "AYNI_KAVRAM_TEKRARI"
+                    : (belirginRakip ? "BASKA_KONU_BELIRGIN_USTUN"
+                    : (yetersiz ? "HEDEF_BENZERLIK_DUSUK" : "UYGUN")),
+                tekrarEdenSoruIndeksi: tekrar?.indeks ?? null,
+                tekrarSkoru: tekrar ? Number(tekrar.skor.toFixed(4)) : null,
                 hedefSkor: hedefSkor == null ? null : Number(hedefSkor.toFixed(4)),
                 rakipSkor: rakipSkor == null ? null : Number(rakipSkor.toFixed(4)),
                 rakipKonuId: rakip?.konuId || "",
