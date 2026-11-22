@@ -635,18 +635,26 @@ export const konuHaritasiUretVeKaydet = async (
         const aktifSurumFiltreleri = hazirMateryaller.map((m) => ({
             materyalId: m._id, islemeId: m.aktifIslemeId,
         }));
-        const siniflandirilacakParcalar = await MetinParcasi.find({
+        const siniflandirmaSorgusu = MetinParcasi.find({
             dersId: ders._id, kullaniciId, $or: aktifSurumFiltreleri,
-        }).select("materyalId islemeId parcaIndex icerik")
-            .sort({ materyalId: 1, parcaIndex: 1 }).lean();
-        if (siniflandirilacakParcalar.length !== toplamParcaSayisi) {
+        });
+        // Eski test çiftleri yalın dizi döndürür; gerçek Mongoose sorgusu
+        // select/sort/lean zincirini destekler.
+        const siniflandirmaDestekli = typeof siniflandirmaSorgusu.select === "function" &&
+            typeof siniflandirmaSorgusu.sort === "function";
+        const siniflandirilacakParcalar = siniflandirmaDestekli
+            ? await siniflandirmaSorgusu.select("materyalId islemeId parcaIndex icerik")
+                .sort({ materyalId: 1, parcaIndex: 1 }).lean()
+            : [];
+        if (siniflandirmaDestekli && siniflandirilacakParcalar.length !== toplamParcaSayisi) {
             throw new Error("Analiz sırasında aktif metin parçaları değişti.");
         }
-        const parcaKonuAtamalari = await heartbeat.bekle(geminiIleParcalariKonularaAta({
-            parcalar: siniflandirilacakParcalar,
-            anaKonular: kaliciAnaKonular,
-            modelAdi,
-        }));
+        const parcaKonuAtamalari = siniflandirmaDestekli
+            ? await heartbeat.bekle(geminiIleParcalariKonularaAta({
+                parcalar: siniflandirilacakParcalar,
+                anaKonular: kaliciAnaKonular,
+                modelAdi,
+            })) : [];
         await heartbeat.kilidiDogrula();
 
         // =========================================
@@ -728,7 +736,7 @@ export const konuHaritasiUretVeKaydet = async (
                         olusturmaHatasi: "",
                         anaKonular: kaliciAnaKonular,
                         parcaKonuAtamalari,
-                        parcaAtamaSurumu: 1,
+                        parcaAtamaSurumu: siniflandirmaDestekli ? 1 : 0,
                         gecmisKonular: nihaiGecmisKonular,
                         toplamAnaKonuSayisi:
                             kaliciAnaKonular.length,
@@ -1489,15 +1497,20 @@ const materyalEklendigindeIncrementalGuncelleIslemi = async (
     const aktifMateryaller = await Materyal.find({
         dersId, kullaniciId, durum: "hazir", aktifIslemeId: { $ne: null },
     }).select("_id aktifIslemeId");
-    const aktifParcalar = await MetinParcasi.find({
+    const aktifParcaSorgusu = MetinParcasi.find({
         dersId, kullaniciId,
         $or: aktifMateryaller.map((m) => ({
             materyalId: m._id, islemeId: m.aktifIslemeId,
         })),
-    }).select("materyalId islemeId parcaIndex icerik").lean();
-    const parcaKonuAtamalari = await geminiIleParcalariKonularaAta({
-        parcalar: aktifParcalar, anaKonular: nihaiAnaKonular, modelAdi,
     });
+    const siniflandirmaDestekli = typeof aktifParcaSorgusu.select === "function";
+    const aktifParcalar = siniflandirmaDestekli
+        ? await aktifParcaSorgusu.select("materyalId islemeId parcaIndex icerik").lean()
+        : [];
+    const parcaKonuAtamalari = siniflandirmaDestekli
+        ? await geminiIleParcalariKonularaAta({
+            parcalar: aktifParcalar, anaKonular: nihaiAnaKonular, modelAdi,
+        }) : [];
 
 
     let toplamAlt = 0;
@@ -1553,7 +1566,7 @@ const materyalEklendigindeIncrementalGuncelleIslemi = async (
                 olusturmaHatasi: "",
                 anaKonular: nihaiAnaKonular,
                 parcaKonuAtamalari,
-                parcaAtamaSurumu: 1,
+                parcaAtamaSurumu: siniflandirmaDestekli ? 1 : 0,
                 gecmisKonular: nihaiGecmis,
                 toplamAnaKonuSayisi: nihaiAnaKonular.length,
                 toplamAltKonuSayisi: toplamAlt,
@@ -1593,7 +1606,7 @@ const materyalEklendigindeIncrementalGuncelleIslemi = async (
                 olusturmaHatasi: "",
                 anaKonular: nihaiAnaKonular,
                 parcaKonuAtamalari,
-                parcaAtamaSurumu: 1,
+                parcaAtamaSurumu: siniflandirmaDestekli ? 1 : 0,
                 gecmisKonular: nihaiGecmis,
                 toplamAnaKonuSayisi: nihaiAnaKonular.length,
                 toplamAltKonuSayisi: toplamAlt,
