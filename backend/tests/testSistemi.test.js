@@ -10,7 +10,7 @@ import {
     testOlusturmaGirdisiniDogrula,
     testiSunumaHazirla,
 } from "../controllers/testController.js";
-import { testSorulariniDogrula } from "../services/geminiService.js";
+import { testPartisiPromptunuOlustur, testSorulariniDogrula } from "../services/geminiService.js";
 import {
     cevabiKaydet,
     altKonuKotalariniDagit,
@@ -1201,4 +1201,21 @@ test("ana konu: iki alt konunun ortak fiziksel metni tek kez iletilir, iki bağ 
         new Set(geminiGirdisi.kaynaklar[0].konuIds),
         new Set(["alt-1", "alt-2"])
     );
+});
+
+test("Gemini soru istemi her alt konunun adını ve açıklamasını içerir", () => {
+    const istem = testPartisiPromptunuOlustur({
+        dersBilgisi: { dersAdi: "Uygulamalı Veri Bilimi", aciklama: "Veri bilimi dersi" },
+        kapsamTuru: "konu", hedefBasligi: "Veri Bilimine Giriş",
+        soruPlani: [{ sira: 1, zorluk: "orta", konuId: "sub-yasam-dongusu" }],
+        kaynaklar: [{ anahtar: "K1", konuIds: ["sub-yasam-dongusu"],
+            icerik: "CRISP-DM veri hazırlama aşaması modellemeden önce gelir." }],
+        izinliKonuIds: [{ konuId: "sub-yasam-dongusu",
+            baslik: "Veri Bilimi Proje Yaşam Döngüsü ve Süreçler",
+            aciklama: "CRISP-DM ve KDD aşamaları", konuTuru: "alt" }],
+    });
+    assert.match(istem, /"konuBasligi":"Veri Bilimi Proje Yaşam Döngüsü ve Süreçler"/);
+    assert.match(istem, /"konuAciklamasi":"CRISP-DM ve KDD aşamaları"/);
+    assert.match(istem, /KONU_KIMLIKLERI_VE_KAPSAMLARI/);
+    assert.match(istem, /öğrenme hedefini ölçmeyen soruları üretme/);
 });
