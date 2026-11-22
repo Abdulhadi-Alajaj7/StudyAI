@@ -250,38 +250,27 @@ const fizikselParcalariTekillestir = (parcalar) => [...new Map(
 ).values()];
 
 export const konuKotalariniDagit = (konuGruplari, soruSayisi) => {
-    const gruplar = (konuGruplari || [])
-        .map((grup) => ({
-            ...grup,
-            karakterSayisi: grup.parcalar.reduce(
-                (toplam, parca) => toplam + String(parca.icerik || "").length,
-                0
-            ),
-        }))
-        .filter((grup) => grup.karakterSayisi >= MINIMUM_SORU_BASI_KARAKTER)
-        .sort((sol, sag) => (
-            sag.karakterSayisi - sol.karakterSayisi ||
-            sol.konuId.localeCompare(sag.konuId)
-        ));
-    if (gruplar.length === 0) return [];
-
-    const secilenler = gruplar.slice(0, soruSayisi).map((grup) => ({
+    const gruplar = (konuGruplari || []).map((grup) => ({
         ...grup,
-        kapasite: Math.max(1, Math.floor(
-            grup.karakterSayisi / MINIMUM_SORU_BASI_KARAKTER
-        )),
+        karakterSayisi: fizikselParcalariTekillestir(grup.parcalar || []).reduce(
+            (toplam, parca) => toplam + String(parca.icerik || "").length, 0
+        ),
+    }));
+    // Bir dersin bütün konularını kapsamak için en az birer soru gerekir.
+    if (!gruplar.length || gruplar.length > soruSayisi ||
+        gruplar.some((grup) => grup.karakterSayisi < MINIMUM_SORU_BASI_KARAKTER)) return [];
+    const secilenler = gruplar.map((grup) => ({
+        ...grup,
+        kapasite: Math.max(1, Math.floor(grup.karakterSayisi / MINIMUM_SORU_BASI_KARAKTER)),
         adet: 1,
     }));
     let kalan = soruSayisi - secilenler.length;
+    // Önce eşit dağıt; kalan sorularda kaynak kapasitesine öncelik ver.
     while (kalan > 0) {
         const uygunlar = secilenler.filter((grup) => grup.adet < grup.kapasite);
-        if (uygunlar.length === 0) return [];
-        uygunlar.sort((sol, sag) => (
-            (sol.adet / sol.kapasite) - (sag.adet / sag.kapasite) ||
-            sol.adet - sag.adet ||
-            sag.karakterSayisi - sol.karakterSayisi ||
-            sol.konuId.localeCompare(sag.konuId)
-        ));
+        if (!uygunlar.length) break;
+        uygunlar.sort((sol, sag) => sol.adet - sag.adet ||
+            sag.karakterSayisi - sol.karakterSayisi || sol.konuId.localeCompare(sag.konuId));
         uygunlar[0].adet += 1;
         kalan -= 1;
     }
