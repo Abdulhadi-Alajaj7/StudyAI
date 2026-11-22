@@ -5,6 +5,7 @@ import Materyal from "../models/Materyal.js";
 import MetinParcasi from "../models/MetinParcasi.js";
 import KonuHaritasi from "../models/KonuHaritasi.js";
 import Ders from "../models/Ders.js";
+import { geminiIleParcalariKonularaAta } from "./parcaKonuAtamaService.js";
 
 import {
     geminiIleKonuHaritasiUret,
@@ -628,6 +629,26 @@ export const konuHaritasiUretVeKaydet = async (
         );
         const kaliciAnaKonular = konuSiralariniDuzenle(kaliciAnaKonularHam);
 
+        // Nihai (ID'leri sabitlenmiş) haritayı Gemini öğretmen olarak kullanır.
+        // Her aktif chunk bir veya birden çok konuya atanır; eksik atamada
+        // harita "hazır" olarak yayımlanmaz.
+        const aktifSurumFiltreleri = hazirMateryaller.map((m) => ({
+            materyalId: m._id, islemeId: m.aktifIslemeId,
+        }));
+        const siniflandirilacakParcalar = await MetinParcasi.find({
+            dersId: ders._id, kullaniciId, $or: aktifSurumFiltreleri,
+        }).select("materyalId islemeId parcaIndex icerik")
+            .sort({ materyalId: 1, parcaIndex: 1 }).lean();
+        if (siniflandirilacakParcalar.length !== toplamParcaSayisi) {
+            throw new Error("Analiz sırasında aktif metin parçaları değişti.");
+        }
+        const parcaKonuAtamalari = await heartbeat.bekle(geminiIleParcalariKonularaAta({
+            parcalar: siniflandirilacakParcalar,
+            anaKonular: kaliciAnaKonular,
+            modelAdi,
+        }));
+        await heartbeat.kilidiDogrula();
+
         // =========================================
         // KONU ID EŞLEŞTİRME SONU
         // =========================================
@@ -706,6 +727,8 @@ export const konuHaritasiUretVeKaydet = async (
                         durum: "hazir",
                         olusturmaHatasi: "",
                         anaKonular: kaliciAnaKonular,
+                        parcaKonuAtamalari,
+                        parcaAtamaSurumu: 1,
                         gecmisKonular: nihaiGecmisKonular,
                         toplamAnaKonuSayisi:
                             kaliciAnaKonular.length,
