@@ -34,6 +34,14 @@ const soruKaynagiSchema = new mongoose.Schema(
             type: [Number],
             default: [],
         },
+        // Geçici inceleme için kaynak parçasının ilgili alt konuya yakınlığı.
+        parcaSkorlari: {
+            type: [new mongoose.Schema({
+                parcaIndex: { type: Number, required: true },
+                skor: { type: Number, min: -1, max: 1, required: true },
+            }, { _id: false })],
+            default: undefined,
+        },
     },
     { _id: false }
 );
@@ -84,6 +92,15 @@ const soruSchema = new mongoose.Schema({
         trim: true,
         maxlength: 500,
         default: "",
+    },
+    // Bağımsız semantik kontrol yalnızca tanılama puanları saklar.
+    konuDogrulama: {
+        type: new mongoose.Schema({
+            hedefSkor: { type: Number, min: -1, max: 1 },
+            rakipSkor: { type: Number, min: -1, max: 1 },
+            rakipKonuBasligi: { type: String, maxlength: 250 },
+        }, { _id: false }),
+        default: undefined,
     },
     kaynaklar: {
         type: [soruKaynagiSchema],
