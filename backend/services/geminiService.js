@@ -2782,6 +2782,8 @@ export const geminiBaglantisiniDogrula = async (modelAdi = VARSAYILAN_GEMINI_MOD
  * Ortak API çağrısı ve yeniden deneme mekanizması.
  */
 const haritaSiniri = haritaSinirlayiciOlustur();
+// Konu haritası üretimi ve chunk sınıflandırması aynı süreç içi kotayı paylaşır.
+export const ortakHaritaSinirlayicisi = haritaSiniri;
 export async function callGeminiStructuredJson(ai, modelAdi, prompt, systemInstruction, bagimliliklar = {}) {
     const ayarlar = bagimliliklar.ayarlar || haritaIstekAyarlari();
     const beklet = bagimliliklar.beklet || (ms => new Promise(r => setTimeout(r, ms)));
