@@ -290,255 +290,108 @@ test("karışık zorluk dağılımı test başlamadan dengeli ve sabit belirleni
     assert.deepEqual(zorlukDagiliminiOlustur("zor", 20), { zor: 20 });
 });
 
-test("tüm ders konu kotası içeriği yetersiz konuya soru zorlamadan dengelenir", () => {
-    const dagilim = konuKotalariniDagit([
-        { konuId: "a", baslik: "A", parcalar: [{ icerik: "a".repeat(800) }] },
-        { konuId: "b", baslik: "B", parcalar: [{ icerik: "b".repeat(500) }] },
-        { konuId: "c", baslik: "C", parcalar: [{ icerik: "kısa" }] },
-    ], 5);
-    assert.equal(dagilim.reduce((toplam, konu) => toplam + konu.adet, 0), 5);
-    assert.deepEqual(new Set(dagilim.map((konu) => konu.konuId)), new Set(["a", "b"]));
-    assert.ok(dagilim.every((konu) => konu.adet >= 1));
-});
-
-test("başlık kelimeleri bulunsa bile semantik sonuç yoksa konu testi üretilmez", async () => {
-    const { bagimliliklar } = uretimBagimliliklari();
-    bagimliliklar.semanticArama = async () => ({ sonuclar: [] });
-    await assert.rejects(testOlustur({
-        kullaniciId, dersId, kapsamTuru: "konu",
-        konuId: "sub-yigin", soruSayisi: 10, zorluk: "orta",
-    }, bagimliliklar), (hata) => (
-        hata.status === 422 && hata.kod === "YETERSIZ_TEST_ICERIGI"
-    ));
-});
-
-test("konu testi düşük anlamsal skorları reddeder ve güvenilir sonucu kullanır", async () => {
-    const ekParca = {
-        ...metinParcalari[0],
-        _id: new mongoose.Types.ObjectId(),
-        parcaIndex: 7,
-        icerik: uzunIcerik("Kuyruk", "FIFO sıralama"),
+test("eski haritada test üretimi hiç embedding çağırmaz", async () => {
+    const { bagimliliklar, kaydiGetir } = uretimBagimliliklari();
+    let embeddingCagrildi = false;
+    bagimliliklar.semanticArama = async () => {
+        embeddingCagrildi = true;
+        throw new Error("Embedding kullanılmamalı");
     };
-    let geminiGirdisi;
+    await testOlustur({ kullaniciId, dersId, kapsamTuru: "konu",
+        konuId: "sub-yigin", soruSayisi: 10, zorluk: "orta" }, bagimliliklar);
+    assert.equal(embeddingCagrildi, false);
+    assert.equal(kaydiGetir().soruSayisi, 10);
+});
+
+test("eski haritada yalnızca ilgili hazır materyallerin parçaları gönderilir", async () => {
+    let girdi;
     const { bagimliliklar } = uretimBagimliliklari({
-        parcalar: [...metinParcalari, ekParca],
-        geminiTestUret: async (girdi) => {
-            geminiGirdisi = girdi;
-            return { sorular: ornekSorular(girdi.soruSayisi), model: "test-model" };
+        geminiTestUret: async (deger) => {
+            girdi = deger;
+            return { sorular: ornekSorular(10), model: "mock" };
         },
     });
-    bagimliliklar.semanticArama = async () => ({
-        sonuclar: [
-            { materyalId: String(materyalId), parcaIndex: 7, skor: 0.35 },
-            { materyalId: String(materyalId), parcaIndex: 0, skor: 0.9 },
-        ],
-    });
-    await testOlustur({
-        kullaniciId, dersId, kapsamTuru: "konu",
-        konuId: "sub-yigin", soruSayisi: 10, zorluk: "orta",
-    }, bagimliliklar);
-    assert.equal(geminiGirdisi.kaynaklar.length, 1);
-    assert.deepEqual(geminiGirdisi.kaynaklar[0].konuIds, ["sub-yigin"]);
-    assert.equal(geminiGirdisi.kaynaklar[0].parcaIndex, 0);
+    await testOlustur({ kullaniciId, dersId, kapsamTuru: "konu",
+        konuId: "sub-yigin", soruSayisi: 10, zorluk: "orta" }, bagimliliklar);
+    assert.equal(girdi.kaynaklar.length, 1);
+    assert.equal(String(girdi.kaynaklar[0].materyalId), String(materyalId));
+    assert.deepEqual(girdi.kaynaklar[0].konuIds, []);
 });
 
-test("embedding hizmeti hata verdiğinde kelime eşleşmesine dönülmez", async () => {
-    const embeddingHatasi = Object.assign(new Error("Embedding kullanılamıyor"), {
-        status: 503, kod: "SORGU_EMBEDDING_HATASI",
+test("yeni haritanın parça-konu atamaları eşleşmeyen metni dışarıda bırakır", async () => {
+    const ekParca = { ...metinParcalari[0], parcaIndex: 7,
+        icerik: uzunIcerik("Kuyruk", "FIFO çalışma ilkesi") };
+    const harita = { ...konuHaritasi, parcaAtamaSurumu: 1,
+        parcaKonuAtamalari: [{
+            materyalId, islemeId, parcaIndex: 0, konuIds: ["sub-yigin"],
+        }] };
+    let girdi;
+    const { bagimliliklar } = uretimBagimliliklari({
+        parcalar: [...metinParcalari, ekParca], harita,
+        geminiTestUret: async (deger) => {
+            girdi = deger;
+            return { sorular: ornekSorular(10), model: "mock" };
+        },
     });
-    const { bagimliliklar } = uretimBagimliliklari();
-    bagimliliklar.semanticArama = async () => { throw embeddingHatasi; };
-    await assert.rejects(testOlustur({
-        kullaniciId, dersId, kapsamTuru: "konu",
-        konuId: "sub-yigin", soruSayisi: 10, zorluk: "orta",
-    }, bagimliliklar), (hata) => hata === embeddingHatasi);
+    await testOlustur({ kullaniciId, dersId, kapsamTuru: "konu",
+        konuId: "sub-yigin", soruSayisi: 10, zorluk: "orta" }, bagimliliklar);
+    assert.equal(girdi.kaynaklar.length, 1);
+    assert.equal(girdi.kaynaklar[0].parcaIndex, 0);
+    assert.deepEqual(girdi.kaynaklar[0].konuIds, ["sub-yigin"]);
 });
 
-test("tum_ders, materyal ve konu üretimleri yalnızca doğrulanmış kapsamdaki kaynakları kullanır", async () => {
-    for (const girdi of [
-        { kapsamTuru: "tum_ders" },
-        { kapsamTuru: "materyal", materyalId },
-        { kapsamTuru: "konu", konuId: "sub-yigin" },
+test("tüm ders, materyal ve konu kapsamlarında ilgili metinler gönderilir", async () => {
+    for (const hedef of [
+        { kapsamTuru: "tum_ders", beklenen: [materyalId, ikinciMateryalId] },
+        { kapsamTuru: "materyal", materyalId, beklenen: [materyalId] },
+        { kapsamTuru: "konu", konuId: "sub-yigin", beklenen: [materyalId] },
     ]) {
-        let geminiGirdisi;
+        let girdi;
         const { bagimliliklar, kaydiGetir } = uretimBagimliliklari({
             geminiTestUret: async (veri) => {
-                geminiGirdisi = veri;
-                return { sorular: ornekSorular(5), model: "test-model" };
+                girdi = veri;
+                return { sorular: ornekSorular(10), model: "mock" };
             },
         });
         await testOlustur({
-            kullaniciId,
-            dersId,
-            soruSayisi: 5,
-            zorluk: "orta",
-            ...girdi,
+            kullaniciId, dersId, kapsamTuru: hedef.kapsamTuru,
+            ...(hedef.materyalId ? { materyalId: hedef.materyalId } : {}),
+            ...(hedef.konuId ? { konuId: hedef.konuId } : {}),
+            soruSayisi: 10, zorluk: "orta",
         }, bagimliliklar);
-
-        const kaynakMateryalleri = new Set(
-            geminiGirdisi.kaynaklar.map((kaynak) => String(kaynak.materyalId))
-        );
-        if (girdi.kapsamTuru === "tum_ders") {
-            assert.deepEqual(kaynakMateryalleri, new Set([
-                String(materyalId),
-                String(ikinciMateryalId),
-            ]));
-            assert.deepEqual(
-                new Map(geminiGirdisi.izinliKonuIds.map(
-                    (konu) => [konu.konuId, konu.konuTuru]
-                )),
-                new Map([
-                    ["top-veri-yapilari", "ana"],
-                    ["sub-yigin", "alt"],
-                    ["sub-kuyruk", "alt"],
-                ])
-            );
-            assert.equal(
-                geminiGirdisi.konuDagilimi.reduce((toplam, konu) => toplam + konu.adet, 0),
-                5
-            );
-        } else {
-            assert.deepEqual(kaynakMateryalleri, new Set([String(materyalId)]));
+        assert.deepEqual(new Set(girdi.kaynaklar.map((kaynak) =>
+            String(kaynak.materyalId))),
+            new Set(hedef.beklenen.map(String)));
+        assert.equal(kaydiGetir().soruSayisi, 10);
+        if (hedef.kapsamTuru === "tum_ders") {
+            assert.deepEqual(girdi.konuDagilimi.map((konu) => konu.adet), [5, 5]);
         }
-        assert.equal(kaydiGetir().kapsamTuru, girdi.kapsamTuru);
-        assert.equal(kaydiGetir().sorular.length, 5);
     }
 });
 
-test("tüm ders her alt konu için anlamsal arama yapar", async () => {
-    const { bagimliliklar } = uretimBagimliliklari();
-    const asliArama = bagimliliklar.semanticArama;
-    const aramalar = [];
-    bagimliliklar.semanticArama = async (girdi) => {
-        aramalar.push(girdi);
-        return asliArama(girdi);
+test("aynı parça iki alt konuya bağlanmışsa tek kaynak ve iki konu etiketi iletilir", async () => {
+    const ortakHarita = { parcaAtamaSurumu: 1,
+        anaKonular: [{ konuId: "ana-ortak", baslik: "Ortak Konu",
+            kaynakMateryalIds: [materyalId], altKonular: [
+                { konuId: "alt-1", baslik: "A", kaynakMateryalIds: [materyalId] },
+                { konuId: "alt-2", baslik: "B", kaynakMateryalIds: [materyalId] },
+            ] }],
+        parcaKonuAtamalari: [{ materyalId, islemeId, parcaIndex: 0,
+            konuIds: ["alt-1", "alt-2"] }],
     };
-    await testOlustur({
-        kullaniciId, dersId, kapsamTuru: "tum_ders",
-        soruSayisi: 10, zorluk: "karisik",
-    }, bagimliliklar);
-    assert.equal(aramalar.length, 2);
-    assert.ok(aramalar.some((arama) => /Yığın/.test(arama.sorgu)));
-    assert.ok(aramalar.some((arama) => /Kuyruk/.test(arama.sorgu)));
-});
-
-test("tüm ders kök eşleşmesi bulamadığında mevcut semantik aramayla konu kaynağını bulur", async () => {
-    const anlamsalHarita = {
-        anaKonular: [{
-            konuId: "top-kilitlenme",
-            baslik: "Kilitlenme Önleme",
-            aciklama: "Döngüsel bekleme koşulunun engellenmesi",
-            kaynakMateryalIds: [materyalId],
-            altKonular: [],
-        }],
-    };
-    const anlamsalParca = {
-        _id: new mongoose.Types.ObjectId(),
-        materyalId,
-        islemeId,
-        parcaIndex: 7,
-        icerik: uzunIcerik(
-            "Kaynak tahsisi",
-            "Bir görev elindeki varlığı bırakmadan yenisini isterse ilerleme durabilir"
-        ),
-    };
-    let semantikAramaGirdisi;
-    let geminiGirdisi;
+    let girdi;
     const { bagimliliklar } = uretimBagimliliklari({
-        parcalar: [anlamsalParca],
-        harita: anlamsalHarita,
-        geminiTestUret: async (girdi) => {
-            geminiGirdisi = girdi;
-            return { sorular: ornekSorular(5), model: "test-model" };
-        },
-    });
-    bagimliliklar.semanticArama = async (girdi) => {
-        semantikAramaGirdisi = girdi;
-        return {
-            sonuclar: [{
-                materyalId: String(materyalId),
-                parcaIndex: anlamsalParca.parcaIndex,
-                skor: 0.88,
-            }],
-        };
-    };
-
-    await testOlustur({
-        kullaniciId,
-        dersId,
-        kapsamTuru: "tum_ders",
-        soruSayisi: 5,
-        zorluk: "karisik",
-    }, bagimliliklar);
-
-    assert.ok(semantikAramaGirdisi);
-    assert.deepEqual(
-        semantikAramaGirdisi.materyalIds.map(String),
-        [String(materyalId)]
-    );
-    assert.equal(geminiGirdisi.kaynaklar.length, 1);
-    assert.deepEqual(geminiGirdisi.kaynaklar[0].konuIds, ["top-kilitlenme"]);
-});
-
-test("aynı fiziksel parça farklı konu etiketleriyle çoğaltılmaz, konu kümesi korunur", async () => {
-    const ortakHarita = {
-        anaKonular: [{
-            konuId: "ana-ortak",
-            baslik: "Ortak Ana Konu",
-            aciklama: "Ortak açıklama",
-            kaynakMateryalIds: [materyalId],
-            altKonular: [
-                {
-                    konuId: "alt-bir",
-                    baslik: "Birinci Alt Konu",
-                    aciklama: "Birinci açıklama",
-                    kaynakMateryalIds: [materyalId],
-                },
-                {
-                    konuId: "alt-iki",
-                    baslik: "İkinci Alt Konu",
-                    aciklama: "İkinci açıklama",
-                    kaynakMateryalIds: [materyalId],
-                },
-            ],
-        }],
-    };
-    const ortakParca = {
-        _id: new mongoose.Types.ObjectId(),
-        materyalId,
-        islemeId,
-        parcaIndex: 0,
-        icerik: uzunIcerik(
-            "Birinci Alt Konu İkinci Alt Konu",
-            "Ortak fiziksel parça iki konu için doğrulanmış içerik sağlar"
-        ),
-    };
-    let geminiGirdisi;
-    const { bagimliliklar } = uretimBagimliliklari({
-        parcalar: [ortakParca],
         harita: ortakHarita,
-        geminiTestUret: async (girdi) => {
-            geminiGirdisi = girdi;
-            return { sorular: ornekSorular(5), model: "test-model" };
+        geminiTestUret: async (deger) => {
+            girdi = deger;
+            return { sorular: ornekSorular(10), model: "mock" };
         },
     });
-
-    bagimliliklar.semanticArama = async () => ({
-        sonuclar: [{ materyalId: String(materyalId), parcaIndex: 0, skor: 0.92 }],
-    });
-    await testOlustur({
-        kullaniciId,
-        dersId,
-        kapsamTuru: "tum_ders",
-        soruSayisi: 5,
-        zorluk: "karisik",
-    }, bagimliliklar);
-
-    assert.equal(geminiGirdisi.kaynaklar.length, 1);
-    assert.deepEqual(
-        new Set(geminiGirdisi.kaynaklar[0].konuIds),
-        new Set(["alt-bir", "alt-iki"])
-    );
+    await testOlustur({ kullaniciId, dersId, kapsamTuru: "konu",
+        konuId: "ana-ortak", soruSayisi: 10, zorluk: "orta" }, bagimliliklar);
+    assert.equal(girdi.kaynaklar.length, 1);
+    assert.deepEqual(new Set(girdi.kaynaklar[0].konuIds),
+        new Set(["alt-1", "alt-2"]));
 });
 
 test("başarısız üretim güvenli korelasyonlu metadata kaydı bırakır ve hatayı değiştirmez", async () => {
@@ -614,7 +467,7 @@ test("başarısız üretim güvenli korelasyonlu metadata kaydı bırakır ve ha
         model: "gemini-3.5-flash-lite",
         kaynakMateryalSayisi: 2,
         kaynakMetinParcasiSayisi: 2,
-        konuSayisi: 2,
+        konuSayisi: 0,
         toplamKaynakKarakterSayisi: metinParcalari.reduce(
             (toplam, parca) => toplam + parca.icerik.trim().length,
             0
@@ -705,62 +558,37 @@ test("test üretimi korelasyonlu terminal izleyicisini Gemini akışına bağlar
     assert.deepEqual(olaylar, ["basladi", { sonuc: "basarili" }]);
 });
 
-test("konu kapsamı mevcut semantik aramayı konu materyalleriyle sınırlar", async () => {
-    let aramaGirdisi;
-    const { bagimliliklar } = uretimBagimliliklari();
-    bagimliliklar.semanticArama = async (girdi) => {
-        aramaGirdisi = girdi;
-        return {
-            sonuclar: [{
-                materyalId: String(materyalId),
-                parcaIndex: 0,
-                icerik: metinParcalari[0].icerik,
-                skor: 0.91,
-            }],
-        };
-    };
-
-    await testOlustur({
-        kullaniciId,
-        dersId,
-        kapsamTuru: "konu",
-        konuId: "sub-yigin",
-        soruSayisi: 5,
-        zorluk: "orta",
-    }, bagimliliklar);
-
-    assert.match(aramaGirdisi.sorgu, /Yığın/);
-    assert.deepEqual(aramaGirdisi.materyalIds.map(String), [String(materyalId)]);
-    assert.equal(aramaGirdisi.limit, 10);
-});
-
-test("yetersiz işlenmiş içerikte Gemini çağrılmadan anlaşılır hata üretilir", async () => {
-    let geminiCagrildi = false;
+test("konu kapsamı materyal sınırını embedding olmadan korur", async () => {
+    let girdi;
     const { bagimliliklar } = uretimBagimliliklari({
-        parcalar: [{
-            _id: new mongoose.Types.ObjectId(),
-            materyalId,
-            islemeId,
-            parcaIndex: 0,
-            icerik: "Çok kısa içerik.",
-        }],
-        geminiTestUret: async () => {
-            geminiCagrildi = true;
-            return { sorular: [] };
+        geminiTestUret: async (deger) => {
+            girdi = deger;
+            return { sorular: ornekSorular(10), model: "mock" };
         },
     });
-    await assert.rejects(
-        testOlustur({
-            kullaniciId,
-            dersId,
-            kapsamTuru: "materyal",
-            materyalId,
-            soruSayisi: 5,
-            zorluk: "kolay",
-        }, bagimliliklar),
-        (hata) => hata.status === 422 && hata.kod === "YETERSIZ_TEST_ICERIGI"
-    );
-    assert.equal(geminiCagrildi, false);
+    bagimliliklar.semanticArama = async () => {
+        throw new Error("Embedding artık kullanılmamalı");
+    };
+    await testOlustur({ kullaniciId, dersId, kapsamTuru: "konu",
+        konuId: "sub-yigin", soruSayisi: 10, zorluk: "orta" }, bagimliliklar);
+    assert.deepEqual(new Set(girdi.kaynaklar.map((kaynak) =>
+        String(kaynak.materyalId))), new Set([String(materyalId)]));
+});
+
+test("kısa kaynak bile Gemini'ye gönderilir, içerik kapasitesi önceden reddedilmez", async () => {
+    let geminiCagrildi = false;
+    const { bagimliliklar, kaydiGetir } = uretimBagimliliklari({
+        parcalar: [{ ...metinParcalari[0], icerik: "Kısa not." }],
+        geminiTestUret: async () => {
+            geminiCagrildi = true;
+            return { sorular: ornekSorular(1), model: "mock",
+                kismiUretimNedeni: "KAYNAK_KAPASITESI" };
+        },
+    });
+    await testOlustur({ kullaniciId, dersId, kapsamTuru: "materyal",
+        materyalId, soruSayisi: 10, zorluk: "orta" }, bagimliliklar);
+    assert.equal(geminiCagrildi, true);
+    assert.equal(kaydiGetir().soruSayisi, 1);
 });
 
 const dogrulamaKaynaklari = [
