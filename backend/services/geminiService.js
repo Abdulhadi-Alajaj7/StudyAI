@@ -1493,6 +1493,7 @@ const ONARIM_TALIMATLARI = {
     KAYNAK_KONU_UYUSMAZLIGI: "Yalnızca soru planındaki izinli kaynak referanslarını kullan ve konu kimliğini değiştirme.",
     BILINMEYEN_KONU_KIMLIGI: "Konu kimliğini soru planında verilen değerle aynı yaz.",
     KONU_DAGILIMI: "Konu kimliğini soru planında verilen değerle aynı yaz.",
+    KONU_ANLAMSAL_UYUM: "Soru planındaki konu başlığı ve açıklamasına gerçekten ait yeni bir kavramı ölç. Başka alt konulara ait bilgiyle boşluğu doldurma; aynı yanlış soruyu yeniden yazma.",
     ZORLUK_DAGILIMI: "Zorluk değerini soru planında verilen değerle aynı yaz.",
     TEKRARLAYAN_SORU: "Mevcut sorulardan farklı bir kavramı ölçen yeni bir soru üret.",
     KAYNAK_REFERANSI: "Yalnızca soru planındaki izinli kaynak anahtarlarını kullan.",
@@ -1515,6 +1516,7 @@ const KAYNAK_SECIMI_GEREKTIREN_ONARIMLAR = new Set([
     "KAYNAK_KANITI",
     "KAYNAK_KONU_UYUSMAZLIGI",
     "TEKRARLAYAN_SORU",
+    "KONU_ANLAMSAL_UYUM",
 ]);
 
 const kaynakIceriginiBolumle = (kaynak) => {
@@ -1734,6 +1736,8 @@ export const geminiIleTestSorulariUret = async ({
     konuDagilimi = [],
     kaynaklar = [],
     izinliKonuIds = [],
+    // İsteğe bağlı bağımsız soru-konusu denetimi (embedding tabanlı).
+    soruKonuDogrula = null,
     modelAdi = process.env.GEMINI_TEST_MODELI || VARSAYILAN_GEMINI_MODELI,
 }, bagimliliklar = {}) => {
     const istemci = bagimliliklar.istemci || null;
@@ -2021,6 +2025,32 @@ export const geminiIleTestSorulariUret = async ({
                     soruPlani: partiPlani,
                     oncekiSorular,
                 });
+                if (typeof soruKonuDogrula === "function") {
+                    const denetim = await soruKonuDogrula({ sorular: partiHamSorular });
+                    const uyumsuz = (denetim || []).find((sonuc) => sonuc.gecerli === false);
+                    if (uyumsuz) {
+                        throw gecersizTestYaniti({
+                            altKod: "KONU_ANLAMSAL_UYUM",
+                            soruIndeksi: uyumsuz.soruIndeksi,
+                            ekTanilama: {
+                                hedefKonuSkoru: uyumsuz.hedefSkor,
+                                rakipKonuSkoru: uyumsuz.rakipSkor,
+                                konuUyumsuzlukNedeni: uyumsuz.neden,
+                            },
+                        });
+                    }
+                    // Geçerli soruların denetim puanları sunuma ve JSON
+                    // incelemesine aktarılmak üzere yalnızca veri nesnesine eklenir.
+                    (denetim || []).forEach((sonuc) => {
+                        if (partiHamSorular?.[sonuc.soruIndeksi] && sonuc.gecerli) {
+                            partiHamSorular[sonuc.soruIndeksi]._konuDogrulama = {
+                                hedefSkor: sonuc.hedefSkor,
+                                rakipSkor: sonuc.rakipSkor,
+                                rakipKonuBasligi: sonuc.rakipKonuBasligi,
+                            };
+                        }
+                    });
+                }
                 return partiHamSorular;
             } catch (hata) {
                 const yerelSoruIndeksi = hata?.tanilama?.soruIndeksi;
@@ -2317,6 +2347,14 @@ export const geminiIleTestSorulariUret = async ({
         throw hata;
     }
 
+    if (typeof soruKonuDogrula === "function") {
+        sorular = sorular.map((soru, index) => ({
+            ...soru,
+            ...(tumHamSorular[index]?._konuDogrulama
+                ? { konuDogrulama: tumHamSorular[index]._konuDogrulama }
+                : {}),
+        }));
+    }
     return {
         sorular,
         tokenKullanimi: toplamTokenKullanimi,
