@@ -213,33 +213,11 @@ const konuIcinParcalariSec = async ({
             )
         );
     }
-    const sorgu = String(konu.kanitSorgusu || konu.sorgu || konu.baslik || "").trim().slice(0, 500);
-    if (!sorgu) return [];
-    // Test için konu metinleri yalnızca mevcut embedding tabanlı aramadan gelir.
-    // Arama başarısız olduğunda metinsel/kök eşleşmesine geri dönülmez.
-    const aramaSonucu = await deps.semanticArama({
-        kullaniciId,
-        dersId,
-        sorgu,
-        limit: 10,
-        materyalIds: konuMateryalleri.map((materyal) => materyal._id),
-    });
-    const parcaHaritasi = new Map(tumParcalar
-        .filter((parca) => izinliMateryalKimlikleri.has(kimlikMetni(parca.materyalId)))
-        .map((parca) => [`${kimlikMetni(parca.materyalId)}:${parca.parcaIndex}`, parca])
+    // Eski haritalarda da embedding çağırma: konuya bağlı materyallerin
+    // aktif parçalarını Gemini'ye gönder; konu uygunluğunu model belirler.
+    return tumParcalar.filter((parca) =>
+        izinliMateryalKimlikleri.has(kimlikMetni(parca.materyalId))
     );
-    const minSkor = testSemantikMinSkorGetir();
-    const secilen = [];
-    const gorulen = new Set();
-    for (const sonuc of aramaSonucu?.sonuclar || []) {
-        if (!Number.isFinite(sonuc.skor) || sonuc.skor < minSkor) continue;
-        const anahtar = `${kimlikMetni(sonuc.materyalId)}:${sonuc.parcaIndex}`;
-        const parca = parcaHaritasi.get(anahtar);
-        if (!parca || gorulen.has(anahtar)) continue;
-        gorulen.add(anahtar);
-        secilen.push({ ...parca, semantikSkor: sonuc.skor });
-    }
-    return secilen;
 };
 
 const fizikselParcalariTekillestir = (parcalar) => [...new Map(
