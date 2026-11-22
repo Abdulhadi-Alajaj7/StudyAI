@@ -1336,3 +1336,78 @@ test("ek Gemini kalite kontrolü 503 olduğunda konu testini ve denetim kaydın�
     assert.equal(denetimCagrilari, 1);
     assert.equal(kaydiGetir().sorular[0].kaliteDogrulama.durum, "DENETIM_ATLANDI");
 });
+
+test("20 soru istendiğinde kaynak kapasitesi 17 ise dört koruma kuralıyla 17 soru saklanır", async () => {
+    const parcalar = metinParcalari.map((parca, index) => ({
+        ...parca,
+        icerik: (index === 0 ? "Yığın LIFO çalışma ilkesi" : "Kuyruk FIFO çalışma ilkesi")
+            .padEnd(index === 0 ? 820 : 600, "x"),
+    }));
+    let verilenSoruSayisi = 0;
+    const { bagimliliklar, kaydiGetir } = uretimBagimliliklari({
+        parcalar,
+        geminiTestUret: async ({ soruSayisi, konuDagilimi, kismiSonucKabul }) => {
+            verilenSoruSayisi = soruSayisi;
+            assert.equal(kismiSonucKabul, true);
+            const siraliKonular = konuDagilimi.flatMap((konu) =>
+                Array.from({ length: konu.adet }, () => konu.konuId)
+            );
+            return {
+                sorular: ornekSorular(soruSayisi).map((soru, index) => ({
+                    ...soru,
+                    konuId: siraliKonular[index],
+                })),
+                model: "test-model",
+            };
+        },
+    });
+    await testOlustur({
+        kullaniciId, dersId, kapsamTuru: "konu",
+        konuId: "top-veri-yapilari", soruSayisi: 20, zorluk: "orta",
+    }, bagimliliklar);
+    assert.equal(verilenSoruSayisi, 17);
+    assert.equal(kaydiGetir().soruSayisi, 17);
+    assert.equal(kaydiGetir().istenenSoruSayisi, 20);
+    assert.equal(kaydiGetir().eksikSoruNedeni, "KAYNAK_KAPASITESI");
+    assert.deepEqual(new Set(kaydiGetir().sorular.map((soru) => soru.konuId)),
+        new Set(["sub-yigin", "sub-kuyruk"]));
+});
+
+test("20 sorudan 17 tanesi tüm kontrolleri geçerse 17 soruluk test kaydedilir", async () => {
+    const { bagimliliklar, kaydiGetir } = uretimBagimliliklari({
+        geminiTestUret: async ({ soruSayisi, kismiSonucKabul }) => {
+            assert.equal(soruSayisi, 20);
+            assert.equal(kismiSonucKabul, true);
+            return {
+                sorular: ornekSorular(17).map((soru, index) => ({
+                    ...soru, konuId: index % 2 ? "sub-kuyruk" : "sub-yigin",
+                })),
+                model: "test-model",
+                kismiUretimNedeni: "KALITE_KONTROLU",
+            };
+        },
+    });
+    await testOlustur({
+        kullaniciId, dersId, kapsamTuru: "konu",
+        konuId: "top-veri-yapilari", soruSayisi: 20, zorluk: "orta",
+    }, bagimliliklar);
+    assert.equal(kaydiGetir().soruSayisi, 17);
+    assert.equal(kaydiGetir().istenenSoruSayisi, 20);
+    assert.equal(kaydiGetir().eksikSoruNedeni, "KALITE_KONTROLU");
+});
+
+test("konu kapsamı eksik olan kısmi test hiçbir koşulda kaydedilmez", async () => {
+    const { bagimliliklar, kaydiGetir } = uretimBagimliliklari({
+        geminiTestUret: async () => ({
+            sorular: ornekSorular(17).map((soru) => ({
+                ...soru, konuId: "sub-yigin",
+            })),
+            model: "test-model",
+        }),
+    });
+    await assert.rejects(testOlustur({
+        kullaniciId, dersId, kapsamTuru: "konu",
+        konuId: "top-veri-yapilari", soruSayisi: 20, zorluk: "orta",
+    }, bagimliliklar), (hata) => hata.kod === "YETERSIZ_TEST_ICERIGI");
+    assert.equal(kaydiGetir(), undefined);
+});
