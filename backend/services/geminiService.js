@@ -1409,14 +1409,14 @@ export const partiKaynaklariniSec = (ayarlar = {}) => (
     partiKaynakPaketiniOlustur(ayarlar).kaynaklar
 );
 
-const testYanitSemasiniOlustur = ({ soruSayisi, kaynakAnahtarlari, zorluklar }) => ({
+const testYanitSemasiniOlustur = ({ soruSayisi, kaynakAnahtarlari, zorluklar, kismiSonucKabul = false }) => ({
     type: "object",
     additionalProperties: false,
     required: ["sorular"],
     properties: {
         sorular: {
             type: "array",
-            minItems: soruSayisi,
+            minItems: kismiSonucKabul ? 1 : soruSayisi,
             maxItems: soruSayisi,
             items: {
                 type: "object",
@@ -1858,6 +1858,152 @@ const tokenKullaniminiEkle = (toplam, eklenecek) => {
     }
 };
 
+/**
+ * Varsayılan konu testi yolu: tek Gemini isteği, ek Gemini denetimi / onarım
+ * / parti bölme olmadan yerel soru bazlı güvenlik kontrolü. Eski üretici
+ * geriye uyum ve mevcut testler için korunur.
+ */
+export const geminiIleTestSorulariTekIstekleUret = async ({
+    dersBilgisi = {}, kapsamTuru, hedefBasligi = "", soruSayisi,
+    zorlukDagilimi, konuDagilimi = [], kaynaklar = [], izinliKonuIds = [],
+    modelAdi = process.env.GEMINI_TEST_MODELI || VARSAYILAN_GEMINI_MODELI,
+}, bagimliliklar = {}) => {
+    const baslangic = performance.now();
+    const soruPlani = testUretimPlaniniOlustur({
+        soruSayisi, zorlukDagilimi, konuDagilimi,
+    });
+    const benzersizKaynaklar = kaynaklariFizikselOlarakTekillestir(kaynaklar);
+    const istenenButce = Number.parseInt(process.env.TEST_TEK_ISTEK_KAYNAK_KARAKTER_BUTCESI, 10);
+    const karakterButcesi = Number.isInteger(istenenButce)
+        ? Math.max(30_000, Math.min(110_000, istenenButce)) : 70_000;
+    const paket = partiKaynakPaketiniOlustur({
+        kaynaklar: benzersizKaynaklar, soruPlani,
+        partiIndeksi: 0, partiSayisi: 1, karakterButcesi,
+    });
+    if (!paket.kaynaklar.length || paket.soruPlani.some((soru) =>
+        soru.konuId && soru.izinliKaynakReferanslari.length === 0
+    )) {
+        throw new GeminiSohbetHatasi(
+            "En az bir alt konu için yeterli kaynak metni bulunamadı.",
+            { status: 422, kod: "YETERSIZ_TEST_ICERIGI" }
+        );
+    }
+    const sistem = TEST_SISTEM_TALIMATI + `
+TEK İSTEK MODU: Tüm soruları tek yanıtta oluştur; yeniden üretim veya ek denetim istemeyeceğiz.
+SORU_PLANI hedeflenen soru/konu/zorluk dağılımıdır. Her alt konuyu en az bir soruyla kapsa.
+Her soruda farklı bir öğrenme hedefini ölç; aynı kavramı farklı kelimelerle tekrar etme.
+Yalnızca sağlanan kaynaktan kesin desteklenebilen soruları döndür. Kaynak yetersizse, yanlış soru uydurmak veya tekrar etmek yerine daha az sayıda soru döndür.
+Az sayıda soru döndürürsen mümkün olduğunca tüm alt konuları kapsa.
+Sorular dizisi 1 ile istenen sayı arasında olabilir; yalnızca geçerli JSON döndür.`;
+    const prompt = testPartisiPromptunuOlustur({
+        dersBilgisi, kapsamTuru, hedefBasligi,
+        soruPlani: paket.soruPlani,
+        kaynaklar: paket.kaynaklar, izinliKonuIds,
+    }) + `
+TEK_ISTEK_KURALI: Bu bir tek çağrılık testtir; gerekli çeşitlilik/kaynak yoksa sorular dizisini kısa döndür.
+Her soru için konuId, zorluk, kaynakReferanslari ve kaynakKanitlari zorunludur.
+Konu başına hedef kota: ${JSON.stringify(konuDagilimi)}.
+Yalnızca kaynakla doğrulanabilen farklı soruları döndür.`;
+    const apiCagriButcesi = { kullanilan: 0, maksimum: 1 };
+    const { veri, tokenKullanimi, tanilama } = await yapilandirilmisGeminiCagrisi({
+        istemci: bagimliliklar.istemci || null,
+        istekYonetimi: bagimliliklar.istekYonetimi || ortakGeminiIstekYonetimi,
+        modelAdi, prompt, systemInstruction: sistem,
+        timeoutMs: Number.isFinite(bagimliliklar.timeoutMs) ? bagimliliklar.timeoutMs : 90_000,
+        maxDeneme: 1, // 429 dahil otomatik tekrar yok
+        maxOutputTokens: Math.min(24_000, 1_800 + (soruSayisi * 1_000)),
+        bekle: bagimliliklar.bekle || (() => Promise.resolve()),
+        responseJsonSchema: testYanitSemasiniOlustur({
+            soruSayisi,
+            kaynakAnahtarlari: paket.kaynaklar.map((kaynak) => kaynak.anahtar),
+            zorluklar: soruPlani.map((soru) => soru.zorluk),
+            kismiSonucKabul: true,
+        }),
+        apiCagriButcesi,
+        uretimIzleyicisi: bagimliliklar.uretimIzleyicisi || null,
+        sdkCagriBaglami: { anaCagriTuru: "tek_istek", partiIndeksi: 0, partiBoyutu: soruSayisi },
+    });
+    if (!Array.isArray(veri?.sorular) || veri.sorular.length === 0 ||
+        veri.sorular.length > soruSayisi) {
+        throw gecersizTestYaniti({
+            altKod: "SORU_SAYISI",
+            uretilenSoruSayisi: veri?.sorular?.length ?? null,
+        });
+    }
+    const kabulEdilenler = [];
+    const konuKotalari = new Map(konuDagilimi.map((konu) => [
+        String(konu.konuId), Number(konu.adet),
+    ]));
+    const kabulEdilenKonuSayilari = new Map();
+    const zorlukSayilari = new Map();
+    const izinliZorluklar = new Map(Object.entries(zorlukDagilimi || {}));
+    let reddedilenSoruSayisi = 0;
+    for (const hamSoru of veri.sorular) {
+        const konuId = String(hamSoru?.konuId || "");
+        const zorluk = String(hamSoru?.zorluk || "");
+        if (!izinliZorluklar.has(zorluk) ||
+            (zorlukSayilari.get(zorluk) || 0) >= izinliZorluklar.get(zorluk) ||
+            (konuKotalari.size > 0 && !konuKotalari.has(konuId)) ||
+            (konuKotalari.size > 0 &&
+                (kabulEdilenKonuSayilari.get(konuId) || 0) >= konuKotalari.get(konuId))) {
+            reddedilenSoruSayisi += 1;
+            continue;
+        }
+        const izinliKaynakReferanslari = paket.kaynaklar
+            .filter((kaynak) => !konuId || kaynakKonuKimlikleriniGetir(kaynak).includes(konuId))
+            .map((kaynak) => kaynak.anahtar);
+        try {
+            const [soru] = testSorulariniDogrula({ sorular: [hamSoru] }, {
+                soruSayisi: 1,
+                zorlukDagilimi: { [zorluk]: 1 },
+                konuDagilimi: konuKotalari.size > 0 ? [{ konuId, adet: 1 }] : [],
+                kaynaklar: paket.kaynaklar, izinliKonuIds,
+                soruPlani: [{
+                    sira: 1, konuId, zorluk, izinliKaynakReferanslari,
+                }],
+                oncekiSorular: kabulEdilenler,
+            });
+            kabulEdilenler.push(soru);
+            zorlukSayilari.set(zorluk, (zorlukSayilari.get(zorluk) || 0) + 1);
+            if (konuId) {
+                kabulEdilenKonuSayilari.set(
+                    konuId, (kabulEdilenKonuSayilari.get(konuId) || 0) + 1
+                );
+            }
+        } catch (hata) {
+            if (hata?.kod !== "GEMINI_GECERSIZ_TEST_YANITI") throw hata;
+            reddedilenSoruSayisi += 1;
+        }
+    }
+    // Kapsam boşsa eksik testi başarı olarak kaydetme.
+    if (!kabulEdilenler.length) {
+        throw new GeminiSohbetHatasi(
+            "Tek istekte kaynakla doğrulanmış soru alınamadı.",
+            { status: 422, kod: "YETERSIZ_TEST_ICERIGI",
+                tanilama: { apiCagriSayisi: apiCagriButcesi.kullanilan, reddedilenSoruSayisi } }
+        );
+    }
+    console.info("[TestTekIstek] Gemini üretimi", {
+        model: modelAdi,
+        apiCagriSayisi: apiCagriButcesi.kullanilan,
+        istenenSoruSayisi: soruSayisi,
+        uretilenSoruSayisi: veri.sorular.length,
+        kabulEdilenSoruSayisi: kabulEdilenler.length,
+        reddedilenSoruSayisi,
+        sureMs: Math.round(performance.now() - baslangic),
+        tokenKullanimi,
+    });
+    return {
+        sorular: kabulEdilenler, model: modelAdi, tokenKullanimi,
+        apiCagriSayisi: apiCagriButcesi.kullanilan,
+        tanilama,
+        ...(kabulEdilenler.length < soruSayisi ? {
+            kismiUretimNedeni: "KALITE_KONTROLU",
+            atlananSoruSayisi: soruSayisi - kabulEdilenler.length,
+        } : {}),
+    };
+};
+
 export const geminiIleTestSorulariUret = async ({
     dersBilgisi = {},
     kapsamTuru,
@@ -1871,8 +2017,13 @@ export const geminiIleTestSorulariUret = async ({
     soruKonuDogrula = null,
     soruKalitesiDogrula = null,
     kismiSonucKabul = false,
+    tekIstekModu = false,
     modelAdi = process.env.GEMINI_TEST_MODELI || VARSAYILAN_GEMINI_MODELI,
 }, bagimliliklar = {}) => {
+    if (tekIstekModu) return geminiIleTestSorulariTekIstekleUret({
+        dersBilgisi, kapsamTuru, hedefBasligi, soruSayisi, zorlukDagilimi,
+        konuDagilimi, kaynaklar, izinliKonuIds, modelAdi,
+    }, bagimliliklar);
     const istemci = bagimliliklar.istemci || null;
     const uretimIzleyicisi = bagimliliklar.uretimIzleyicisi || null;
     const partiBoyutu = Math.min(
