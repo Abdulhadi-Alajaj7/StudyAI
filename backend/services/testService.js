@@ -9,6 +9,7 @@ import { semanticAramaYap } from "./semanticAramaService.js";
 import { dersKonulariniDogrulamaIcinGetir, testKonuDogrulayicisiOlustur } from "./testKonuDogrulamaService.js";
 import {
     geminiIleTestSorulariUret,
+    geminiIleTestKalitesiniDenetle,
     VARSAYILAN_GEMINI_MODELI,
 } from "./geminiService.js";
 import { testTanilamaKaydiYaz } from "./testTanilamaService.js";
@@ -65,6 +66,7 @@ const bagimliliklariGetir = (bagimliliklar = {}) => ({
     TestModel: bagimliliklar.TestModel || Test,
     semanticArama: bagimliliklar.semanticArama || semanticAramaYap,
     geminiTestUret: bagimliliklar.geminiTestUret || geminiIleTestSorulariUret,
+    geminiKaliteDenetle: bagimliliklar.geminiKaliteDenetle || geminiIleTestKalitesiniDenetle,
     testKonuDogrulayicisiOlustur: bagimliliklar.testKonuDogrulayicisiOlustur || testKonuDogrulayicisiOlustur,
     kaynakButcesi: bagimliliklar.kaynakButcesi || kaynakButcesiGetir(),
     simdi: bagimliliklar.simdi || (() => new Date()),
@@ -735,6 +737,36 @@ const testOlusturTekIslem = async ({
                 konular: dersKonulariniDogrulamaIcinGetir(hedef.harita),
             })
             : null;
+        // Ek kalite denetimi geçici sağlayıcı hatasında var olan
+        // semantik/kanıt kontrolünü çalışır tutar; aynı test boyunca
+        // başarısız denetim API çağrısı tekrar tekrar yapılmaz.
+        let kaliteDenetimiKullanilabilir = true;
+        const soruKalitesiDogrula = kapsamTuru === "konu"
+            ? async ({ sorular, oncekiSorular, izinliKonuIds }) => {
+                if (!kaliteDenetimiKullanilabilir) return sorular.map((_, index) => ({
+                    soruIndeksi: index, gecerli: true, neden: "DENETIM_ATLANDI",
+                }));
+                try {
+                    return await deps.geminiKaliteDenetle({
+                        sorular, oncekiSorular, izinliKonuIds,
+                    });
+                } catch (hata) {
+                    // Denetim ilave kontroldür; erişilemeyen ikinci API çağrısı
+                    // nedeniyle zaten doğrulanmış testleri boşa çıkarma.
+                    if (![429, 502, 503, 504].includes(Number(hata?.status)) &&
+                        !["ETIMEDOUT", "ECONNRESET", "GEMINI_GECERSIZ_YANIT"].includes(hata?.kod)) {
+                        throw hata;
+                    }
+                    kaliteDenetimiKullanilabilir = false;
+                    console.warn("[TestKalitesi] Ek denetim atlandı", {
+                        kod: String(hata?.kod || "SAGLAYICI_HATASI").slice(0, 80),
+                    });
+                    return sorular.map((_, index) => ({
+                        soruIndeksi: index, gecerli: true, neden: "DENETIM_ATLANDI",
+                    }));
+                }
+            }
+            : null;
         const geminiSonucu = await deps.geminiTestUret({
             dersBilgisi: { dersAdi: ders.dersAdi, aciklama: ders.aciklama },
             kapsamTuru,
@@ -747,6 +779,7 @@ const testOlusturTekIslem = async ({
             kaynaklar: kaynakVerisi.kaynaklar,
             izinliKonuIds: kaynakVerisi.izinliKonuIds,
             soruKonuDogrula,
+            soruKalitesiDogrula,
         }, {
             uretimIzleyicisi,
         });
