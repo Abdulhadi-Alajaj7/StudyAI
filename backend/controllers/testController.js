@@ -13,7 +13,7 @@ import {
 } from "../services/testService.js";
 
 const KAPSAM_TURLERI = new Set(["tum_ders", "materyal", "konu"]);
-const SORU_SAYILARI = new Set([10, 15, 20]);
+const SORU_SAYILARI = new Set([5, 10, 15, 20]);
 const ZORLUKLAR = new Set(["kolay", "orta", "zor", "karisik"]);
 const CEVAPLAR = new Set(["A", "B", "C", "D"]);
 
@@ -36,9 +36,9 @@ export const testOlusturmaGirdisiniDogrula = (dersId, girdi = {}) => {
     }
 
     const soruSayisi = veri.soruSayisi === undefined ? 10 : Number(veri.soruSayisi);
-    if (!SORU_SAYILARI.has(soruSayisi)) {
+    if (!SORU_SAYILARI.has(soruSayisi) || (soruSayisi === 5 && kapsamTuru !== "konu")) {
         return {
-            hata: "Soru sayısı 10, 15 veya 20 olmalıdır.",
+            hata: "Soru sayısı ana kapsamda 10, 15 veya 20; alt konuda 5 veya 10 olmalıdır.",
             kod: "GECERSIZ_SORU_SAYISI",
         };
     }
