@@ -1485,7 +1485,7 @@ KESİN KURALLAR:
 9. Her soru, soru planında konu kimliğine bağlı verilen konu başlığı ve açıklamasının kavramsal kapsamına doğrudan ait olmalı. Sadece ortak kaynak kullanılması bir soruyu o konunun sorusu yapmaz.
 10. Ders takvimi, sonraki haftanın başlığı, öğretim üyesi veya üniversite adı gibi öğrenme hedefini ölçmeyen sorular üretme.
 11. Konu ilişkisi kesin değilse ve planda konu zorunlu değilse konuId alanını boş dize yap.
-12. Yalnızca şemaya uygun JSON döndür; Markdown veya ek açıklama döndürme.`;
+12. Olumsuz köklü (hangisi yanlıştır/değildir/hatasıdır) soruları tercih etme; kullanırsan seçenekleri tek tek sınayarak yalnızca birinin istenen koşulu karşıladığından emin ol.\n13. Yanlış seçenekler aynı kavramsal kategoriden, makul ama açıkça yanlış çeldiriciler olsun. Alakasız donanım veya web terimleriyle bariz yanlış şıklar doldurma.\n14. Aynı bilgi/kural/terimi farklı sözcüklerle tekrar sorma; her soru yeni bir öğrenme hedefini sınasın. Örneğin IQR tanımını iki kez sorma.\n15. Yalnızca şemaya uygun JSON döndür; Markdown veya ek açıklama döndürme.`;
 
 
 /**
@@ -1605,6 +1605,7 @@ export const geminiIleTestKalitesiniDenetle = async ({
             soruIndeksi: index,
             gecerli: !red,
             neden: red ? kontrol.durum : "UYGUN",
+            durum: kontrol.durum,
             guven: Number.isFinite(guven) ? Number(guven.toFixed(3)) : null,
             gerekce: String(kontrol.gerekce || "").slice(0, 280),
         };
@@ -2008,7 +2009,7 @@ export const geminiIleTestSorulariUret = async ({
                 soruHataBasinaMaksimumOnarimDenemesi;
     };
     const yetersizCesitlilikHatasinaCevir = (hata) => {
-        if (hata?.tanilama?.dogrulamaAltKodu !== "TEKRARLAYAN_SORU") return hata;
+        if (!["TEKRARLAYAN_SORU", "TEST_KALITE_TEKRAR"].includes(hata?.tanilama?.dogrulamaAltKodu)) return hata;
         return new GeminiSohbetHatasi(
             "Seçilen içerikten istenen sayıda birbirinden farklı ve kaynakla doğrulanabilir soru üretilemedi. Soru sayısını azaltın veya daha kapsamlı materyal seçin.",
             {
@@ -2201,6 +2202,14 @@ export const geminiIleTestSorulariUret = async ({
                             ekTanilama: { kaliteHatasi: reddedilen.neden },
                         });
                     }
+                    (kalite || []).forEach((sonuc) => {
+                        if (partiHamSorular?.[sonuc.soruIndeksi] && sonuc.gecerli) {
+                            partiHamSorular[sonuc.soruIndeksi]._kaliteDogrulama = {
+                                durum: String(sonuc.durum || sonuc.neden || "UYGUN").slice(0, 45),
+                                guven: Number.isFinite(sonuc.guven) ? sonuc.guven : null,
+                            };
+                        }
+                    });
                 }
                 return partiHamSorular;
             } catch (hata) {
@@ -2498,11 +2507,14 @@ export const geminiIleTestSorulariUret = async ({
         throw hata;
     }
 
-    if (typeof soruKonuDogrula === "function") {
+    if (typeof soruKonuDogrula === "function" || typeof soruKalitesiDogrula === "function") {
         sorular = sorular.map((soru, index) => ({
             ...soru,
             ...(tumHamSorular[index]?._konuDogrulama
                 ? { konuDogrulama: tumHamSorular[index]._konuDogrulama }
+                : {}),
+            ...(tumHamSorular[index]?._kaliteDogrulama
+                ? { kaliteDogrulama: tumHamSorular[index]._kaliteDogrulama }
                 : {}),
         }));
     }
