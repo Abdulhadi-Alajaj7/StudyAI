@@ -53,8 +53,8 @@ export const testEksikSoruMesaji = (test) => {
         istenen <= hazirlanan || hazirlanan < 1) return "";
     const eksik = istenen - hazirlanan;
     const neden = test?.eksikSoruNedeni === "KAYNAK_KAPASITESI"
-        ? "Kaynak metinler istenen sayıda güvenilir soru için yeterli değildi."
-        : "Kalan sorular kaynak veya kalite doğrulamasını geçemedi.";
+        ? "Gemini, kaynak metinlere dayanarak daha fazla farklı soru oluşturamadı."
+        : "Gemini'nin yanıtındaki bazı sorularda soru metni, dört seçenek veya cevap eksikti.";
     return `İstenen ${istenen} sorudan ${hazirlanan} soru hazırlandı (${eksik} eksik). ${neden} Hazırlanan sorularla teste devam edebilirsiniz.`;
 };
 
