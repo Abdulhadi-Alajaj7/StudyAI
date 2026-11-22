@@ -30,6 +30,8 @@ const TEST_LISTE_ALANLARI = [
     "konuId",
     "konuBasligi",
     "soruSayisi",
+    "istenenSoruSayisi",
+    "eksikSoruNedeni",
     "zorluk",
     "durum",
     "sonGoruntulenenSoru",
@@ -814,7 +816,7 @@ const testOlusturTekIslem = async ({
         );
         if (gercekSoruSayisi < 1 ||
             gercekSoruSayisi > planlananSoruSayisi ||
-            (kapsamTuru === "konu" && !konuKapsamiTam)) {
+            (kapsamTuru === "konu" && gercekSoruSayisi < soruSayisi && !konuKapsamiTam)) {
             throw uygunIcerikBulunamadiHatasi(
                 "Tüm alt konuları kapsayan güvenilir soru sayısına ulaşılamadı."
             );
