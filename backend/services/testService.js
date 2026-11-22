@@ -645,8 +645,7 @@ const testOlusturTekIslem = async ({
         const zorlukDagilimi = zorlukDagiliminiOlustur(zorluk, planlananSoruSayisi);
         asama = "GEMINI_URETIMI";
         // Önceden Gemini tarafından konuya bağlanmış kaynaklardan tek istekte
-        // üretim yap. Ek embedding denetimi ve ikinci Gemini kalite çağrısı
-        // bu yolda kullanılmaz; kaynak/tekrar/şema kontrolleri yereldir.
+        // üretim yap. Soruları üretim sonrasında içerik denetimiyle eleme.
         const geminiSonucu = await deps.geminiTestUret({
             dersBilgisi: { dersAdi: ders.dersAdi, aciklama: ders.aciklama },
             kapsamTuru,
@@ -666,48 +665,18 @@ const testOlusturTekIslem = async ({
 
         tanilama.geminiApiCagriSayisi = Number.isInteger(geminiSonucu?.apiCagriSayisi)
             ? geminiSonucu.apiCagriSayisi : null;
-        // Kısmi dönüşte yalnızca doğrulanmış gerçek soru sayısı saklanır;
-        // her alt konu için en az bir soru bulunması şartı da korunur.
-        const gercekSoruSayisi = Array.isArray(geminiSonucu.sorular)
+        // Gemini'nin gösterilebilir olarak döndürdüğü soruları olduğu gibi tut.
+        // Eksik konu kotası, tekrar veya kanıt denetimiyle testi iptal etme.
+        const gercekSoruSayisi = Array.isArray(geminiSonucu?.sorular)
             ? geminiSonucu.sorular.length : 0;
-        const konuKapsamiTam = kaynakVerisi.konuDagilimi.every((konu) =>
-            geminiSonucu.sorular.some((soru) => String(soru.konuId) === String(konu.konuId))
-        );
-        if (gercekSoruSayisi < 1 ||
-            gercekSoruSayisi > planlananSoruSayisi ||
-            (kapsamTuru === "konu" && gercekSoruSayisi < soruSayisi && !konuKapsamiTam)) {
+        if (gercekSoruSayisi < 1) {
             throw uygunIcerikBulunamadiHatasi(
-                "Tüm alt konuları kapsayan güvenilir soru sayısına ulaşılamadı."
+                "Gemini bu kaynaklardan görüntülenebilir bir soru üretemedi."
             );
         }
-        const eksikSoruNedeni = gercekSoruSayisi < planlananSoruSayisi
-            ? "KALITE_KONTROLU"
-            : (planlananSoruSayisi < soruSayisi
-                ? "KAYNAK_KAPASITESI" : "");
-
-        // Denetim JSON'u için her sorunun gerçekten kullandığı parçaların
-        // o sorunun alt konusuyla olan semantik skorlarını sakla.
-        const skorHaritasi = new Map(kaynakVerisi.kaynaklar.map((kaynak) => [
-            `${kimlikMetni(kaynak.materyalId)}:${kaynak.parcaIndex}`, kaynak,
-        ]));
-        const denetimliSorular = geminiSonucu.sorular.map((soru) => ({
-            ...soru,
-            kaynaklar: (soru.kaynaklar || []).map((kaynak) => {
-                const parcaSkorlari = (kaynak.parcaIndeksleri || [])
-                    .map((parcaIndex) => {
-                        const kayit = skorHaritasi.get(
-                            `${kimlikMetni(kaynak.materyalId)}:${parcaIndex}`
-                        );
-                        const skor = kayit?.konuSkorlari?.[soru.konuId];
-                        return Number.isFinite(skor) ? {
-                            parcaIndex, skor: Number(skor.toFixed(4)),
-                        } : null;
-                    }).filter(Boolean);
-                return parcaSkorlari.length > 0
-                    ? { ...kaynak, parcaSkorlari }
-                    : kaynak;
-            }),
-        }));
+        const eksikSoruNedeni = gercekSoruSayisi < soruSayisi
+            ? (geminiSonucu.kismiUretimNedeni || "KAYNAK_KAPASITESI") : "";
+        const denetimliSorular = geminiSonucu.sorular.slice(0, soruSayisi);
         asama = "KAYNAK_SURUM_DOGRULAMA";
         await kaynakSurumleriniDogrula({
             kullaniciId,
