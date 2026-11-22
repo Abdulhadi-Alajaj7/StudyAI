@@ -715,6 +715,7 @@ test("konu kapsamı mevcut semantik aramayı konu materyalleriyle sınırlar", a
                 materyalId: String(materyalId),
                 parcaIndex: 0,
                 icerik: metinParcalari[0].icerik,
+                skor: 0.91,
             }],
         };
     };
