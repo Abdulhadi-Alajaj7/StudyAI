@@ -86,3 +86,38 @@ test("karşılaştırma konusu bulunmazsa yanlış güvenle kabul edilmez", asyn
     assert.equal(sonuc[0].gecerli, false);
     assert.equal(sonuc[0].neden, "HEDEF_BENZERLIK_DUSUK");
 });
+
+test("farklı cümlelerle aynı cevabı ölçen iki soru aynı alt konuda reddedilir", async () => {
+    const denetle = testKonuDogrulayicisiOlustur({
+        konular: [{ konuId: "olcum", baslik: "Ölçüm Düzeyleri" },
+            { konuId: "diger", baslik: "Diğer Konular" }],
+        embeddingUret: async (metinler, { tur }) => tur === "dokuman"
+            ? [[1, 0], [0, 1]]
+            : metinler.map(() => [0.99, 0.10]),
+    });
+    const sorular = [
+        soru("olcum", "Hangi düzeyde mutlak sıfır bulunur?", "Ratio"),
+        soru("olcum", "Mutlak sıfır noktası olan ölçüm düzeyi hangisidir?", "Ratio"),
+    ];
+    const sonuc = await denetle({ sorular });
+    assert.equal(sonuc[0].gecerli, true);
+    assert.equal(sonuc[1].gecerli, false);
+    assert.equal(sonuc[1].neden, "AYNI_KAVRAM_TEKRARI");
+    assert.equal(sonuc[1].tekrarEdenSoruIndeksi, 0);
+});
+
+test("önceki partide üretilen aynı kavram da yeni partide reddedilir", async () => {
+    const denetle = testKonuDogrulayicisiOlustur({
+        konular: [{ konuId: "olcum", baslik: "Ölçüm Düzeyleri" }],
+        embeddingUret: async (metinler, { tur }) => tur === "dokuman"
+            ? [[1, 0]]
+            : metinler.map(() => [0.995, 0.09]),
+    });
+    const oncekiSorular = [soru("olcum", "Ölçüm düzeyi nedir?", "Ratio")];
+    const sonuc = await denetle({
+        sorular: [soru("olcum", "Aynı ölçüm kavramının başka tanımı nedir?", "Ratio")],
+        oncekiSorular,
+    });
+    assert.equal(sonuc[0].gecerli, false);
+    assert.equal(sonuc[0].neden, "AYNI_KAVRAM_TEKRARI");
+});
