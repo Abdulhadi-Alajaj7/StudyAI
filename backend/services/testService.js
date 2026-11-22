@@ -753,6 +753,16 @@ const testOlusturTekIslem = async ({
             materyalId,
             konuId,
         }, deps);
+        if (kapsamTuru === "konu") {
+            const altMi = String(hedef.konu?.konuId || "").startsWith("sub-");
+            const izinli = altMi ? [5, 10] : [10, 15, 20];
+            if (!izinli.includes(soruSayisi)) {
+                throw new TestSistemiHatasi(
+                    altMi ? "Alt konu için 5 veya 10 soru seçin." : "Ana konu için 10, 15 veya 20 soru seçin.",
+                    { status: 422, kod: "GECERSIZ_SORU_SAYISI" }
+                );
+            }
+        }
         asama = "KAYNAK_HAZIRLAMA";
         const kaynakVerisi = await kaynaklariHazirla({
             kullaniciId,
