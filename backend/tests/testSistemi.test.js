@@ -13,6 +13,7 @@ import {
 import { testSorulariniDogrula } from "../services/geminiService.js";
 import {
     cevabiKaydet,
+    altKonuKotalariniDagit,
     konuIcinParcalariSirala,
     konuKotalariniDagit,
     sonGoruntulenenSoruyuGuncelle,
@@ -226,7 +227,7 @@ test("üç test kapsamı ile varsayılan ve geçersiz ayarlar doğrulanır", () 
     assert.equal(testOlusturmaGirdisiniDogrula(String(dersId), {
         kapsamTuru: "materyal",
         materyalId: String(materyalId),
-        soruSayisi: 5,
+        soruSayisi: 10,
         zorluk: "kolay",
     }).kapsamTuru, "materyal");
     assert.equal(testOlusturmaGirdisiniDogrula(String(dersId), {
@@ -239,10 +240,12 @@ test("üç test kapsamı ile varsayılan ve geçersiz ayarlar doğrulanır", () 
     assert.equal(testOlusturmaGirdisiniDogrula(String(dersId), {
         kapsamTuru: "yanlis",
     }).kod, "GECERSIZ_TEST_KAPSAMI");
-    assert.equal(testOlusturmaGirdisiniDogrula(String(dersId), {
-        kapsamTuru: "tum_ders",
-        soruSayisi: 7,
-    }).kod, "GECERSIZ_SORU_SAYISI");
+    for (const soruSayisi of [5, 7]) {
+        assert.equal(testOlusturmaGirdisiniDogrula(String(dersId), {
+            kapsamTuru: "tum_ders",
+            soruSayisi,
+        }).kod, "GECERSIZ_SORU_SAYISI");
+    }
     assert.equal(testOlusturmaGirdisiniDogrula(String(dersId), {
         kapsamTuru: "tum_ders",
         zorluk: "imkansiz",
@@ -1071,4 +1074,131 @@ test("denetim: test üretimi hatasında single-flight kaydı temizlenir ve sonra
     await testOlustur(girdi, bagimliliklar);
     assert.equal(sayi, 2);
     assert.equal(kaydiGetir().sorular.length, 5);
+});
+
+
+test("ana konu: 10 soru 5 alt konuya eşit dağıtılır", () => {
+    const gruplar = Array.from({ length: 5 }, (_, index) => ({
+        konuId: `alt-${index + 1}`,
+        baslik: `Alt konu ${index + 1}`,
+        parcalar: [{ materyalId, parcaIndex: index, icerik: "a".repeat(1000) }],
+    }));
+    const dagilim = altKonuKotalariniDagit(gruplar, 10);
+    assert.equal(dagilim.length, 5);
+    assert.deepEqual(dagilim.map((konu) => konu.adet), [2, 2, 2, 2, 2]);
+});
+
+test("ana konu: bölünemeyen sayıdaki ek sorular içerik kapsamı yüksek konulara gider", () => {
+    const uzunluklar = [1600, 1300, 1000, 800, 700, 600, 500];
+    const gruplar = uzunluklar.map((uzunluk, index) => ({
+        konuId: `alt-${index + 1}`,
+        baslik: `Alt konu ${index + 1}`,
+        parcalar: [{ materyalId, parcaIndex: index, icerik: "a".repeat(uzunluk) }],
+    }));
+    const dagilim = altKonuKotalariniDagit(gruplar, 10);
+    assert.equal(dagilim.reduce((toplam, grup) => toplam + grup.adet, 0), 10);
+    assert.ok(dagilim.every((grup) => grup.adet >= 1));
+    assert.equal(dagilim[0].adet, 2);
+    assert.equal(dagilim[1].adet, 2);
+    assert.equal(dagilim[2].adet, 2);
+    assert.deepEqual(altKonuKotalariniDagit(gruplar, 6), []);
+});
+
+test("ana konu: her alt konu için yeterli kaynak yoksa kota verilmez", () => {
+    const dagilim = altKonuKotalariniDagit([
+        { konuId: "a", baslik: "A", parcalar: [{ materyalId, parcaIndex: 0, icerik: "a".repeat(900) }] },
+        { konuId: "b", baslik: "B", parcalar: [{ materyalId, parcaIndex: 1, icerik: "b".repeat(20) }] },
+    ], 10);
+    assert.deepEqual(dagilim, []);
+});
+
+test("ana konu seçimi yalnızca doğrudan alt konular için Gemini kotası hazırlar", async () => {
+    let geminiGirdisi;
+    const { bagimliliklar, kaydiGetir } = uretimBagimliliklari({
+        geminiTestUret: async (girdi) => {
+            geminiGirdisi = girdi;
+            return { sorular: ornekSorular(girdi.soruSayisi), model: "test-model" };
+        },
+    });
+    await testOlustur({
+        kullaniciId, dersId,
+        kapsamTuru: "konu",
+        konuId: "top-veri-yapilari",
+        soruSayisi: 10,
+        zorluk: "orta",
+    }, bagimliliklar);
+    assert.deepEqual(
+        new Map(geminiGirdisi.konuDagilimi.map((konu) => [konu.konuId, konu.adet])),
+        new Map([["sub-yigin", 5], ["sub-kuyruk", 5]])
+    );
+    assert.deepEqual(
+        new Set(geminiGirdisi.kaynaklar.flatMap((kaynak) => kaynak.konuIds)),
+        new Set(["sub-yigin", "sub-kuyruk"])
+    );
+    assert.equal(kaydiGetir().soruSayisi, 10);
+    assert.equal(geminiGirdisi.kaynaklar.length, 2);
+});
+
+test("ana konu: 12 alt konu için 10 soru isteği Gemini çağrılmadan reddedilir", async () => {
+    const harita = { anaKonular: [{
+        konuId: "ana-oniki",
+        baslik: "On İki Konu",
+        kaynakMateryalIds: [materyalId],
+        altKonular: Array.from({ length: 12 }, (_, index) => ({
+            konuId: `alt-${index + 1}`,
+            baslik: `Alt konu ${index + 1}`,
+            kaynakMateryalIds: [materyalId],
+        })),
+    }] };
+    let geminiCagrisi = false;
+    const { bagimliliklar } = uretimBagimliliklari({
+        harita,
+        geminiTestUret: async () => {
+            geminiCagrisi = true;
+            return { sorular: [] };
+        },
+    });
+    await assert.rejects(testOlustur({
+        kullaniciId, dersId, kapsamTuru: "konu",
+        konuId: "ana-oniki", soruSayisi: 10, zorluk: "orta",
+    }, bagimliliklar), (hata) => (
+        hata.status === 422 && hata.kod === "ALT_KONU_SORU_SAYISI_YETERSIZ"
+    ));
+    assert.equal(geminiCagrisi, false);
+});
+
+test("ana konu: iki alt konunun ortak fiziksel metni tek kez iletilir, iki bağ korunur", async () => {
+    const ortakHarita = { anaKonular: [{
+        konuId: "ana-ortak",
+        baslik: "Ortak Ana Konu",
+        aciklama: "İki konu",
+        kaynakMateryalIds: [materyalId],
+        altKonular: [
+            { konuId: "alt-1", baslik: "Yığın", aciklama: "LIFO", kaynakMateryalIds: [materyalId] },
+            { konuId: "alt-2", baslik: "Kuyruk", aciklama: "FIFO", kaynakMateryalIds: [materyalId] },
+        ],
+    }] };
+    const parcalar = [{
+        _id: new mongoose.Types.ObjectId(),
+        materyalId, islemeId, parcaIndex: 0,
+        icerik: uzunIcerik("Yığın LIFO ve Kuyruk FIFO", "iki veri yapısının çalışma ilkeleri"),
+    }];
+    let geminiGirdisi;
+    const { bagimliliklar } = uretimBagimliliklari({
+        harita: ortakHarita,
+        parcalar,
+        geminiTestUret: async (girdi) => {
+            geminiGirdisi = girdi;
+            return { sorular: ornekSorular(girdi.soruSayisi), model: "test-model" };
+        },
+    });
+    await testOlustur({
+        kullaniciId, dersId, kapsamTuru: "konu",
+        konuId: "ana-ortak", soruSayisi: 10, zorluk: "orta",
+    }, bagimliliklar);
+    assert.equal(geminiGirdisi.kaynaklar.length, 1);
+    assert.deepEqual(
+        new Set(geminiGirdisi.kaynaklar[0].konuIds),
+        new Set(["alt-1", "alt-2"])
+    );
 });
