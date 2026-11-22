@@ -1905,6 +1905,8 @@ Sorular dizisi 1 ile istenen sayı arasında olabilir; yalnızca geçerli JSON d
     }) + `
 TEK_ISTEK_KURALI: Bu bir tek çağrılık testtir; gerekli çeşitlilik/kaynak yoksa sorular dizisini kısa döndür.
 Her soru için konuId, zorluk, kaynakReferanslari ve kaynakKanitlari zorunludur.
+JSON biçimi: {"sorular":[{"metin":"Soru metni","secenekler":[{"anahtar":"A","metin":"..."},{"anahtar":"B","metin":"..."},{"anahtar":"C","metin":"..."},{"anahtar":"D","metin":"..."}],"dogruCevap":"A","aciklama":"Kaynağa dayalı açıklama","zorluk":"kolay","konuId":"planda verilen konu kimliği","kaynakReferanslari":["verilen kaynak anahtarı"],"kaynakKanitlari":[{"kaynakReferansi":"aynı kaynak anahtarı","alinti":"kaynakta birebir geçen alıntı"}]}]}.
+Örnek değerleri kopyalama; yalnızca gerçek kaynak anahtarlarını ve planın izin verdiği konu kimliklerini kullan.
 Konu başına hedef kota: ${JSON.stringify(konuDagilimi)}.
 Yalnızca kaynakla doğrulanabilen farklı soruları döndür.`;
     const apiCagriButcesi = { kullanilan: 0, maksimum: 1 };
