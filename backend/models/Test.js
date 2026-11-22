@@ -112,10 +112,8 @@ const soruSchema = new mongoose.Schema({
     kaynaklar: {
         type: [soruKaynagiSchema],
         default: [],
-        validate: {
-            validator: (kaynaklar) => Array.isArray(kaynaklar) && kaynaklar.length > 0,
-            message: "Her soru en az bir doğrulanmış kaynağa bağlı olmalıdır.",
-        },
+        // Gemini'nin kaynak referansı eksikse soruyu reddetme. Bilinmeyen
+        // bir dosya/parça uydurmak yerine kaynaklar boş kalabilir.
     },
     ogrenciCevabi: {
         type: String,
