@@ -1916,12 +1916,11 @@ Yalnızca kaynakla doğrulanabilen farklı soruları döndür.`;
         maxDeneme: 1, // 429 dahil otomatik tekrar yok
         maxOutputTokens: Math.min(24_000, 1_800 + (soruSayisi * 1_000)),
         bekle: bagimliliklar.bekle || (() => Promise.resolve()),
-        responseJsonSchema: testYanitSemasiniOlustur({
-            soruSayisi,
-            kaynakAnahtarlari: paket.kaynaklar.map((kaynak) => kaynak.anahtar),
-            zorluklar: soruPlani.map((soru) => soru.zorluk),
-            kismiSonucKabul: true,
-        }),
+        // Gemini'nin karmaşık responseJsonSchema'sı bazı model/sürüm
+        // kombinasyonlarında HTTP 400 INVALID_ARGUMENT döndürebilir.
+        // JSON MIME korunur; tüm alanlar ve kaynak izinleri aşağıdaki
+        // testSorulariniDogrula ile tek tek denetlenir.
+        responseJsonSchema: null,
         apiCagriButcesi,
         uretimIzleyicisi: bagimliliklar.uretimIzleyicisi || null,
         sdkCagriBaglami: { anaCagriTuru: "tek_istek", partiIndeksi: 0, partiBoyutu: soruSayisi },
