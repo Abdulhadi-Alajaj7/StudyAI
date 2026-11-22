@@ -1244,80 +1244,46 @@ test("Gemini soru istemi her alt konunun adını ve açıklamasını içerir", (
     assert.match(istem, /öğrenme hedefini ölçmeyen soruları üretme/);
 });
 
-test("konu testinde bağımsız embedding doğrulayıcısı ve kaynak skorları kayda taşınır", async () => {
-    let denetlenenKonular = [];
+test("konu testi tek istek kullanır, kaynak skorlarını korur ve embedding denetimi çağırmaz", async () => {
     let denetlemeCagrildi = false;
     const { bagimliliklar, kaydiGetir } = uretimBagimliliklari({
         geminiTestUret: async (girdi) => {
-            assert.equal(typeof girdi.soruKonuDogrula, "function");
-            const denetim = await girdi.soruKonuDogrula({
-                sorular: [{
-                    konuId: "sub-yigin", metin: "Yığın nedir?",
-                    dogruCevap: "A",
-                    secenekler: [{ anahtar: "A", metin: "LIFO" }],
-                }],
-            });
-            assert.equal(denetim[0].gecerli, true);
+            assert.equal(girdi.tekIstekModu, true);
+            assert.equal(girdi.soruKonuDogrula, undefined);
+            assert.equal(girdi.soruKalitesiDogrula, undefined);
             return {
                 sorular: ornekSorular(girdi.soruSayisi).map((soru) => ({
-                    ...soru,
-                    konuId: "sub-yigin",
-                    konuDogrulama: {
-                        hedefSkor: 0.88, rakipSkor: 0.52,
-                        rakipKonuBasligi: "Kuyruk",
-                    },
+                    ...soru, konuId: "sub-yigin",
                 })),
-                model: "test-model",
+                model: "test-model", apiCagriSayisi: 1,
             };
         },
     });
-    bagimliliklar.testKonuDogrulayicisiOlustur = ({ konular }) => {
-        denetlenenKonular = konular.map((konu) => konu.konuId);
-        return async () => {
-            denetlemeCagrildi = true;
-            return [{
-                soruIndeksi: 0,
-                gecerli: true,
-                hedefSkor: 0.88,
-                rakipSkor: 0.52,
-                rakipKonuBasligi: "Kuyruk",
-            }];
-        };
+    bagimliliklar.testKonuDogrulayicisiOlustur = () => {
+        denetlemeCagrildi = true;
+        throw new Error("Tek istek modunda kullanılmamalı.");
     };
     await testOlustur({
         kullaniciId, dersId, kapsamTuru: "konu",
         konuId: "sub-yigin", soruSayisi: 10, zorluk: "orta",
     }, bagimliliklar);
-    assert.ok(denetlemeCagrildi);
-    assert.deepEqual(denetlenenKonular, ["sub-yigin", "sub-kuyruk"]);
-    assert.deepEqual(kaydiGetir().sorular[0].konuDogrulama, {
-        hedefSkor: 0.88, rakipSkor: 0.52, rakipKonuBasligi: "Kuyruk",
-    });
+    assert.equal(denetlemeCagrildi, false);
+    assert.equal(kaydiGetir().sorular[0].konuDogrulama, undefined);
     assert.deepEqual(kaydiGetir().sorular[0].kaynaklar[0].parcaSkorlari, [
         { parcaIndex: 0, skor: 0.91 },
     ]);
 });
 
-test("ek Gemini kalite kontrolü 503 olduğunda konu testini ve denetim kaydını bozmaz", async () => {
+test("ek Gemini kalite isteği artık yapılmaz; tek üretim çağrısı yeterlidir", async () => {
     let denetimCagrilari = 0;
+    let uretimCagrilari = 0;
     const { bagimliliklar, kaydiGetir } = uretimBagimliliklari({
         geminiTestUret: async (girdi) => {
-            assert.equal(typeof girdi.soruKalitesiDogrula, "function");
-            const ilk = await girdi.soruKalitesiDogrula({
-                sorular: [{ konuId: "sub-yigin", metin: "Yığın?" }],
-                oncekiSorular: [], izinliKonuIds: girdi.izinliKonuIds,
-            });
-            const tekrar = await girdi.soruKalitesiDogrula({
-                sorular: [{ konuId: "sub-yigin", metin: "Yığın?" }],
-                oncekiSorular: [], izinliKonuIds: girdi.izinliKonuIds,
-            });
-            assert.equal(ilk[0].neden, "DENETIM_ATLANDI");
-            assert.equal(tekrar[0].neden, "DENETIM_ATLANDI");
+            uretimCagrilari += 1;
+            assert.equal(girdi.tekIstekModu, true);
             return {
                 sorular: ornekSorular(girdi.soruSayisi).map((soru) => ({
-                    ...soru,
-                    konuId: "sub-yigin",
-                    kaliteDogrulama: { durum: "DENETIM_ATLANDI" },
+                    ...soru, konuId: "sub-yigin",
                 })),
                 model: "test-model",
             };
@@ -1325,16 +1291,15 @@ test("ek Gemini kalite kontrolü 503 olduğunda konu testini ve denetim kaydın�
     });
     bagimliliklar.geminiKaliteDenetle = async () => {
         denetimCagrilari += 1;
-        throw Object.assign(new Error("Kalite denetim servisi geçici olarak kullanılamıyor"), {
-            status: 503, kod: "GEMINI_503",
-        });
+        throw new Error("İkinci Gemini çağrısı yapılmamalı.");
     };
     await testOlustur({
         kullaniciId, dersId, kapsamTuru: "konu",
         konuId: "sub-yigin", soruSayisi: 10, zorluk: "orta",
     }, bagimliliklar);
-    assert.equal(denetimCagrilari, 1);
-    assert.equal(kaydiGetir().sorular[0].kaliteDogrulama.durum, "DENETIM_ATLANDI");
+    assert.equal(uretimCagrilari, 1);
+    assert.equal(denetimCagrilari, 0);
+    assert.equal(kaydiGetir().sorular[0].kaliteDogrulama, undefined);
 });
 
 test("20 soru istendiğinde kaynak kapasitesi 17 ise dört koruma kuralıyla 17 soru saklanır", async () => {
