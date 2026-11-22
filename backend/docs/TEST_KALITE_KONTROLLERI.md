@@ -15,6 +15,17 @@ Her soru, seçilen ana konunun bir alt konusuna (veya doğrudan seçilen yaprak 
 7. Reddedilen sorunun kendisi sınırlı sayıda yeniden üretilir. İlgili konu kotası ve kaynak kanıtı korunur; tüm testi baştan üretmek zorunlu değildir. Güvenilir soru üretilemiyorsa eksik/kusurlu test kaydedilmez.
 8. Sorular veritabanına öğrenciye ait test kaydında saklanır. Eski kayıtlar ve önceki test yanıtları değiştirilmez.
 
+## Eksik soru üretimi (ör. 20 istenen / 17 hazır)
+
+- Kullanıcının yeni test için seçebileceği adetler halen **10, 15, 20**'dir; eski test kayıtları değişmez.
+- Ana konu kapsamındaki her alt konu için en az bir doğrulanmış soru zorunludur. Hiçbir alt konu kapsanamazsa eksik test kaydedilmez.
+- Kaynak hazırlama aşaması istenen adet için kapasite bulamazsa bütün alt konuları ve kaynak kanıtını koruyan en yüksek sayıyı (en az bir/alt konu) hesaplar. Kelime eşleştirmesine veya düşük embedding skoruna geri dönmez.
+- Gemini aşamasında her parti ve tek soru normal kalite, kaynak, tekrar, cevap anahtarı, konu uyumu ve sınırlı onarım kontrollerini geçer. Onarılamayan kalite hatası yüzünden **yalnızca doğrulanmamış** sorular dışlanabilir; şebeke, kota ve servis hataları kısmi başarı diye gizlenmez.
+- Nihai doğrulama gerçek soru sayısına, gerçek zorluk dağılımına ve gerçek alt konu dağılımına göre tekrar çalıştırılır.
+- Test belgesinin `soruSayisi` alanı **gerçekte kaydedilen** sayıdır; `istenenSoruSayisi` ise talep edilen sayıdır. `eksikSoruNedeni` alanı `KAYNAK_KAPASITESI` veya `KALITE_KONTROLU` olabilir.
+- Kullanıcıya ve devam eden testler listesine Türkçe açıklama gösterilir: "İstenen 20 sorudan 17 soru hazırlandı (3 eksik)." JSON denetim görünümünde istenen/gerçek sayı ve neden alanları da bulunur.
+- Bu özellik, güvenilir içeriğin hiç bulunamadığı durumlarda veya bütün alt konuları kapsama kuralının sağlanamadığı durumlarda hatayı kaldırmaz. Kısmi sonuç akademik doğruluk yüzdesi değildir.
+
 ## Kontrollerin sınırları
 
 - Embedding skorları **doğruluk yüzdesi değildir**; konu yakınlığına ilişkin sinyaldir.
