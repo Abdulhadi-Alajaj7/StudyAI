@@ -80,6 +80,10 @@ export const testDenetimVerisiniOlustur = (test, konular = []) => ({
             rakipSkor: soru.konuDogrulama.rakipSkor ?? null,
             rakipKonuBasligi: soru.konuDogrulama.rakipKonuBasligi || "",
         } : null,
+        kaliteDogrulama: soru?.kaliteDogrulama ? {
+            durum: String(soru.kaliteDogrulama.durum || ""),
+            guven: soru.kaliteDogrulama.guven ?? null,
+        } : null,
     })),
 });
 
