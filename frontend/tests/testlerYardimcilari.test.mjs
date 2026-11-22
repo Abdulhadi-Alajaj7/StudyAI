@@ -185,10 +185,10 @@ test("kısmi soru sayısında gerçek sonuç ve anlaşılır Türkçe neden gös
     };
     assert.match(testEksikSoruMesaji(kismi), /20 sorudan 17 soru/);
     assert.match(testEksikSoruMesaji(kismi), /3 eksik/);
-    assert.match(testEksikSoruMesaji(kismi), /kalite doğrulamasını geçemedi/);
+    assert.match(testEksikSoruMesaji(kismi), /dört seçenek veya cevap eksikti/);
     assert.equal(testEksikSoruMesaji({ soruSayisi: 10, istenenSoruSayisi: 10 }), "");
     const kaynak = { ...kismi, eksikSoruNedeni: "KAYNAK_KAPASITESI" };
-    assert.match(testEksikSoruMesaji(kaynak), /Kaynak metinler/);
+    assert.match(testEksikSoruMesaji(kaynak), /Gemini, kaynak metinlere dayanarak/);
     const json = testDenetimVerisiniOlustur(kismi);
     assert.equal(json.soruSayisi, 17);
     assert.equal(json.istenenSoruSayisi, 20);
