@@ -1,60 +1,32 @@
-# Test Sorusu Kalite Kontrolleri
+# StudyAI Test Üretimi: Gemini Öğretmen, Tek İstek ve Güvenilir Kısmi Sonuç
 
-## Hedef
+## Güncel üretim akışı
 
-Her soru, seçilen ana konunun bir alt konusuna (veya doğrudan seçilen yaprak konuya) bağlanmalı ve öğrencinin ilgili konudaki öğrenmesini gerçekten ölçmelidir. Sorunun yalnızca geçerli bir `konuId` taşıması tek başına akademik doğruluk garantisi değildir.
+1. **Yeni konu haritaları:** PDF'lerin aktif metin parçalarını Gemini, harita tamamlanırken ilgili ana/alt konu ID'lerine bağlar. Aynı chunk birden çok konuyla ilişkili olabilir. Atamalar `KonuHaritasi.parcaKonuAtamalari` içinde materyal, işlem sürümü ve parça indeksiyle tutulur. Eski haritalar için semantik kaynak araması korunur.
+2. Kullanıcı ana konu seçerse her alt konu için **en az bir** soru hedeflenir; istek sayısı alt konu sayısından küçükse işlem reddedilir. Alt konu testleri 5/10, ana konu testleri 10/15/20 soru destekler.
+3. Backend önceden etiketlenmiş kaynaklardan fiziksel olarak tekilleştirilmiş, konu başına kaynak içeren bir paket hazırlar. Tek istekte gönderilen kaynak hacmi `TEST_TEK_ISTEK_KAYNAK_KARAKTER_BUTCESI` ile sınırlandırılır (varsayılan 70.000, izinli 30.000–110.000 karakter).
+4. **Tek Gemini API isteği:** Hedef sayı, konu/zorluk kotaları, kaynak anahtarları ve tekrar etmeme kuralları ile mümkün olan sorular istenir. Kaynak yetersizse tekrar veya tahmin yerine daha az soru döndürmesine izin verilir. Eski 5 soruluk parti akışı, tekil onarımlar ve ek Gemini kalite kontrolü bu varsayılan yolda çalışmaz.
+5. **Yerel kontrol (yeni API çağrısı yok):** Her soru sırayla JSON yapısı, A/B/C/D seçenekleri, tek cevap anahtarı, konu/kota kimliği, kaynak referansları, kaynaktaki birebir kanıt alıntısı, cevap-kaynak örtüşmesi ve benzer/tekrar soru açısından kontrol edilir. Geçersiz sorular atılır, geçerli sorular saklanır.
+6. Tüm alt konulardan en az bir geçerli soru yoksa ana konu testi **kaydedilmez** (kapsam kuralı korunur). Yeterli kapsam varsa eksik sayıyla test kaydedilebilir ve kullanıcıya Türkçe uyarı gösterilir.
+7. Mevcut kullanıcı testleri ve cevapları değiştirilmez; `main` için otomatik birleştirme yapılmaz.
 
-## Üretim akışı
+## Kısmi test ve görünür uyarı
 
-1. Konuya özgü gömleme tabanlı anlamsal arama ile metin parçaları belirlenir. Kelime/kök benzerliği ile kaynak seçimine geri dönülmez.
-2. Ana konu seçilirse her alt konuya en az bir soru ayrılır. Eşit bölünebilen sayıda eşit; aksi durumda içerik kapasitesine göre dengeli kotalar kullanılır. Soru sayısı alt konu sayısından azsa istek reddedilir.
-3. Gemini, doğrulanmış kaynaklardan tam dört seçenekli ve tek doğru cevaplı sorular üretir; kaynak alıntıları ve konu kimliği zorunludur.
-4. Mevcut kaynak ve yapı doğrulamasından sonra bağımsız embedding kontrolü soruyu dersin bütün yaprak konularıyla karşılaştırır; belirgin başka konu üstünlüğünü veya düşük hedef benzerliğini reddeder.
-5. Aynı embedding kontrolü yeni soruyu hem o partinin önceki sorularıyla hem önceki partilerle karşılaştırır; güçlü semantik tekrarları reddeder.
-6. Ayrı Gemini kalite denetçisi soruların dört seçeneğini kaynak alıntılarına göre bağımsız yorumlar. Özellikle birden fazla doğru cevap, yanlış cevap anahtarı, aynı öğrenme hedefi tekrarı ve konu dışı sorular için yüksek güvenli tespitleri reddeder.
-7. Reddedilen sorunun kendisi sınırlı sayıda yeniden üretilir. İlgili konu kotası ve kaynak kanıtı korunur; tüm testi baştan üretmek zorunlu değildir. Güvenilir soru üretilemiyorsa eksik/kusurlu test kaydedilmez.
-8. Sorular veritabanına öğrenciye ait test kaydında saklanır. Eski kayıtlar ve önceki test yanıtları değiştirilmez.
+- `soruSayisi`: kaydedilen gerçek soru sayısı.
+- `istenenSoruSayisi`: kullanıcının istediği soru sayısı.
+- `eksikSoruNedeni`: `KAYNAK_KAPASITESI` (kaynak hazırlama kısalttı) veya `KALITE_KONTROLU` (Gemini eksik üretti veya yerel kontrol soru reddetti).
+- Kullanıcı örneğin 10 soru istediğinde 7 geçerli ve kapsayıcı soru kalırsa 7 soru kaydedilir ve eksik 3 soru açıkça gösterilir.
+- Kaynak bulunamadığında, tüm alt konular kapsanamadığında, geçerli hiç soru olmadığında veya Gemini 429/503/timeout hatası verdiğinde kısmi başarı uydurulmaz.
 
-## Eksik soru üretimi (ör. 20 istenen / 17 hazır)
+## API hızı, kota ve denetlenebilirlik
 
-- Kullanıcının yeni test için seçebileceği adetler halen **10, 15, 20**'dir; eski test kayıtları değişmez.
-- Ana konu kapsamındaki her alt konu için en az bir doğrulanmış soru zorunludur. Hiçbir alt konu kapsanamazsa eksik test kaydedilmez.
-- Kaynak hazırlama aşaması istenen adet için kapasite bulamazsa bütün alt konuları ve kaynak kanıtını koruyan en yüksek sayıyı (en az bir/alt konu) hesaplar. Kelime eşleştirmesine veya düşük embedding skoruna geri dönmez.
-- Gemini aşamasında her parti ve tek soru normal kalite, kaynak, tekrar, cevap anahtarı, konu uyumu ve sınırlı onarım kontrollerini geçer. Onarılamayan kalite hatası yüzünden **yalnızca doğrulanmamış** sorular dışlanabilir; şebeke, kota ve servis hataları kısmi başarı diye gizlenmez.
-- Nihai doğrulama gerçek soru sayısına, gerçek zorluk dağılımına ve gerçek alt konu dağılımına göre tekrar çalıştırılır.
-- Test belgesinin `soruSayisi` alanı **gerçekte kaydedilen** sayıdır; `istenenSoruSayisi` ise talep edilen sayıdır. `eksikSoruNedeni` alanı `KAYNAK_KAPASITESI` veya `KALITE_KONTROLU` olabilir.
-- Kullanıcıya ve devam eden testler listesine Türkçe açıklama gösterilir: "İstenen 20 sorudan 17 soru hazırlandı (3 eksik)." JSON denetim görünümünde istenen/gerçek sayı ve neden alanları da bulunur.
-- Bu özellik, güvenilir içeriğin hiç bulunamadığı durumlarda veya bütün alt konuları kapsama kuralının sağlanamadığı durumlarda hatayı kaldırmaz. Kısmi sonuç akademik doğruluk yüzdesi değildir.
+- Varsayılan test üretimi için **en fazla bir Gemini çağrı denemesi** yapılır; 429'a tekrar istek atılmaz. Kota yenilenme süresi sağlayıcının sınırına bağlıdır.
+- Terminalde `[TestTekIstek] Gemini üretimi` özeti: model, istek adedi, istenen/üretilen/kabul edilen soru sayıları, reddedilen soru sayısı, süre ve token kullanımı.
+- Gemini'den daha az çağrı yapmak gecikmeyi ve kota kullanımını **azaltabilir**, fakat gerçek süre/kalite değişimini üretim ortamında ölçmek gerekir.
+- İkinci Gemini denetimi ve embedding tabanlı soru kontrolü varsayılan tek-istek yolunda devre dışıdır; bu nedenle modelin yanıtı akademik doğruluk garantisi değildir. Yerel kontroller de açıkça yanlış bilgiyi her zaman yakalayamaz.
+- `JSON` inceleme düğmesinde kaynak indeksleri ve mevcutsa önceki semantic skorları görünür. Yeni haritada skor bulunmaması normaldir; skor bir doğruluk yüzdesi değildir.
 
-## Kontrollerin sınırları
+## Eski yol ve regresyon
 
-- Embedding skorları **doğruluk yüzdesi değildir**; konu yakınlığına ilişkin sinyaldir.
-- Bağımsız Gemini denetiminin sonucu da kesin akademik doğruluk garantisi değildir. Düşük güvenli işaretler otomatik reddedilmez.
-- Ek kalite denetim API'si geçici sağlayıcı hatası nedeniyle erişilemezse testin temel konu, kaynak, cevap kanıtı ve benzerlik kontrolleri çalışmaya devam eder. İnceleme JSON'unda `kaliteDogrulama.durum = DENETIM_ATLANDI` olarak görülebilir; bu durum başarılı kalite denetimi anlamına gelmez.
-- Ek denetim yeni bir API çağrısı gerektirir ve bazı testlerde süreyi artırabilir.
-- %85 gibi bir gerçek eğitimsel doğruluk oranı yalnızca etiketli ve bağımsız incelenmiş soru örnekleri üzerinde ölçülerek iddia edilebilir. Otomatik birim testleri bunu kanıtlamaz.
-
-## Geçici JSON incelemesi
-
-`JSON` düğmesi seçilen soru sayısı, soru metni, seçenekler, `konuId`, `konuBasligi`, kaynak dosyaları, kaynak parça indeksleri ve embedding skorlarını görüntüler. `konuDogrulama` hedef ve rakip konuları; `kaliteDogrulama` ise ilave kalite denetimi durumunu gösterir. Cevap anahtarı ve öğrenciye açıklanmayacak çözüm metni JSON'a eklenmez.
-
-## Ortam ayarları
-
-- `TEST_KONU_SEMANTIK_MIN_SKOR`: aranan kaynak parçası için varsayılan 0.50.
-- `TEST_SORU_KONU_MIN_SKOR`: sorunun hedef konu yakınlığı için varsayılan 0.43.
-- `TEST_SORU_KONU_RAKIP_FARKI`: belirgin rakip üstünlüğü için varsayılan 0.06.
-- `TEST_SORU_TEKRAR_ESIK`: aynı alt konu için yüksek benzerlik eşiği varsayılan 0.89.
-- `TEST_AYNI_CEVAP_TEKRAR_ESIK`: aynı cevapla aynı kavramın yeniden ölçülme eşiği varsayılan 0.80.
-- `GEMINI_TEST_DENETIM_MODELI`: istenirse bağımsız kalite denetimi için ayrı model; ayarlanmazsa test modelini kullanır.
-
-Eşikler gerçek öğrenci materyallerinde yanlış pozitif ve kaçan tekrar oranları ölçülerek değiştirilmelidir. Başarılı CI, gerçek Gemini servisinde bütün soruların doğru olacağını garanti etmez.
-
-## Gemini öğretmen: harita ve metin parçaları
-
-- Yeni konu haritası oluşturulurken nihai konu ID'leri belirlendikten sonra Gemini tüm aktif metin parçalarını ilgili ana/alt konulara sınıflandırır.
-- Her aktif parça en az bir geçerli konu ID'sine bağlanır. Birden fazla konuyu gerçekten kapsayan parçalara çoklu etiket verilebilir; başlık ve genel içerikler ana konuya bağlanabilir.
-- Sınıflandırma, materyal ID + aktif işleme sürümü + parça indeksi ile haritaya kaydedilir. Bilinmeyen ID, eksik parça veya tekrar eden parça varsa harita hazır olarak yayımlanmaz.
-- Test oluştururken yeni haritalarda doğrudan bu eşleştirmeler kullanılır; her testte yeniden geniş çaplı semantik arama yapılmaz. Önceden oluşturulmuş eski haritalarda embedding tabanlı eski yöntem korunur.
-- Incremental materyal güncellemesinde tüm aktif parçalar yeni haritaya yeniden atanır; materyal silme gibi durumlarda eski atamalar geçersiz kılınır.
-- Alt konu testi 5 veya 10; ana konu testi 10, 15 veya 20 soruya izin verir. Her alt konu için en az bir soru şartı devam eder.
-- Bu yaklaşımın gerçek API gecikmesini azaltacağı henüz ölçülmemiştir. Gemini'nin sınıflandırma doğruluğu da otomatik olarak garanti edilmez.
+- `geminiIleTestSorulariUret` fonksiyonu doğrudan `tekIstekModu` olmadan çağrılırsa eski parti/onarma yolunu korur (test/geri uyumluluk). StudyAI test servisi `tekIstekModu: true` geçirir.
+- Çalışan birim/entegrasyon testleri kalite ve hızın gerçek Gemini ile doğrulandığı anlamına gelmez.
