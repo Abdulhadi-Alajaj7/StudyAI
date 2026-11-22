@@ -6,6 +6,7 @@ import KonuHaritasi from "../models/KonuHaritasi.js";
 import Test from "../models/Test.js";
 import { dengeliOzetParcalariniSec } from "./dersOzetiService.js";
 import { semanticAramaYap } from "./semanticAramaService.js";
+import { dersKonulariniDogrulamaIcinGetir, testKonuDogrulayicisiOlustur } from "./testKonuDogrulamaService.js";
 import {
     geminiIleTestSorulariUret,
     VARSAYILAN_GEMINI_MODELI,
@@ -64,6 +65,7 @@ const bagimliliklariGetir = (bagimliliklar = {}) => ({
     TestModel: bagimliliklar.TestModel || Test,
     semanticArama: bagimliliklar.semanticArama || semanticAramaYap,
     geminiTestUret: bagimliliklar.geminiTestUret || geminiIleTestSorulariUret,
+    testKonuDogrulayicisiOlustur: bagimliliklar.testKonuDogrulayicisiOlustur || testKonuDogrulayicisiOlustur,
     kaynakButcesi: bagimliliklar.kaynakButcesi || kaynakButcesiGetir(),
     simdi: bagimliliklar.simdi || (() => new Date()),
     korelasyonIdOlustur: bagimliliklar.korelasyonIdOlustur || randomUUID,
@@ -718,6 +720,14 @@ const testOlusturTekIslem = async ({
         });
         const zorlukDagilimi = zorlukDagiliminiOlustur(zorluk, soruSayisi);
         asama = "GEMINI_URETIMI";
+        // Soru gerçekten doğru alt konuya mı ait? Bütün ders haritasındaki
+        // rakip konularla bağımsız embedding karşılaştırması kullanılır.
+        const soruKonuDogrula = kapsamTuru === "konu" &&
+            kaynakVerisi.konuDagilimi.length > 0
+            ? deps.testKonuDogrulayicisiOlustur({
+                konular: dersKonulariniDogrulamaIcinGetir(hedef.harita),
+            })
+            : null;
         const geminiSonucu = await deps.geminiTestUret({
             dersBilgisi: { dersAdi: ders.dersAdi, aciklama: ders.aciklama },
             kapsamTuru,
@@ -729,6 +739,7 @@ const testOlusturTekIslem = async ({
             konuDagilimi: kaynakVerisi.konuDagilimi,
             kaynaklar: kaynakVerisi.kaynaklar,
             izinliKonuIds: kaynakVerisi.izinliKonuIds,
+            soruKonuDogrula,
         }, {
             uretimIzleyicisi,
         });
