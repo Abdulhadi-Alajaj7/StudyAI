@@ -30,3 +30,17 @@
 
 - `geminiIleTestSorulariUret` fonksiyonu doğrudan `tekIstekModu` olmadan çağrılırsa eski parti/onarma yolunu korur (test/geri uyumluluk). StudyAI test servisi `tekIstekModu: true` geçirir.
 - Çalışan birim/entegrasyon testleri kalite ve hızın gerçek Gemini ile doğrulandığı anlamına gelmez.
+
+## Konu haritası / chunk sınıflandırma terminal tanılaması
+
+- `[GeminiHazirlama]`: konu haritası çıkarma ve birleştirme çağrılarının model, aşama, HTTP durumu, sağlayıcı hata kodu, süre ve token özetleri.
+- `[ParcaAtama] Başladı`: kaç aktif chunk ve batch olduğu.
+- `[ParcaAtama] Batch tamamlandı`: tamamlanan batch, o batch'in chunk sayısı ve gerçek API çağrı sayısı.
+- `[ParcaAtama] Yerel kota beklemesi`: harita üretimiyle **aynı Node.js sürecinde paylaşılan** RPM/TPM sınırının bekleme süresi.
+- `[ParcaAtama] Batch hatası`: başarısız batch, gerçek sağlayıcı HTTP kodu (varsa), `kod`, `yerelSinir`, `retryAfterMs`, toplam API çağrısı. API anahtarı veya chunk metni loglanmaz.
+- `[ParcaAtama] İşlem durduruldu`: kaç batch tamamlandığı ve hatanın kodu. Başarılı batch sonuçları şu anda kalıcı checkpoint olarak tutulmaz; harita yeniden oluşturulursa yeniden işlenir.
+- `[ParcaAtama] Tamamlandı`: tüm chunkların atanması, batch ve API çağrı sayısı.
+
+Chunk atamaları harita ile **aynı kota sınırlayıcısını** paylaşır. Geçici 503 ve geçici 429 hatalarında yapılandırılmış en fazla üç deneme yapılır; günlük kota için yeniden deneme yapılmaz. Yerel RPM/TPM beklemesi 65 saniyeyle sınırlandırılır. Sınırlayıcı yalnızca tek Node.js süreci içindir; farklı backend süreçleri ve AI Studio aynı sayaçta görünmez. Sağlayıcı hatası ile yerel sınır ayrımı için `httpDurumu` ve `yerelSinir` birlikte incelenir.
+
+Hata raporu için terminalden yalnızca `[GeminiHazirlama]` ve `[ParcaAtama]` satırlarını paylaşın. `.env`, API anahtarı ve ders metnini paylaşmayın.
