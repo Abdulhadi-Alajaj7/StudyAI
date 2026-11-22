@@ -100,8 +100,11 @@ test("ikinci denetimde reddedilen soru aynı partide tek soruluk onarımla deği
         izinliKonuIds: [{ konuId: "gorsellestirme", baslik: "Görselleştirme ile Veri Keşfi" }],
         soruKalitesiDogrula: async ({ sorular }) => {
             kontrolSayisi += 1;
-            return [{ soruIndeksi: 0, gecerli: sorular[0].metin.startsWith("Grafikleri"),
-                neden: "BIRDEN_FAZLA_DOGRU" }];
+            const gecerli = sorular[0].metin.startsWith("Grafikleri");
+            return [{ soruIndeksi: 0, gecerli,
+                neden: gecerli ? "UYGUN" : "BIRDEN_FAZLA_DOGRU",
+                durum: gecerli ? "UYGUN" : "BIRDEN_FAZLA_DOGRU",
+                guven: 0.96 }];
         },
     }, {
         istemci, maxDeneme: 1, maksimumOnarimDenemesi: 2,
@@ -112,4 +115,7 @@ test("ikinci denetimde reddedilen soru aynı partide tek soruluk onarımla deği
     assert.equal(kontrolSayisi, 2);
     assert.match(sonuc.sorular[0].metin, /Grafikleri yorumlamanın/);
     assert.equal(sonuc.sorular[0].konuId, "gorsellestirme");
+    assert.deepEqual(sonuc.sorular[0].kaliteDogrulama, {
+        durum: "UYGUN", guven: 0.96,
+    });
 });
