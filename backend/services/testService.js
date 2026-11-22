@@ -151,6 +151,16 @@ const dagitimKonulariniGetir = (harita) => (harita?.anaKonular || []).flatMap(
         }]
 );
 
+// Seçilen ana konunun yalnızca doğrudan alt konularını test kapsamına al.
+const secilenAnaKonununAltKonulari = (hedef) => {
+    const anaKonu = (hedef.harita?.anaKonular || []).find(
+        (konu) => konu.konuId === hedef.konu?.konuId
+    );
+    return anaKonu?.altKonular?.length > 0
+        ? dagitimKonulariniGetir({ anaKonular: [anaKonu] })
+        : [];
+};
+
 const konuParcaEslesmesiniHesapla = (parca, konu) => {
     const parcaKokleri = metinKokleriniCikar(parca?.icerik);
     const ayirtEdiciKokleriGetir = (metin) => new Set(
@@ -284,6 +294,47 @@ export const konuKotalariniDagit = (konuGruplari, soruSayisi) => {
     return secilenler;
 };
 
+// Ana konu testlerinde hiçbir alt konu atlanmaz. Eşit bölünebilen soru
+// sayılarında eşit kota, diğerlerinde içerik kapasitesine göre kalan dağıtılır.
+export const altKonuKotalariniDagit = (konuGruplari, soruSayisi) => {
+    if (!Array.isArray(konuGruplari) || konuGruplari.length === 0 ||
+        !Number.isInteger(soruSayisi) || soruSayisi < konuGruplari.length) return [];
+
+    const gruplar = konuGruplari.map((grup) => {
+        const karakterSayisi = fizikselParcalariTekillestir(grup.parcalar).reduce(
+            (toplam, parca) => toplam + String(parca.icerik || "").length, 0
+        );
+        return {
+            ...grup,
+            karakterSayisi,
+            kapasite: Math.floor(karakterSayisi / MINIMUM_SORU_BASI_KARAKTER),
+            adet: 1,
+        };
+    });
+    if (gruplar.some((grup) => grup.kapasite < 1)) return [];
+
+    if (soruSayisi % gruplar.length === 0) {
+        const esitAdet = soruSayisi / gruplar.length;
+        if (gruplar.some((grup) => grup.kapasite < esitAdet)) return [];
+        return gruplar.map((grup) => ({ ...grup, adet: esitAdet }));
+    }
+
+    let kalan = soruSayisi - gruplar.length;
+    while (kalan > 0) {
+        const uygunlar = gruplar.filter((grup) => grup.adet < grup.kapasite);
+        if (uygunlar.length === 0) return [];
+        uygunlar.sort((sol, sag) => (
+            (sag.karakterSayisi / (sag.adet + 1)) -
+            (sol.karakterSayisi / (sol.adet + 1)) ||
+            sag.karakterSayisi - sol.karakterSayisi ||
+            sol.konuId.localeCompare(sag.konuId)
+        ));
+        uygunlar[0].adet += 1;
+        kalan -= 1;
+    }
+    return gruplar;
+};
+
 const dersiGetir = async ({ kullaniciId, dersId }, DersModel) => {
     const ders = await DersModel.findOne({
         _id: dersId,
@@ -387,8 +438,15 @@ const aktifParcalariGetir = async ({
 
 const kapsamMateryalIds = (kapsamTuru, hedef) => {
     if (kapsamTuru === "materyal") return [hedef.materyal._id];
-    if (kapsamTuru === "konu" && hedef.konu.kaynakMateryalIds.length > 0) {
-        return hedef.konu.kaynakMateryalIds;
+    if (kapsamTuru === "konu") {
+        const altKonular = secilenAnaKonununAltKonulari(hedef);
+        // Ana konuyla ilişkili tüm alt konu materyallerini de kapsa.
+        const kaynaklar = [hedef.konu, ...altKonular].flatMap(
+            (konu) => konu.kaynakMateryalIds || []
+        );
+        return kaynaklar.length > 0
+            ? [...new Map(kaynaklar.map((id) => [kimlikMetni(id), id])).values()]
+            : null;
     }
     return null;
 };
@@ -438,6 +496,15 @@ const kaynaklariHazirla = async ({
     hedef,
     soruSayisi,
 }, deps) => {
+    const altKonular = kapsamTuru === "konu"
+        ? secilenAnaKonununAltKonulari(hedef)
+        : [];
+    if (altKonular.length > soruSayisi) {
+        throw new TestSistemiHatasi(
+            `Seçilen ana konuda ${altKonular.length} alt konu var. Her alt konu için en az bir soru gerektiğinden en az ${altKonular.length} soruluk test seçin.`,
+            { status: 422, kod: "ALT_KONU_SORU_SAYISI_YETERSIZ" }
+        );
+    }
     const materyaller = await hazirMateryalleriGetir({
         kullaniciId,
         dersId,
@@ -456,7 +523,60 @@ const kaynaklariHazirla = async ({
     let konuDagilimi = [];
     let parcaKonulari = [];
 
-    if (kapsamTuru === "tum_ders" && hedef.harita) {
+    if (kapsamTuru === "konu" && altKonular.length > 0) {
+        // Ana konu seçildiğinde hem ana konunun hem her alt konunun kaynakları
+        // toplanır; aynı fiziksel metin aşağıda bir kez gönderilir.
+        const gruplar = [];
+        for (const altKonu of altKonular) {
+            let parcalar = konuIcinParcalariSirala(tumParcalar, altKonu);
+            const karakterSayisi = parcalar.reduce(
+                (toplam, parca) => toplam + String(parca.icerik || "").length, 0
+            );
+            if (karakterSayisi < MINIMUM_SORU_BASI_KARAKTER) {
+                const semantikParcalar = await konuIcinParcalariSec({
+                    kullaniciId, dersId, konu: altKonu, materyaller, tumParcalar,
+                }, deps);
+                parcalar = fizikselParcalariTekillestir([
+                    ...parcalar, ...semantikParcalar,
+                ]);
+            }
+            if (parcalar.reduce(
+                (toplam, parca) => toplam + String(parca.icerik || "").length, 0
+            ) < MINIMUM_SORU_BASI_KARAKTER) {
+                throw uygunIcerikBulunamadiHatasi(
+                    `"${altKonu.baslik}" alt konusu için güvenilir soru üretecek yeterli kaynak bulunamadı.`
+                );
+            }
+            gruplar.push({ ...altKonu, parcalar });
+        }
+        const kotalar = altKonuKotalariniDagit(gruplar, soruSayisi);
+        if (kotalar.length !== altKonular.length) {
+            throw uygunIcerikBulunamadiHatasi(
+                "Her alt konuyu seçilen soru sayısıyla kapsayacak yeterli içerik bulunamadı."
+            );
+        }
+        const grupButcesi = Math.max(
+            2_000, Math.floor(deps.kaynakButcesi / kotalar.length)
+        );
+        for (const grup of kotalar) {
+            const secilenler = dengeliOzetParcalariniSec(grup.parcalar, grupButcesi);
+            if (secilenler.reduce(
+                (toplam, parca) => toplam + String(parca.icerik || "").length, 0
+            ) < grup.adet * MINIMUM_SORU_BASI_KARAKTER) {
+                throw uygunIcerikBulunamadiHatasi(
+                    `"${grup.baslik}" alt konusu için ayrılan ${grup.adet} soruya yeterli kaynak seçilemedi.`
+                );
+            }
+            parcaKonulari.push(...secilenler.map((parca) => ({
+                parca, konu: grup,
+            })));
+        }
+        konuDagilimi = kotalar.map((grup) => ({
+            konuId: grup.konuId,
+            baslik: grup.baslik,
+            adet: grup.adet,
+        }));
+    } else if (kapsamTuru === "tum_ders" && hedef.harita) {
         // Başlık/açıklama kökleri güçlü kanıt sağlıyorsa ek sorgu embedding'i
         // üretmeyiz. Metinsel kanıt bulunmayan konularda ise MongoDB'deki hazır
         // parça embedding'lerini kullanan mevcut semantik aramaya kontrollü düşeriz.
