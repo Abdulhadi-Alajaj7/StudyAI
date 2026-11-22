@@ -102,6 +102,13 @@ const soruSchema = new mongoose.Schema({
         }, { _id: false }),
         default: undefined,
     },
+    kaliteDogrulama: {
+        type: new mongoose.Schema({
+            durum: { type: String, maxlength: 45 },
+            guven: { type: Number, min: 0, max: 1 },
+        }, { _id: false }),
+        default: undefined,
+    },
     kaynaklar: {
         type: [soruKaynagiSchema],
         default: [],
