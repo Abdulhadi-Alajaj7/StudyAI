@@ -1482,8 +1482,10 @@ KESİN KURALLAR:
 6. Dosya adı, sayfa, slayt veya kaynak konumu yazma. Yalnızca gerçekten kullanılan kaynak anahtarlarını bildir.
 7. Aynı bilgiyi ölçen, yalnızca sözcükleri değiştirilmiş veya aşırı benzer sorular üretme.
 8. SORU_PLANI sırasına, zorluğuna, dolu konu kimliğine ve izinliKaynakReferanslari listesine tam uy. Her soruda yalnızca o plan satırında izin verilen kaynakları kullan; farklı konuları tek soruda birleştirme.
-9. Konu ilişkisi kesin değilse ve planda konu zorunlu değilse konuId alanını boş dize yap.
-10. Yalnızca şemaya uygun JSON döndür; Markdown veya ek açıklama döndürme.`;
+9. Her soru, soru planında konu kimliğine bağlı verilen konu başlığı ve açıklamasının kavramsal kapsamına doğrudan ait olmalı. Sadece ortak kaynak kullanılması bir soruyu o konunun sorusu yapmaz.
+10. Ders takvimi, sonraki haftanın başlığı, öğretim üyesi veya üniversite adı gibi öğrenme hedefini ölçmeyen sorular üretme.
+11. Konu ilişkisi kesin değilse ve planda konu zorunlu değilse konuId alanını boş dize yap.
+12. Yalnızca şemaya uygun JSON döndür; Markdown veya ek açıklama döndürme.`;
 
 const ONARIM_TALIMATLARI = {
     KAYNAK_UYUMU: "Soru, doğru cevap ve açıklamadaki ayırt edici kavramları birebir kaynak kanıtına dayandır.",
@@ -1657,7 +1659,7 @@ const guvenliOnarimBaglaminiOlustur = (tanilama = {}) => {
     };
 };
 
-const testPartisiPromptunuOlustur = ({
+export const testPartisiPromptunuOlustur = ({
     dersBilgisi,
     kapsamTuru,
     hedefBasligi,
@@ -1693,8 +1695,18 @@ KAVRAM_CESITLILIGI: ${JSON.stringify({
         kacinilacakOlcumOdaklari: kacinilacakKavramlar,
         talimat: "Aynı ölçüm odağını yeniden sorma; ortak üst konu terimleri kullanılabilir ancak farklı bir olgu, ilişki veya sonuç ölçülmelidir.",
     })}
-SORU_PLANI: ${JSON.stringify(soruPlani)}
-İzin verilen konu kimlikleri: ${izinliKonuIds.map((konu) => konu.konuId).join(", ") || "yok"}
+SORU_PLANI: ${JSON.stringify(soruPlani.map((soru) => ({
+    ...soru,
+    konuBasligi: izinliKonuIds.find((konu) => String(konu.konuId) === String(soru.konuId))?.baslik || "",
+    konuAciklamasi: izinliKonuIds.find((konu) => String(konu.konuId) === String(soru.konuId))?.aciklama || "",
+})))}
+KONU_KIMLIKLERI_VE_KAPSAMLARI: ${JSON.stringify(izinliKonuIds.map((konu) => ({
+    konuId: String(konu.konuId || ""),
+    baslik: String(konu.baslik || "").slice(0, 250),
+    aciklama: String(konu.aciklama || "").slice(0, 500),
+    konuTuru: String(konu.konuTuru || ""),
+})))}
+KONU_KONTROLU: Her soru kendi plan satırındaki konuBasligi ve konuAciklamasi ile doğrudan ilgili, kavramsal açıdan doğru bir bilgi ölçmelidir. Yalnızca kaynak etiketindeki konu kimliğine güvenme. Bir kaynaktan farklı haftalara ait bilgiler gelirse planlanan alt konuyla ilgisiz olanları kullanma. Ders takvimi, sonraki hafta ve kurum adı gibi öğrenme hedefini ölçmeyen soruları üretme.
 Kaçınılacak mevcut sorular: ${JSON.stringify(kacinilacakSorular
         .map((soru) => String(soru || "").trim().slice(0, 240))
         .filter(Boolean)
