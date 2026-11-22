@@ -9,6 +9,7 @@ import {
     testCozumOzetiniGetir,
     testCozmeYolu,
     testDenetimVerisiniOlustur,
+    testEksikSoruMesaji,
     testHedefBilgisi,
     testIlerlemeBilgisi,
     testOlusturmaButonuDevreDisiMi,
@@ -175,4 +176,21 @@ test("JSON denetimi soru, şık ve konu içerir; cevap anahtarını sızdırmaz"
     });
     assert.equal(JSON.stringify(veri).includes("dogruCevap"), false);
     assert.equal(JSON.stringify(veri).includes("Gizli açıklama"), false);
+});
+
+test("kısmi soru sayısında gerçek sonuç ve anlaşılır Türkçe neden gösterilir", () => {
+    const kismi = {
+        soruSayisi: 17, istenenSoruSayisi: 20,
+        eksikSoruNedeni: "KALITE_KONTROLU", sorular: [],
+    };
+    assert.match(testEksikSoruMesaji(kismi), /20 sorudan 17 soru/);
+    assert.match(testEksikSoruMesaji(kismi), /3 eksik/);
+    assert.match(testEksikSoruMesaji(kismi), /kalite doğrulamasını geçemedi/);
+    assert.equal(testEksikSoruMesaji({ soruSayisi: 10, istenenSoruSayisi: 10 }), "");
+    const kaynak = { ...kismi, eksikSoruNedeni: "KAYNAK_KAPASITESI" };
+    assert.match(testEksikSoruMesaji(kaynak), /Kaynak metinler/);
+    const json = testDenetimVerisiniOlustur(kismi);
+    assert.equal(json.soruSayisi, 17);
+    assert.equal(json.istenenSoruSayisi, 20);
+    assert.equal(json.eksikSoruNedeni, "KALITE_KONTROLU");
 });
