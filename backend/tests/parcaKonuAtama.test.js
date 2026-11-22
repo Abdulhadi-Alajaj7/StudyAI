@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
     geminiIleParcalariKonularaAta,
     parcaAtamalariniDogrula,
+    atamaYanitiniIncele,
 } from "../services/parcaKonuAtamaService.js";
 
 const parcalar = [
@@ -91,4 +92,38 @@ test("429 günlük kota hatasında tekrar deneme yapmaz ve terminalde batch'i bi
     assert.equal(apiCagriSayisi, 1);
     assert.ok(loglar.some(([etiket, veri]) =>
         etiket === "[ParcaAtama] İşlem durduruldu" && veri.kod === "GEMINI_GUNLUK_KOTA"));
+});
+
+test("şema tanısı eksik, tekrar eden ve bilinmeyen konu indexlerini ayırır", () => {
+    const ids = new Set(["sub-1", "sub-2"]);
+    assert.equal(atamaYanitiniIncele([{ index: 0, konuIds: ["sub-1"] }], 2, ids).neden, "MISSING_INDEX");
+    assert.equal(atamaYanitiniIncele([
+        { index: 0, konuIds: ["sub-1"] }, { index: 0, konuIds: ["sub-1"] },
+    ], 2, ids).neden, "DUPLICATE_INDEX");
+    assert.equal(atamaYanitiniIncele([
+        { index: 0, konuIds: ["sub-1"] }, { index: 1, konuIds: ["unknown"] },
+    ], 2, ids).neden, "UNKNOWN_TOPIC_ID");
+});
+
+test("503 sonrası eksik index dönerse sadece başarısız batch yeniden istenir", async () => {
+    let cagrilar = 0;
+    const loglar = [];
+    const istemci = { models: { generateContent: async () => {
+        cagrilar++;
+        if (cagrilar === 1) throw Object.assign(new Error("unavailable"), { status: 503 });
+        if (cagrilar === 2) return { text: JSON.stringify({ atamalar: [{ index: 0, konuIds: ["sub-1"] }] }) };
+        return { text: JSON.stringify({ atamalar: [
+            { index: 0, konuIds: ["sub-1"] }, { index: 1, konuIds: ["sub-2"] },
+        ] }) };
+    } } };
+    const sonuc = await geminiIleParcalariKonularaAta({
+        parcalar, anaKonular, istemci, modelAdi: "mock",
+        sinir: { kontrolEt: () => {}, hataKaydet: () => {} },
+        ayarlar: { maksDeneme: 2, timeoutMs: 60000, maksBeklemeMs: 30000 },
+        beklet: async () => {},
+        logger: { info: () => {}, error: (...args) => loglar.push(args) },
+    });
+    assert.equal(sonuc.length, 2);
+    assert.equal(cagrilar, 3);
+    assert.ok(loglar.some(([etiket, veri]) => etiket === "[ParcaAtama] Şema ayrıntısı" && veri.neden === "MISSING_INDEX"));
 });
