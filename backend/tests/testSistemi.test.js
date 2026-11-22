@@ -1243,3 +1243,57 @@ test("Gemini soru istemi her alt konunun adını ve açıklamasını içerir", (
     assert.match(istem, /KONU_KIMLIKLERI_VE_KAPSAMLARI/);
     assert.match(istem, /öğrenme hedefini ölçmeyen soruları üretme/);
 });
+
+test("konu testinde bağımsız embedding doğrulayıcısı ve kaynak skorları kayda taşınır", async () => {
+    let denetlenenKonular = [];
+    let denetlemeCagrildi = false;
+    const { bagimliliklar, kaydiGetir } = uretimBagimliliklari({
+        geminiTestUret: async (girdi) => {
+            assert.equal(typeof girdi.soruKonuDogrula, "function");
+            const denetim = await girdi.soruKonuDogrula({
+                sorular: [{
+                    konuId: "sub-yigin", metin: "Yığın nedir?",
+                    dogruCevap: "A",
+                    secenekler: [{ anahtar: "A", metin: "LIFO" }],
+                }],
+            });
+            assert.equal(denetim[0].gecerli, true);
+            return {
+                sorular: ornekSorular(girdi.soruSayisi).map((soru) => ({
+                    ...soru,
+                    konuId: "sub-yigin",
+                    konuDogrulama: {
+                        hedefSkor: 0.88, rakipSkor: 0.52,
+                        rakipKonuBasligi: "Kuyruk",
+                    },
+                })),
+                model: "test-model",
+            };
+        },
+    });
+    bagimliliklar.testKonuDogrulayicisiOlustur = ({ konular }) => {
+        denetlenenKonular = konular.map((konu) => konu.konuId);
+        return async () => {
+            denetlemeCagrildi = true;
+            return [{
+                soruIndeksi: 0,
+                gecerli: true,
+                hedefSkor: 0.88,
+                rakipSkor: 0.52,
+                rakipKonuBasligi: "Kuyruk",
+            }];
+        };
+    };
+    await testOlustur({
+        kullaniciId, dersId, kapsamTuru: "konu",
+        konuId: "sub-yigin", soruSayisi: 10, zorluk: "orta",
+    }, bagimliliklar);
+    assert.ok(denetlemeCagrildi);
+    assert.deepEqual(denetlenenKonular, ["sub-yigin", "sub-kuyruk"]);
+    assert.deepEqual(kaydiGetir().sorular[0].konuDogrulama, {
+        hedefSkor: 0.88, rakipSkor: 0.52, rakipKonuBasligi: "Kuyruk",
+    });
+    assert.deepEqual(kaydiGetir().sorular[0].kaynaklar[0].parcaSkorlari, [
+        { parcaIndex: 0, skor: 0.91 },
+    ]);
+});
