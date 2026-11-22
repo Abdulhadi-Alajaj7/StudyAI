@@ -640,11 +640,12 @@ export const konuHaritasiUretVeKaydet = async (
         });
         // Eski test çiftleri yalın dizi döndürür; gerçek Mongoose sorgusu
         // select/sort/lean zincirini destekler.
-        const siniflandirmaDestekli = typeof siniflandirmaSorgusu.select === "function" &&
-            typeof siniflandirmaSorgusu.sort === "function";
+        const seciliSiniflandirmaSorgusu = typeof siniflandirmaSorgusu.select === "function"
+            ? siniflandirmaSorgusu.select("materyalId islemeId parcaIndex icerik") : null;
+        const siniflandirmaDestekli = typeof seciliSiniflandirmaSorgusu?.sort === "function" &&
+            typeof seciliSiniflandirmaSorgusu?.lean === "function";
         const siniflandirilacakParcalar = siniflandirmaDestekli
-            ? await siniflandirmaSorgusu.select("materyalId islemeId parcaIndex icerik")
-                .sort({ materyalId: 1, parcaIndex: 1 }).lean()
+            ? await seciliSiniflandirmaSorgusu.sort({ materyalId: 1, parcaIndex: 1 }).lean()
             : [];
         if (siniflandirmaDestekli && siniflandirilacakParcalar.length !== toplamParcaSayisi) {
             throw new Error("Analiz sırasında aktif metin parçaları değişti.");
@@ -1503,10 +1504,10 @@ const materyalEklendigindeIncrementalGuncelleIslemi = async (
             materyalId: m._id, islemeId: m.aktifIslemeId,
         })),
     });
-    const siniflandirmaDestekli = typeof aktifParcaSorgusu.select === "function";
-    const aktifParcalar = siniflandirmaDestekli
-        ? await aktifParcaSorgusu.select("materyalId islemeId parcaIndex icerik").lean()
-        : [];
+    const seciliParcaSorgusu = typeof aktifParcaSorgusu.select === "function"
+        ? aktifParcaSorgusu.select("materyalId islemeId parcaIndex icerik") : null;
+    const siniflandirmaDestekli = typeof seciliParcaSorgusu?.lean === "function";
+    const aktifParcalar = siniflandirmaDestekli ? await seciliParcaSorgusu.lean() : [];
     const parcaKonuAtamalari = siniflandirmaDestekli
         ? await geminiIleParcalariKonularaAta({
             parcalar: aktifParcalar, anaKonular: nihaiAnaKonular, modelAdi,
