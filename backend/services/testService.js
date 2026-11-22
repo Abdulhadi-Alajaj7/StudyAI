@@ -189,6 +189,30 @@ const konuIcinParcalariSec = async ({
         konuMateryalleri.map((materyal) => kimlikMetni(materyal._id))
     );
     if (konuMateryalleri.length === 0) return [];
+
+    // Yeni haritalarda Gemini'nin önceden kaydettiği konu eşleştirmesi
+    // tek otoritedir. Eski haritalar için mevcut semantik yol korunur.
+    if (deps.aktifHaritaAtamalari?.parcaAtamaSurumu === 1) {
+        const atamalar = deps.aktifHaritaAtamalari.parcaKonuAtamalari || [];
+        const seciliAna = (deps.aktifHaritaAtamalari.anaKonular || []).find(
+            (ana) => ana.konuId === konu.konuId
+        );
+        const ilgiliIds = new Set([
+            konu.konuId,
+            ...(seciliAna?.altKonular || []).map((alt) => alt.konuId),
+        ]);
+        const atamaAnahtarlari = new Set(atamalar.filter((atama) =>
+            (atama.konuIds || []).some((id) => ilgiliIds.has(id))
+        ).map((atama) =>
+            `${kimlikMetni(atama.materyalId)}:${kimlikMetni(atama.islemeId)}:${atama.parcaIndex}`
+        ));
+        return tumParcalar.filter((parca) =>
+            izinliMateryalKimlikleri.has(kimlikMetni(parca.materyalId)) &&
+            atamaAnahtarlari.has(
+                `${kimlikMetni(parca.materyalId)}:${kimlikMetni(parca.islemeId)}:${parca.parcaIndex}`
+            )
+        );
+    }
     const sorgu = String(konu.kanitSorgusu || konu.sorgu || konu.baslik || "").trim().slice(0, 500);
     if (!sorgu) return [];
     // Test için konu metinleri yalnızca mevcut embedding tabanlı aramadan gelir.
@@ -477,6 +501,7 @@ const kaynaklariHazirla = async ({
     if (tumParcalar.length === 0) throw uygunIcerikBulunamadiHatasi();
 
     const tumKonular = konulariDuzlestir(hedef.harita);
+    deps.aktifHaritaAtamalari = hedef.harita || null;
     let konuDagilimi = [];
     let parcaKonulari = [];
     let planlananSoruSayisi = soruSayisi;
