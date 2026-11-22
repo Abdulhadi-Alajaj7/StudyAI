@@ -503,8 +503,10 @@ const kaynaklariHazirla = async ({
         }, deps);
         const anaButcesi = Math.min(8_000, Math.floor(deps.kaynakButcesi * 0.05));
         const anaSecilenler = dengeliOzetParcalariniSec(anaParcalar, anaButcesi);
+        // Ana konu metni destekleyici bağlamdır; alt konu sorularına
+        // ana konu kimliği yanlışlıkla etiketlenmemelidir.
         parcaKonulari.push(...anaSecilenler.map((parca) => ({
-            parca, konu: hedef.konu,
+            parca, konu: null,
         })));
         const kullanilanAnaButce = anaSecilenler.reduce(
             (toplam, parca) => toplam + String(parca.icerik || "").length, 0
