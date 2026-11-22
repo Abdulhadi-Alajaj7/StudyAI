@@ -786,44 +786,9 @@ const testOlusturTekIslem = async ({
         const planlananSoruSayisi = kaynakVerisi.planlananSoruSayisi || soruSayisi;
         const zorlukDagilimi = zorlukDagiliminiOlustur(zorluk, planlananSoruSayisi);
         asama = "GEMINI_URETIMI";
-        // Soru gerçekten doğru alt konuya mı ait? Bütün ders haritasındaki
-        // rakip konularla bağımsız embedding karşılaştırması kullanılır.
-        const soruKonuDogrula = kapsamTuru === "konu" &&
-            kaynakVerisi.konuDagilimi.length > 0
-            ? deps.testKonuDogrulayicisiOlustur({
-                konular: dersKonulariniDogrulamaIcinGetir(hedef.harita),
-            })
-            : null;
-        // Ek kalite denetimi geçici sağlayıcı hatasında var olan
-        // semantik/kanıt kontrolünü çalışır tutar; aynı test boyunca
-        // başarısız denetim API çağrısı tekrar tekrar yapılmaz.
-        let kaliteDenetimiKullanilabilir = true;
-        const soruKalitesiDogrula = kapsamTuru === "konu"
-            ? async ({ sorular, oncekiSorular, izinliKonuIds }) => {
-                if (!kaliteDenetimiKullanilabilir) return sorular.map((_, index) => ({
-                    soruIndeksi: index, gecerli: true, neden: "DENETIM_ATLANDI",
-                }));
-                try {
-                    return await deps.geminiKaliteDenetle({
-                        sorular, oncekiSorular, izinliKonuIds,
-                    });
-                } catch (hata) {
-                    // Denetim ilave kontroldür; erişilemeyen ikinci API çağrısı
-                    // nedeniyle zaten doğrulanmış testleri boşa çıkarma.
-                    if (![429, 502, 503, 504].includes(Number(hata?.status)) &&
-                        !["ETIMEDOUT", "ECONNRESET", "GEMINI_GECERSIZ_YANIT"].includes(hata?.kod)) {
-                        throw hata;
-                    }
-                    kaliteDenetimiKullanilabilir = false;
-                    console.warn("[TestKalitesi] Ek denetim atlandı", {
-                        kod: String(hata?.kod || "SAGLAYICI_HATASI").slice(0, 80),
-                    });
-                    return sorular.map((_, index) => ({
-                        soruIndeksi: index, gecerli: true, neden: "DENETIM_ATLANDI",
-                    }));
-                }
-            }
-            : null;
+        // Önceden Gemini tarafından konuya bağlanmış kaynaklardan tek istekte
+        // üretim yap. Ek embedding denetimi ve ikinci Gemini kalite çağrısı
+        // bu yolda kullanılmaz; kaynak/tekrar/şema kontrolleri yereldir.
         const geminiSonucu = await deps.geminiTestUret({
             dersBilgisi: { dersAdi: ders.dersAdi, aciklama: ders.aciklama },
             kapsamTuru,
@@ -835,13 +800,14 @@ const testOlusturTekIslem = async ({
             konuDagilimi: kaynakVerisi.konuDagilimi,
             kaynaklar: kaynakVerisi.kaynaklar,
             izinliKonuIds: kaynakVerisi.izinliKonuIds,
-            soruKonuDogrula,
-            soruKalitesiDogrula,
-            kismiSonucKabul: kapsamTuru === "konu",
+            tekIstekModu: true,
+            kismiSonucKabul: true,
         }, {
             uretimIzleyicisi,
         });
 
+        tanilama.geminiApiCagriSayisi = Number.isInteger(geminiSonucu?.apiCagriSayisi)
+            ? geminiSonucu.apiCagriSayisi : null;
         // Kısmi dönüşte yalnızca doğrulanmış gerçek soru sayısı saklanır;
         // her alt konu için en az bir soru bulunması şartı da korunur.
         const gercekSoruSayisi = Array.isArray(geminiSonucu.sorular)
