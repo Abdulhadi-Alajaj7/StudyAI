@@ -1934,59 +1934,48 @@ Yalnızca kaynakla doğrulanabilen farklı soruları döndür.`;
             uretilenSoruSayisi: veri?.sorular?.length ?? null,
         });
     }
-    const kabulEdilenler = [];
-    const konuKotalari = new Map(konuDagilimi.map((konu) => [
-        String(konu.konuId), Number(konu.adet),
-    ]));
-    const kabulEdilenKonuSayilari = new Map();
-    const zorlukSayilari = new Map();
-    const izinliZorluklar = new Map(Object.entries(zorlukDagilimi || {}));
-    let reddedilenSoruSayisi = 0;
-    for (const hamSoru of veri.sorular) {
-        const konuId = String(hamSoru?.konuId || "");
-        const zorluk = String(hamSoru?.zorluk || "");
-        if (!izinliZorluklar.has(zorluk) ||
-            (zorlukSayilari.get(zorluk) || 0) >= izinliZorluklar.get(zorluk) ||
-            (konuKotalari.size > 0 && !konuKotalari.has(konuId)) ||
-            (konuKotalari.size > 0 &&
-                (kabulEdilenKonuSayilari.get(konuId) || 0) >= konuKotalari.get(konuId))) {
-            reddedilenSoruSayisi += 1;
-            continue;
+    // Tek-istek modunda Gemini'nin ürettiği soruları içerik/benzerlik/kota
+    // filtresiyle eleme. Yalnızca veritabanının zorunlu alanlarını düzenle.
+    const kaynakHaritasi = new Map(paket.kaynaklar.map((kaynak) => [String(kaynak.anahtar), kaynak]));
+    const konuHaritasi = new Map(izinliKonuIds.map((konu) => [String(konu.konuId), konu]));
+    const kabulEdilenler = veri.sorular.map((hamSoru, index) => {
+        const secenekler = Array.isArray(hamSoru?.secenekler) ? hamSoru.secenekler : [];
+        const anahtarlar = ["A", "B", "C", "D"];
+        // Dört seçenek ve bir cevap olmadan soru öğrencinin önüne konamaz.
+        if (!String(hamSoru?.metin || "").trim() || secenekler.length !== 4 ||
+            secenekler.some((s) => !String(s?.metin || "").trim()) ||
+            !anahtarlar.includes(String(hamSoru?.dogruCevap || "").toUpperCase())) {
+            throw gecersizTestYaniti({ altKod: "ZORUNLU_SORU_ALANLARI", soruIndeksi: index });
         }
-        const izinliKaynakReferanslari = paket.kaynaklar
-            .filter((kaynak) => !konuId || kaynakKonuKimlikleriniGetir(kaynak).includes(konuId))
-            .map((kaynak) => kaynak.anahtar);
-        try {
-            const [soru] = testSorulariniDogrula({ sorular: [hamSoru] }, {
-                soruSayisi: 1,
-                zorlukDagilimi: { [zorluk]: 1 },
-                konuDagilimi: konuKotalari.size > 0 ? [{ konuId, adet: 1 }] : [],
-                kaynaklar: paket.kaynaklar, izinliKonuIds,
-                soruPlani: [{
-                    sira: 1, konuId, zorluk, izinliKaynakReferanslari,
-                }],
-                oncekiSorular: kabulEdilenler,
+        const konuId = String(hamSoru.konuId || "");
+        const referanslar = [...new Set((hamSoru.kaynakReferanslari || []).map(String))]
+            .map((anahtar) => kaynakHaritasi.get(anahtar)).filter(Boolean);
+        const materyalKaynaklari = new Map();
+        for (const kaynak of referanslar) {
+            const key = String(kaynak.materyalId);
+            if (!materyalKaynaklari.has(key)) materyalKaynaklari.set(key, {
+                materyalId: kaynak.materyalId, dosyaAdi: kaynak.dosyaAdi, parcaIndeksleri: [],
             });
-            kabulEdilenler.push(soru);
-            zorlukSayilari.set(zorluk, (zorlukSayilari.get(zorluk) || 0) + 1);
-            if (konuId) {
-                kabulEdilenKonuSayilari.set(
-                    konuId, (kabulEdilenKonuSayilari.get(konuId) || 0) + 1
-                );
-            }
-        } catch (hata) {
-            if (hata?.kod !== "GEMINI_GECERSIZ_TEST_YANITI") throw hata;
-            reddedilenSoruSayisi += 1;
+            materyalKaynaklari.get(key).parcaIndeksleri.push(kaynak.parcaIndex);
         }
-    }
-    // Kapsam boşsa eksik testi başarı olarak kaydetme.
-    if (!kabulEdilenler.length) {
-        throw new GeminiSohbetHatasi(
-            "Tek istekte kaynakla doğrulanmış soru alınamadı.",
-            { status: 422, kod: "YETERSIZ_TEST_ICERIGI",
-                tanilama: { apiCagriSayisi: apiCagriButcesi.kullanilan, reddedilenSoruSayisi } }
-        );
-    }
+        const zorluk = ["kolay", "orta", "zor"].includes(hamSoru.zorluk)
+            ? hamSoru.zorluk : (soruPlani[index]?.zorluk || "orta");
+        return {
+            metin: String(hamSoru.metin).trim().slice(0, 4000),
+            secenekler: secenekler.map((s, i) => ({
+                anahtar: anahtarlar[i], metin: String(s.metin).trim().slice(0, 2000),
+            })),
+            dogruCevap: String(hamSoru.dogruCevap).toUpperCase(),
+            aciklama: String(hamSoru.aciklama || "Açıklama sağlanmadı.").trim().slice(0, 6000),
+            zorluk, konuId: konuHaritasi.has(konuId) ? konuId : "",
+            konuBasligi: konuHaritasi.get(konuId)?.baslik || "",
+            kaynaklar: [...materyalKaynaklari.values()].map((kaynak) => ({
+                ...kaynak, parcaIndeksleri: [...new Set(kaynak.parcaIndeksleri)],
+            })),
+            ogrenciCevabi: null, isaretli: false,
+        };
+    });
+    const reddedilenSoruSayisi = 0;
     console.info("[TestTekIstek] Gemini üretimi", {
         model: modelAdi,
         apiCagriSayisi: apiCagriButcesi.kullanilan,
