@@ -193,10 +193,30 @@ const testSchema = new mongoose.Schema(
             default: "",
             immutable: true,
         },
+        // İstenen sayı denetleyicide 10/15/20; burada yalnızca gerçekten
+        // doğrulanan ve kullanıcıya sunulan soru sayısı saklanır.
         soruSayisi: {
             type: Number,
-            enum: [5, 10, 15, 20],
+            min: 1,
+            max: 20,
             required: true,
+            immutable: true,
+            validate: {
+                validator: Number.isInteger,
+                message: "Test soru sayısı tam sayı olmalıdır.",
+            },
+        },
+        istenenSoruSayisi: {
+            type: Number,
+            min: 1,
+            max: 20,
+            default: null,
+            immutable: true,
+        },
+        eksikSoruNedeni: {
+            type: String,
+            enum: ["", "KAYNAK_KAPASITESI", "KALITE_KONTROLU"],
+            default: "",
             immutable: true,
         },
         zorluk: {
