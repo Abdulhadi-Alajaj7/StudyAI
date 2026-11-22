@@ -1485,6 +1485,20 @@ const materyalEklendigindeIncrementalGuncelleIslemi = async (
     }
 
     const nihaiAnaKonular = konuSiralariniDuzenle(Array.from(nihaiAnaKonuMap.values()));
+    // Incremental güncelleme de eksiksiz sınıflandırma olmadan yayınlanmaz.
+    const aktifMateryaller = await Materyal.find({
+        dersId, kullaniciId, durum: "hazir", aktifIslemeId: { $ne: null },
+    }).select("_id aktifIslemeId");
+    const aktifParcalar = await MetinParcasi.find({
+        dersId, kullaniciId,
+        $or: aktifMateryaller.map((m) => ({
+            materyalId: m._id, islemeId: m.aktifIslemeId,
+        })),
+    }).select("materyalId islemeId parcaIndex icerik").lean();
+    const parcaKonuAtamalari = await geminiIleParcalariKonularaAta({
+        parcalar: aktifParcalar, anaKonular: nihaiAnaKonular, modelAdi,
+    });
+
 
     let toplamAlt = 0;
     for (const ana of nihaiAnaKonular) {
@@ -1538,6 +1552,8 @@ const materyalEklendigindeIncrementalGuncelleIslemi = async (
                 durum: "hazir",
                 olusturmaHatasi: "",
                 anaKonular: nihaiAnaKonular,
+                parcaKonuAtamalari,
+                parcaAtamaSurumu: 1,
                 gecmisKonular: nihaiGecmis,
                 toplamAnaKonuSayisi: nihaiAnaKonular.length,
                 toplamAltKonuSayisi: toplamAlt,
@@ -1576,6 +1592,8 @@ const materyalEklendigindeIncrementalGuncelleIslemi = async (
                 durum: "hazir",
                 olusturmaHatasi: "",
                 anaKonular: nihaiAnaKonular,
+                parcaKonuAtamalari,
+                parcaAtamaSurumu: 1,
                 gecmisKonular: nihaiGecmis,
                 toplamAnaKonuSayisi: nihaiAnaKonular.length,
                 toplamAltKonuSayisi: toplamAlt,
@@ -1820,6 +1838,8 @@ const materyalSilindigindeGuncelleIslemi = async (materyalId, dersId, kullaniciI
                 durum: yeniDurum,
                 olusturmaHatasi: "",
                 anaKonular: siraliGuncelAnaKonular,
+                parcaKonuAtamalari: [],
+                parcaAtamaSurumu: 0,
                 gecmisKonular: nihaiGecmis,
                 toplamAnaKonuSayisi: siraliGuncelAnaKonular.length,
                 toplamAltKonuSayisi: toplamAlt,
