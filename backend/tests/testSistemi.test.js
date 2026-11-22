@@ -1411,3 +1411,24 @@ test("konu kapsamı eksik olan kısmi test hiçbir koşulda kaydedilmez", async 
     }, bagimliliklar), (hata) => hata.kod === "YETERSIZ_TEST_ICERIGI");
     assert.equal(kaydiGetir(), undefined);
 });
+
+test("MongoDB Test modeli 17/20 geçerli soru kaydını kabul eder, tutarsız sayıyı reddeder", () => {
+    const veri = {
+        kullaniciId, dersId, kapsamTuru: "konu",
+        konuId: "top-veri-yapilari",
+        konuBasligi: "Veri Yapıları",
+        soruSayisi: 17, istenenSoruSayisi: 20,
+        eksikSoruNedeni: "KALITE_KONTROLU",
+        zorluk: "orta",
+        sorular: ornekSorular(17),
+        kaynakSurumleri: [{ materyalId, aktifIslemeId: islemeId }],
+    };
+    const belge = new TestModel(veri);
+    assert.equal(belge.validateSync(), undefined);
+    assert.equal(belge.sorular.length, 17);
+    assert.equal(belge.soruSayisi, 17);
+    const hatali = new TestModel({ ...veri, soruSayisi: 20 });
+    assert.ok(hatali.validateSync()?.errors?.sorular);
+    const limitDisi = new TestModel({ ...veri, soruSayisi: 21 });
+    assert.ok(limitDisi.validateSync()?.errors?.soruSayisi);
+});
