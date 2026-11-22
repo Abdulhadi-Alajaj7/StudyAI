@@ -46,11 +46,25 @@ export const testOlusturmaGirdisiOlustur = ({
     return { kapsamTuru, soruSayisi: sayi, zorluk };
 };
 
+export const testEksikSoruMesaji = (test) => {
+    const istenen = Number(test?.istenenSoruSayisi);
+    const hazirlanan = Number(test?.soruSayisi);
+    if (!Number.isInteger(istenen) || !Number.isInteger(hazirlanan) ||
+        istenen <= hazirlanan || hazirlanan < 1) return "";
+    const eksik = istenen - hazirlanan;
+    const neden = test?.eksikSoruNedeni === "KAYNAK_KAPASITESI"
+        ? "Kaynak metinler istenen sayıda güvenilir soru için yeterli değildi."
+        : "Kalan sorular kaynak veya kalite doğrulamasını geçemedi.";
+    return `İstenen ${istenen} sorudan ${hazirlanan} soru hazırlandı (${eksik} eksik). ${neden} Hazırlanan sorularla teste devam edebilirsiniz.`;
+};
+
 // Geçici test denetim çıktısı; doğru cevap ve açıklama kesinlikle aktarılmaz.
 export const testDenetimVerisiniOlustur = (test, konular = []) => ({
     testId: String(test?._id || ""),
     konu: String(test?.konuBasligi || ""),
     soruSayisi: Number(test?.soruSayisi || 0),
+    istenenSoruSayisi: Number(test?.istenenSoruSayisi || test?.soruSayisi || 0),
+    eksikSoruNedeni: String(test?.eksikSoruNedeni || ""),
     sorular: (test?.sorular || []).map((soru, index) => ({
         sira: index + 1,
         soru: String(soru?.metin || ""),
