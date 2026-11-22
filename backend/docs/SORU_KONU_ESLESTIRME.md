@@ -51,6 +51,19 @@ Otomatik testler şu durumları kapsar:
 
 Çalıştırma: cd backend && npm test (tüm mevcut testler) veya node --test tests/konuPerformansVerisi.test.js (yalnız bu modül).
 
+
+## Gerçek veri örneklemi (salt okunur)
+
+Gerçek MongoDB verisiyle tanılama için isteğe bağlı bir rapor aracı eklendi:
+
+    cd backend
+    node scripts/soruKonuDenetimRaporu.mjs --kullanici <KULLANICI_OBJECT_ID> --ders <DERS_OBJECT_ID>
+
+- Kodu yerel ve yetkili ortamda çalıştırın. MONGODB_URI backend/.env içinden okunur; kimlik veya parola paylaşmayın.
+- En fazla son 50 test yalnızca okunur, veritabanında yazma/silme işlemi yapılmaz.
+- Çıktı yalnızca özet sayıları ve dışlama nedenlerinin toplamlarını içerir; öğrenci cevapları veya kimlikler basılmaz.
+- Bu rapor GitHub üzerinde gerçek MongoDB erişimi olmadığı için henüz çalıştırılmadı. Sonuçlar Adım 1'in canlı veri kabulü için ayrıca kontrol edilmelidir.
+
 ## Adım 2 entegrasyon kararı
 
 Adım 2'nin sunucu hizmeti, kullaniciId/dersId filtreleriyle tamamlanan testlerin tam belgelerini ve KonuHaritasi içindeki **hem aktif hem arşiv** konuları okur. Yukarıdaki saf doğrulama fonksiyonunun döndürdüğü gecerliKayitlar üzerinden son geçerli cevaplar, asgari örnek sayısı, cevap sayıları ve konu hâkimiyeti hesaplanır. Her sorgu mevcut kimlik doğrulama ile korunur; başka öğrenci verisi asla gösterilmez.
