@@ -34,7 +34,7 @@ const girdiler = {
 };
 const yonetim = { yerAyir: () => () => {} };
 
-test("tek istek modunda eksik ve tekrar soru için yeni API çağrısı yapmaz", async () => {
+test("tek istek modunda Gemini sorularını tekrarlasa bile engellemez ve ikinci istek atmaz", async () => {
     let istekSayisi = 0;
     const istemci = { models: { generateContent: async () => {
         istekSayisi += 1;
@@ -48,9 +48,9 @@ test("tek istek modunda eksik ve tekrar soru için yeni API çağrısı yapmaz",
         istemci, istekYonetimi: yonetim,
     });
     assert.equal(istekSayisi, 1);
-    assert.equal(sonuc.sorular.length, 1);
+    assert.equal(sonuc.sorular.length, 2);
     assert.equal(sonuc.sorular[0].konuId, "sub-yigin");
-    assert.equal(sonuc.kismiUretimNedeni, "KALITE_KONTROLU");
+    assert.equal(sonuc.kismiUretimNedeni, "KAYNAK_KAPASITESI");
     assert.equal(sonuc.apiCagriSayisi, 1);
 });
 
@@ -64,4 +64,21 @@ test("429 kota hatası yeniden API çağrısı tetiklemez", async () => {
         istemci, istekYonetimi: yonetim,
     }));
     assert.equal(istekSayisi, 1);
+});
+
+test("tek eksik seçenekli soru bütün geçerli soruları iptal etmez", async () => {
+    const istemci = { models: { generateContent: async () => ({
+        text: JSON.stringify({ sorular: [
+            soru,
+            { ...soru, metin: "Bozuk soru", secenekler: [] },
+            { ...soru, metin: "Diğer geçerli soru", kaynakReferanslari: [] },
+        ] }),
+        candidates: [{ finishReason: "STOP" }],
+    }) } };
+    const sonuc = await geminiIleTestSorulariTekIstekleUret(girdiler, {
+        istemci, istekYonetimi: yonetim,
+    });
+    assert.equal(sonuc.sorular.length, 2);
+    assert.equal(sonuc.kismiUretimNedeni, "KALITE_KONTROLU");
+    assert.equal(sonuc.sorular[1].kaynaklar.length, 0);
 });
