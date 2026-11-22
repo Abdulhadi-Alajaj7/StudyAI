@@ -852,6 +852,11 @@ function DersTestler() {
                                             <span aria-hidden="true">•</span>
                                             <span>{testZorlukEtiketi(test.zorluk)}</span>
                                         </p>
+                                        {testEksikSoruMesaji(test) && (
+                                            <p className={`mt-1 text-[11px] ${isDark ? "text-amber-300" : "text-amber-700"}`}>
+                                                {testEksikSoruMesaji(test)}
+                                            </p>
+                                        )}
                                         <p className={`mt-1.5 flex items-center gap-1 text-[10px] ${metinIkincil}`}>
                                             <CalendarDaysIcon className="h-3.5 w-3.5" />
                                             {test.baslamaTarihi
