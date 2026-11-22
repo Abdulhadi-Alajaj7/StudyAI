@@ -98,6 +98,7 @@ const geminiTekrarlariniTemizle = (konular = []) => {
             }
 
             const mevcutAlt = gorulenAltlar.get(anahtar);
+            mevcutAlt.parcaKodlari = [...new Set([...(mevcutAlt.parcaKodlari || []), ...(alt.parcaKodlari || [])])];
 
             if (
                 (alt.aciklama || "").length >
