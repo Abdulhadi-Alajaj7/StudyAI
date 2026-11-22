@@ -27,6 +27,7 @@ import {
     tarihiBicimlendir,
     testCozmeYolu,
     testDenetimVerisiniOlustur,
+    testEksikSoruMesaji,
     testHedefBilgisi,
     testIlerlemeBilgisi,
     testKapsamEtiketi,
@@ -720,6 +721,13 @@ function DersTestler() {
                                     {" · "}{testKapsamEtiketi(olusturulanTest.kapsamTuru)}
                                     {" · "}{testZorlukEtiketi(olusturulanTest.zorluk)}
                                 </p>
+                                {testEksikSoruMesaji(olusturulanTest) && (
+                                    <p role="status" className={`mt-2 text-[12px] font-medium ${
+                                        isDark ? "text-amber-200" : "text-amber-800"
+                                    }`}>
+                                        {testEksikSoruMesaji(olusturulanTest)}
+                                    </p>
+                                )}
                             </div>
                             <div className="flex shrink-0 flex-wrap items-center gap-2">
                             <button
