@@ -48,7 +48,8 @@ const kapsamlar = [
     { deger: "konu", etiket: "Konu" },
 ];
 const gizliKapsamArayuzuGorunur = false;
-const soruSayilari = [10, 15, 20];
+const anaKonuSoruSayilari = [10, 15, 20];
+const altKonuSoruSayilari = [5, 10];
 const zorluklar = [
     { deger: "kolay", etiket: "Kolay" },
     { deger: "orta", etiket: "Orta" },
@@ -331,7 +332,10 @@ function DersTestler() {
         (konu) => konu.konuId === konuId
     );
     const altKonuSayisi = anaKonu?.altKonular?.length || 0;
-    const yetersizSoruSayisi = kapsamTuru === "konu" && altKonuSayisi > soruSayisi;
+    const secilenAltKonuMu = kapsamTuru === "konu" && konuId.startsWith("sub-");
+    const soruSayilari = secilenAltKonuMu ? altKonuSoruSayilari : anaKonuSoruSayilari;
+    const yetersizSoruSayisi = (kapsamTuru === "konu" && altKonuSayisi > soruSayisi) ||
+        !soruSayilari.includes(soruSayisi);
     const jsonMetni = useMemo(() => olusturulanTest
         ? JSON.stringify(testDenetimVerisiniOlustur(olusturulanTest, konuSecenekleri), null, 2)
         : "", [olusturulanTest, konuSecenekleri]);
@@ -573,7 +577,7 @@ function DersTestler() {
 
                     <fieldset className="xl:col-span-3">
                         <legend className={`mb-2 text-[12px] font-bold ${metinAna}`}>Soru Sayısı</legend>
-                        <div className="grid h-[46px] grid-cols-3 gap-1.5">
+                        <div className={`grid h-[46px] gap-1.5 ${secilenAltKonuMu ? "grid-cols-2" : "grid-cols-3"}`}>
                             {soruSayilari.map((sayi) => {
                                 const secili = soruSayisi === sayi;
                                 return (
@@ -671,7 +675,10 @@ function DersTestler() {
                                 <OzetSecimDropdown
                                     id="test-konu"
                                     value={konuId}
-                                    onChange={(deger) => secimiDegistir(setKonuId, deger)}
+                                    onChange={(deger) => {
+                                        secimiDegistir(setKonuId, deger);
+                                        setSoruSayisi(10);
+                                    }}
                                     options={konuDropdownSecenekleri}
                                     disabled={olusturuluyor || sayfaYukleniyor || konuDropdownSecenekleri.length === 0}
                                     emptyLabel={sayfaYukleniyor ? "Konular yükleniyor..." : "Hazır konu yok"}
