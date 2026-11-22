@@ -97,6 +97,16 @@ const konuHaritasiSchema = new mongoose.Schema(
         // Son hazır materyal silinse bile gelecekteki Quiz, Flashcard ve Mastery kayıtlarının
         // konu kimliklerini ve öğrenme geçmişini koruyan arşiv
         gecmisKonular: [anaKonuSchema],
+        // Gemini'nin harita ile birlikte onayladığı aktif metin parçası atamaları.
+        // Parça kimliği materyal ve işleme sürümü ile sabitlenir.
+        parcaKonuAtamalari: [{
+            materyalId: { type: mongoose.Schema.Types.ObjectId, required: true },
+            islemeId: { type: mongoose.Schema.Types.ObjectId, required: true },
+            parcaIndex: { type: Number, required: true },
+            konuIds: { type: [String], required: true },
+            anaKonuId: { type: String, default: "" },
+        }],
+        parcaAtamaSurumu: { type: Number, default: 0 },
         toplamAnaKonuSayisi: {
             type: Number,
             default: 0,
