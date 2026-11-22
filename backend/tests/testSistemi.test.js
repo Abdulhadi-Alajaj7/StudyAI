@@ -963,7 +963,15 @@ test("ana konu: her alt konu için yeterli kaynak yoksa kota verilmez", () => {
 
 test("ana konu seçimi yalnızca doğrudan alt konular için Gemini kotası hazırlar", async () => {
     let geminiGirdisi;
+    const yeniHarita = { ...konuHaritasi, parcaAtamaSurumu: 1,
+        parcaKonuAtamalari: [
+            { materyalId, islemeId, parcaIndex: 0, konuIds: ["sub-yigin"] },
+            { materyalId: ikinciMateryalId, islemeId: ikinciIslemeId,
+                parcaIndex: 0, konuIds: ["sub-kuyruk"] },
+        ],
+    };
     const { bagimliliklar, kaydiGetir } = uretimBagimliliklari({
+        harita: yeniHarita,
         geminiTestUret: async (girdi) => {
             geminiGirdisi = girdi;
             return { sorular: ornekSorular(girdi.soruSayisi), model: "test-model" };
@@ -1017,7 +1025,10 @@ test("ana konu: 12 alt konu için 10 soru isteği Gemini çağrılmadan reddedil
 });
 
 test("ana konu: iki alt konunun ortak fiziksel metni tek kez iletilir, iki bağ korunur", async () => {
-    const ortakHarita = { anaKonular: [{
+    const ortakHarita = { parcaAtamaSurumu: 1,
+        parcaKonuAtamalari: [{ materyalId, islemeId, parcaIndex: 0,
+            konuIds: ["alt-1", "alt-2"] }],
+        anaKonular: [{
         konuId: "ana-ortak",
         baslik: "Ortak Ana Konu",
         aciklama: "İki konu",
@@ -1041,9 +1052,7 @@ test("ana konu: iki alt konunun ortak fiziksel metni tek kez iletilir, iki bağ 
             return { sorular: ornekSorular(girdi.soruSayisi), model: "test-model" };
         },
     });
-    bagimliliklar.semanticArama = async () => ({
-        sonuclar: [{ materyalId: String(materyalId), parcaIndex: 0, skor: 0.92 }],
-    });
+
     await testOlustur({
         kullaniciId, dersId, kapsamTuru: "konu",
         konuId: "ana-ortak", soruSayisi: 10, zorluk: "orta",
@@ -1072,7 +1081,7 @@ test("Gemini soru istemi her alt konunun adını ve açıklamasını içerir", (
     assert.match(istem, /öğrenme hedefini ölçmeyen soruları üretme/);
 });
 
-test("konu testi tek istek kullanır, kaynak skorlarını korur ve embedding denetimi çağırmaz", async () => {
+test("konu testi tek istek kullanır, ek embedding veya kalite denetimi çağırmaz", async () => {
     let denetlemeCagrildi = false;
     const { bagimliliklar, kaydiGetir } = uretimBagimliliklari({
         geminiTestUret: async (girdi) => {
@@ -1097,9 +1106,7 @@ test("konu testi tek istek kullanır, kaynak skorlarını korur ve embedding den
     }, bagimliliklar);
     assert.equal(denetlemeCagrildi, false);
     assert.equal(kaydiGetir().sorular[0].konuDogrulama, undefined);
-    assert.deepEqual(kaydiGetir().sorular[0].kaynaklar[0].parcaSkorlari, [
-        { parcaIndex: 0, skor: 0.91 },
-    ]);
+    assert.equal(kaydiGetir().sorular[0].kaynaklar[0].parcaSkorlari, undefined);
 });
 
 test("ek Gemini kalite isteği artık yapılmaz; tek üretim çağrısı yeterlidir", async () => {
@@ -1130,40 +1137,26 @@ test("ek Gemini kalite isteği artık yapılmaz; tek üretim çağrısı yeterli
     assert.equal(kaydiGetir().sorular[0].kaliteDogrulama, undefined);
 });
 
-test("20 soru istendiğinde kaynak kapasitesi 17 ise dört koruma kuralıyla 17 soru saklanır", async () => {
-    const parcalar = metinParcalari.map((parca, index) => ({
-        ...parca,
-        icerik: (index === 0 ? "Yığın LIFO çalışma ilkesi" : "Kuyruk FIFO çalışma ilkesi")
-            .padEnd(index === 0 ? 820 : 600, "x"),
+test("20 soru istendiğinde kısa kaynaklar önceden soru sayısını azaltmaz", async () => {
+    const parcalar = metinParcalari.map((parca) => ({
+        ...parca, icerik: "Yığın ve kuyruk temel ilkeleri",
     }));
-    let verilenSoruSayisi = 0;
+    let geminiGirdisi;
     const { bagimliliklar, kaydiGetir } = uretimBagimliliklari({
         parcalar,
-        geminiTestUret: async ({ soruSayisi, konuDagilimi, kismiSonucKabul }) => {
-            verilenSoruSayisi = soruSayisi;
-            assert.equal(kismiSonucKabul, true);
-            const siraliKonular = konuDagilimi.flatMap((konu) =>
-                Array.from({ length: konu.adet }, () => konu.konuId)
-            );
-            return {
-                sorular: ornekSorular(soruSayisi).map((soru, index) => ({
-                    ...soru,
-                    konuId: siraliKonular[index],
-                })),
-                model: "test-model",
-            };
+        geminiTestUret: async (girdi) => {
+            geminiGirdisi = girdi;
+            return { sorular: ornekSorular(20), model: "test-model" };
         },
     });
     await testOlustur({
         kullaniciId, dersId, kapsamTuru: "konu",
         konuId: "top-veri-yapilari", soruSayisi: 20, zorluk: "orta",
     }, bagimliliklar);
-    assert.equal(verilenSoruSayisi, 17);
-    assert.equal(kaydiGetir().soruSayisi, 17);
+    assert.equal(geminiGirdisi.soruSayisi, 20);
+    assert.equal(kaydiGetir().soruSayisi, 20);
     assert.equal(kaydiGetir().istenenSoruSayisi, 20);
-    assert.equal(kaydiGetir().eksikSoruNedeni, "KAYNAK_KAPASITESI");
-    assert.deepEqual(new Set(kaydiGetir().sorular.map((soru) => soru.konuId)),
-        new Set(["sub-yigin", "sub-kuyruk"]));
+    assert.equal(kaydiGetir().eksikSoruNedeni, "");
 });
 
 test("20 sorudan 17 tanesi tüm kontrolleri geçerse 17 soruluk test kaydedilir", async () => {
@@ -1189,20 +1182,21 @@ test("20 sorudan 17 tanesi tüm kontrolleri geçerse 17 soruluk test kaydedilir"
     assert.equal(kaydiGetir().eksikSoruNedeni, "KALITE_KONTROLU");
 });
 
-test("konu kapsamı eksik olan kısmi test hiçbir koşulda kaydedilmez", async () => {
+test("Gemini kısmi sonuç verirse konu kapsamı eksik olsa da mevcut sorular kaydedilir", async () => {
     const { bagimliliklar, kaydiGetir } = uretimBagimliliklari({
         geminiTestUret: async () => ({
             sorular: ornekSorular(17).map((soru) => ({
                 ...soru, konuId: "sub-yigin",
             })),
-            model: "test-model",
+            model: "test-model", kismiUretimNedeni: "KAYNAK_KAPASITESI",
         }),
     });
-    await assert.rejects(testOlustur({
+    await testOlustur({
         kullaniciId, dersId, kapsamTuru: "konu",
         konuId: "top-veri-yapilari", soruSayisi: 20, zorluk: "orta",
-    }, bagimliliklar), (hata) => hata.kod === "YETERSIZ_TEST_ICERIGI");
-    assert.equal(kaydiGetir(), undefined);
+    }, bagimliliklar);
+    assert.equal(kaydiGetir().soruSayisi, 17);
+    assert.equal(kaydiGetir().eksikSoruNedeni, "KAYNAK_KAPASITESI");
 });
 
 test("MongoDB Test modeli 17/20 geçerli soru kaydını kabul eder, tutarsız sayıyı reddeder", () => {
