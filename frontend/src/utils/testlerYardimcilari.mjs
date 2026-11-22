@@ -65,6 +65,21 @@ export const testDenetimVerisiniOlustur = (test, konular = []) => ({
         kaynakDosyalari: [...new Set(
             (soru?.kaynaklar || []).map((kaynak) => kaynak.dosyaAdi).filter(Boolean)
         )],
+        kaynakParcalari: (soru?.kaynaklar || []).flatMap((kaynak) => (
+            (kaynak.parcaIndeksleri || []).map((parcaIndex) => ({
+                dosyaAdi: kaynak.dosyaAdi,
+                parcaIndex,
+                // Sadece gerçekten mevcut ve doğrulanmış skorlar gösterilir.
+                semantikSkor: (kaynak.parcaSkorlari || []).find(
+                    (parca) => parca.parcaIndex === parcaIndex
+                )?.skor ?? null,
+            }))
+        )),
+        konuDogrulama: soru?.konuDogrulama ? {
+            hedefSkor: soru.konuDogrulama.hedefSkor ?? null,
+            rakipSkor: soru.konuDogrulama.rakipSkor ?? null,
+            rakipKonuBasligi: soru.konuDogrulama.rakipKonuBasligi || "",
+        } : null,
     })),
 });
 
