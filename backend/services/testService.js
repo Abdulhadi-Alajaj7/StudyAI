@@ -105,6 +105,7 @@ const konulariDuzlestir = (harita) => (harita?.anaKonular || []).flatMap((anaKon
     const ana = {
         konuId: anaKonu.konuId,
         baslik: anaKonu.baslik,
+        aciklama: anaKonu.aciklama || "",
         konuTuru: "ana",
         sorgu: [anaKonu.baslik, anaKonu.aciklama].filter(Boolean).join(" "),
         kaynakMateryalIds: anaKaynaklar,
@@ -112,7 +113,9 @@ const konulariDuzlestir = (harita) => (harita?.anaKonular || []).flatMap((anaKon
     const altlar = (anaKonu.altKonular || []).map((altKonu) => ({
         konuId: altKonu.konuId,
         baslik: altKonu.baslik,
+        aciklama: altKonu.aciklama || "",
         konuTuru: "alt",
+        kanitSorgusu: [altKonu.baslik, altKonu.aciklama].filter(Boolean).join(" "),
         sorgu: [
             anaKonu.baslik,
             anaKonu.aciklama,
@@ -131,6 +134,8 @@ const dagitimKonulariniGetir = (harita) => (harita?.anaKonular || []).flatMap(
         ? (anaKonu.altKonular || []).map((altKonu) => ({
             konuId: altKonu.konuId,
             baslik: altKonu.baslik,
+            aciklama: altKonu.aciklama || "",
+            konuTuru: "alt",
             kanitSorgusu: [altKonu.baslik, altKonu.aciklama].filter(Boolean).join(" "),
             sorgu: [
                 anaKonu.baslik,
@@ -145,6 +150,8 @@ const dagitimKonulariniGetir = (harita) => (harita?.anaKonular || []).flatMap(
         : [{
             konuId: anaKonu.konuId,
             baslik: anaKonu.baslik,
+            aciklama: anaKonu.aciklama || "",
+            konuTuru: "ana",
             kanitSorgusu: [anaKonu.baslik, anaKonu.aciklama].filter(Boolean).join(" "),
             sorgu: [anaKonu.baslik, anaKonu.aciklama].filter(Boolean).join(" "),
             kaynakMateryalIds: anaKonu.kaynakMateryalIds || [],
@@ -227,7 +234,9 @@ const konuIcinParcalariSec = async ({
         const aramaSonucu = await deps.semanticArama({
             kullaniciId,
             dersId,
-            sorgu: konu.sorgu.slice(0, 500),
+            // Genel ana konu adı arama sonuçlarını ilgisiz haftalara
+            // çekebileceği için önce seçilen alt konunun özgül tanımını kullan.
+            sorgu: String(konu.kanitSorgusu || konu.sorgu).slice(0, 500),
             limit: 10,
             materyalIds: konuMateryalleri.map((materyal) => materyal._id),
         });
@@ -711,11 +720,17 @@ const kaynaklariHazirla = async ({
         materyaller,
         kaynaklar: kaynakKayitlariniOlustur(benzersizFizikselParcalar, materyaller),
         konuDagilimi,
-        izinliKonuIds: tumKonular.map(({ konuId, baslik, konuTuru }) => ({
-            konuId,
-            baslik,
-            konuTuru,
-        })),
+        // Ana konu testinde yalnızca planlanan alt konuların ad ve açıklamalarını
+        // gönder. Modelin konu kimliklerini rastgele ders başlıklarına bağlamasını önle.
+        izinliKonuIds: tumKonular
+            .filter((konu) => kapsamTuru !== "konu" ||
+                konuDagilimi.some((dagilim) => dagilim.konuId === konu.konuId))
+            .map(({ konuId, baslik, aciklama, konuTuru }) => ({
+                konuId,
+                baslik,
+                aciklama,
+                konuTuru,
+            })),
         kaynakSurumleri: materyaller.map((materyal) => ({
             materyalId: materyal._id,
             aktifIslemeId: materyal.aktifIslemeId,
