@@ -26,6 +26,7 @@ import {
     basariOraniniGetir,
     tarihiBicimlendir,
     testCozmeYolu,
+    testDenetimVerisiniOlustur,
     testHedefBilgisi,
     testIlerlemeBilgisi,
     testKapsamEtiketi,
@@ -46,7 +47,7 @@ const kapsamlar = [
     { deger: "konu", etiket: "Konu" },
 ];
 const gizliKapsamArayuzuGorunur = false;
-const soruSayilari = [5, 10, 15, 20];
+const soruSayilari = [10, 15, 20];
 const zorluklar = [
     { deger: "kolay", etiket: "Kolay" },
     { deger: "orta", etiket: "Orta" },
@@ -152,6 +153,8 @@ function DersTestler() {
     const [olusturuluyor, setOlusturuluyor] = useState(false);
     const [olusturmaHatasi, setOlusturmaHatasi] = useState("");
     const [olusturulanTest, setOlusturulanTest] = useState(null);
+    const [jsonAcik, setJsonAcik] = useState(false);
+    const [jsonKopyalandi, setJsonKopyalandi] = useState(false);
     const [eylemdekiTestId, setEylemdekiTestId] = useState("");
     const [eylemHatasi, setEylemHatasi] = useState("");
 
@@ -323,6 +326,15 @@ function DersTestler() {
         [konuSecenekleri]
     );
 
+    const anaKonu = (konuHaritasi?.anaKonular || []).find(
+        (konu) => konu.konuId === konuId
+    );
+    const altKonuSayisi = anaKonu?.altKonular?.length || 0;
+    const yetersizSoruSayisi = kapsamTuru === "konu" && altKonuSayisi > soruSayisi;
+    const jsonMetni = useMemo(() => olusturulanTest
+        ? JSON.stringify(testDenetimVerisiniOlustur(olusturulanTest, konuSecenekleri), null, 2)
+        : "", [olusturulanTest, konuSecenekleri]);
+
     const olusturmaGirdisi = useMemo(() => testOlusturmaGirdisiOlustur({
         kapsamTuru,
         soruSayisi,
@@ -330,7 +342,7 @@ function DersTestler() {
         materyalId,
         konuId,
     }), [kapsamTuru, soruSayisi, zorluk, materyalId, konuId]);
-    const olusturmaDevreDisi = testOlusturmaButonuDevreDisiMi({
+    const olusturmaDevreDisi = yetersizSoruSayisi || testOlusturmaButonuDevreDisiMi({
         sayfaYukleniyor,
         olusturuluyor,
         olusturmaGirdisi,
@@ -338,6 +350,8 @@ function DersTestler() {
 
     const secimiDegistir = (degistirici, deger) => {
         degistirici(deger);
+        setJsonAcik(false);
+        setJsonKopyalandi(false);
         setOlusturulanTest(null);
         setOlusturmaHatasi("");
     };
@@ -352,7 +366,7 @@ function DersTestler() {
     };
 
     const testiOlustur = async () => {
-        if (!olusturmaGirdisi || olusturuluyorRef.current) return;
+        if (!olusturmaGirdisi || yetersizSoruSayisi || olusturuluyorRef.current) return;
         const istekDersId = dersId;
         const controller = new AbortController();
         olusturmaControllerRef.current?.abort();
@@ -367,6 +381,8 @@ function DersTestler() {
         setOlusturuluyor(true);
         setOlusturmaHatasi("");
         setOlusturulanTest(null);
+        setJsonAcik(false);
+        setJsonKopyalandi(false);
 
         try {
             const yanit = await testlerApi.testOlustur(
@@ -556,7 +572,7 @@ function DersTestler() {
 
                     <fieldset className="xl:col-span-3">
                         <legend className={`mb-2 text-[12px] font-bold ${metinAna}`}>Soru Sayısı</legend>
-                        <div className="grid h-[46px] grid-cols-4 gap-1.5">
+                        <div className="grid h-[46px] grid-cols-3 gap-1.5">
                             {soruSayilari.map((sayi) => {
                                 const secili = soruSayisi === sayi;
                                 return (
@@ -564,7 +580,7 @@ function DersTestler() {
                                         key={sayi}
                                         type="button"
                                         aria-pressed={secili}
-                                        disabled={olusturuluyor}
+                                        disabled={olusturuluyor || altKonuSayisi > sayi}
                                         onClick={() => secimiDegistir(setSoruSayisi, sayi)}
                                         className={`rounded-xl border text-[12px] font-bold transition-colors ${
                                             secili
@@ -577,6 +593,14 @@ function DersTestler() {
                                 );
                             })}
                         </div>
+                        {altKonuSayisi > 0 && (
+                            <p role={yetersizSoruSayisi ? "alert" : undefined}
+                                className={`mt-2 text-[11px] ${yetersizSoruSayisi ? "text-amber-500" : metinIkincil}`}>
+                                {altKonuSayisi} alt konu için en az {altKonuSayisi} soru gerekir.
+                                {yetersizSoruSayisi && " Daha yüksek soru sayısı seçin."}
+                                {altKonuSayisi > 20 && " Mevcut seçeneklerle bu konu test edilemez."}
+                            </p>
+                        )}
                     </fieldset>
 
                     <fieldset className="xl:col-span-3">
@@ -697,6 +721,16 @@ function DersTestler() {
                                     {" · "}{testZorlukEtiketi(olusturulanTest.zorluk)}
                                 </p>
                             </div>
+                            <div className="flex shrink-0 flex-wrap items-center gap-2">
+                            <button
+                                type="button"
+                                onClick={() => { setJsonAcik((acik) => !acik); setJsonKopyalandi(false); }}
+                                className={`inline-flex h-10 items-center justify-center rounded-xl border px-3 text-[12px] font-bold ${ortakButon}`}
+                                aria-expanded={jsonAcik}
+                                aria-controls="test-json-denetim"
+                            >
+                                JSON
+                            </button>
                             <button
                                 type="button"
                                 onClick={() => testeGit(olusturulanTest)}
@@ -710,7 +744,35 @@ function DersTestler() {
                                 )}
                                 Testi Başlat
                             </button>
+                            </div>
                         </div>
+                        {jsonAcik && (
+                            <div id="test-json-denetim" className="mt-3 rounded-xl border p-3">
+                                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                                    <p className={`text-[12px] font-bold ${metinAna}`}>
+                                        Geçici JSON Denetimi — cevap anahtarı içermez
+                                    </p>
+                                    <button
+                                        type="button"
+                                        className={`rounded-lg border px-3 py-1.5 text-[11px] font-bold ${ortakButon}`}
+                                        onClick={async () => {
+                                            try {
+                                                await navigator.clipboard.writeText(jsonMetni);
+                                                setJsonKopyalandi(true);
+                                            } catch {
+                                                setJsonKopyalandi(false);
+                                            }
+                                        }}
+                                    >
+                                        {jsonKopyalandi ? "Kopyalandı" : "JSON Kopyala"}
+                                    </button>
+                                </div>
+                                <textarea readOnly value={jsonMetni} rows={13}
+                                    aria-label="Test soru ve alt konu JSON çıktısı"
+                                    className={`w-full rounded-lg border p-3 font-mono text-[11px] ${isDark ? "border-slate-700 bg-slate-950 text-slate-100" : "border-slate-200 bg-white text-slate-900"}`}
+                                />
+                            </div>
+                        )}
                     </div>
                 )}
             </section>
