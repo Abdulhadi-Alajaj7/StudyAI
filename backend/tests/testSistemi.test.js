@@ -1297,3 +1297,42 @@ test("konu testinde bağımsız embedding doğrulayıcısı ve kaynak skorları 
         { parcaIndex: 0, skor: 0.91 },
     ]);
 });
+
+test("ek Gemini kalite kontrolü 503 olduğunda konu testini ve denetim kaydını bozmaz", async () => {
+    let denetimCagrilari = 0;
+    const { bagimliliklar, kaydiGetir } = uretimBagimliliklari({
+        geminiTestUret: async (girdi) => {
+            assert.equal(typeof girdi.soruKalitesiDogrula, "function");
+            const ilk = await girdi.soruKalitesiDogrula({
+                sorular: [{ konuId: "sub-yigin", metin: "Yığın?" }],
+                oncekiSorular: [], izinliKonuIds: girdi.izinliKonuIds,
+            });
+            const tekrar = await girdi.soruKalitesiDogrula({
+                sorular: [{ konuId: "sub-yigin", metin: "Yığın?" }],
+                oncekiSorular: [], izinliKonuIds: girdi.izinliKonuIds,
+            });
+            assert.equal(ilk[0].neden, "DENETIM_ATLANDI");
+            assert.equal(tekrar[0].neden, "DENETIM_ATLANDI");
+            return {
+                sorular: ornekSorular(girdi.soruSayisi).map((soru) => ({
+                    ...soru,
+                    konuId: "sub-yigin",
+                    kaliteDogrulama: { durum: "DENETIM_ATLANDI" },
+                })),
+                model: "test-model",
+            };
+        },
+    });
+    bagimliliklar.geminiKaliteDenetle = async () => {
+        denetimCagrilari += 1;
+        throw Object.assign(new Error("Kalite denetim servisi geçici olarak kullanılamıyor"), {
+            status: 503, kod: "GEMINI_503",
+        });
+    };
+    await testOlustur({
+        kullaniciId, dersId, kapsamTuru: "konu",
+        konuId: "sub-yigin", soruSayisi: 10, zorluk: "orta",
+    }, bagimliliklar);
+    assert.equal(denetimCagrilari, 1);
+    assert.equal(kaydiGetir().sorular[0].kaliteDogrulama.durum, "DENETIM_ATLANDI");
+});
