@@ -146,13 +146,29 @@ test("JSON denetimi soru, şık ve konu içerir; cevap anahtarını sızdırmaz"
             secenekler: [{ anahtar: "A", metin: "Seçenek A" }],
             konuId: "alt1",
             dogruCevap: "A", aciklama: "Gizli açıklama",
-            kaynaklar: [{ dosyaAdi: "ders.pdf" }],
+            kaynaklar: [{
+                dosyaAdi: "ders.pdf",
+                parcaIndeksleri: [3],
+                parcaSkorlari: [{ parcaIndex: 3, skor: 0.8132 }],
+            }],
+            konuDogrulama: {
+                hedefSkor: 0.8021,
+                rakipSkor: 0.5932,
+                rakipKonuBasligi: "Başka alt konu",
+            },
         }],
     }, [{ konuId: "alt1", baslik: "Alt Konu 1" }]);
     assert.equal(veri.sorular[0].konuId, "alt1");
     assert.equal(veri.sorular[0].konuBasligi, "Alt Konu 1");
     assert.equal(veri.sorular[0].secenekler[0].metin, "Seçenek A");
     assert.deepEqual(veri.sorular[0].kaynakDosyalari, ["ders.pdf"]);
+    assert.deepEqual(veri.sorular[0].kaynakParcalari, [{
+        dosyaAdi: "ders.pdf", parcaIndex: 3, semantikSkor: 0.8132,
+    }]);
+    assert.deepEqual(veri.sorular[0].konuDogrulama, {
+        hedefSkor: 0.8021, rakipSkor: 0.5932,
+        rakipKonuBasligi: "Başka alt konu",
+    });
     assert.equal(JSON.stringify(veri).includes("dogruCevap"), false);
     assert.equal(JSON.stringify(veri).includes("Gizli açıklama"), false);
 });
