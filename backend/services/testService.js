@@ -555,8 +555,19 @@ const kaynaklariHazirla = async ({
                 "Her alt konuyu seçilen soru sayısıyla kapsayacak yeterli içerik bulunamadı."
             );
         }
+        // Ana konu metinleri yalnızca yardımcı bağlamdır: soru kotası ve konu
+        // kimliği alt konulara aittir. Ortak parçalar aşağıda tekilleştirilir.
+        const anaParcalar = konuIcinParcalariSirala(tumParcalar, hedef.konu);
+        const anaButcesi = Math.min(8_000, Math.floor(deps.kaynakButcesi * 0.05));
+        const anaSecilenler = dengeliOzetParcalariniSec(anaParcalar, anaButcesi);
+        parcaKonulari.push(...anaSecilenler.map((parca) => ({
+            parca, konu: hedef.konu,
+        })));
+        const kullanilanAnaButce = anaSecilenler.reduce(
+            (toplam, parca) => toplam + String(parca.icerik || "").length, 0
+        );
         const grupButcesi = Math.max(
-            2_000, Math.floor(deps.kaynakButcesi / kotalar.length)
+            2_000, Math.floor((deps.kaynakButcesi - kullanilanAnaButce) / kotalar.length)
         );
         for (const grup of kotalar) {
             const secilenler = dengeliOzetParcalariniSec(grup.parcalar, grupButcesi);
