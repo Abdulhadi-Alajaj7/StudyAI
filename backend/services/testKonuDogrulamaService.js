@@ -118,8 +118,8 @@ export const testKonuDogrulayicisiOlustur = ({
                 soruIndeksi: index,
                 konuId: hedefKonuId,
                 gecerli: !yetersiz && !belirginRakip,
-                neden: yetersiz ? "HEDEF_BENZERLIK_DUSUK"
-                    : (belirginRakip ? "BASKA_KONU_BELIRGIN_USTUN" : "UYGUN"),
+                neden: belirginRakip ? "BASKA_KONU_BELIRGIN_USTUN"
+                    : (yetersiz ? "HEDEF_BENZERLIK_DUSUK" : "UYGUN"),
                 hedefSkor: hedefSkor == null ? null : Number(hedefSkor.toFixed(4)),
                 rakipSkor: rakipSkor == null ? null : Number(rakipSkor.toFixed(4)),
                 rakipKonuId: rakip?.konuId || "",
