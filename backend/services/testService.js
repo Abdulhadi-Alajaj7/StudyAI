@@ -5,11 +5,8 @@ import MetinParcasi from "../models/MetinParcasi.js";
 import KonuHaritasi from "../models/KonuHaritasi.js";
 import Test from "../models/Test.js";
 import { dengeliOzetParcalariniSec } from "./dersOzetiService.js";
-import { semanticAramaYap } from "./semanticAramaService.js";
-import { dersKonulariniDogrulamaIcinGetir, testKonuDogrulayicisiOlustur } from "./testKonuDogrulamaService.js";
 import {
     geminiIleTestSorulariUret,
-    geminiIleTestKalitesiniDenetle,
     VARSAYILAN_GEMINI_MODELI,
 } from "./geminiService.js";
 import { testTanilamaKaydiYaz } from "./testTanilamaService.js";
@@ -17,11 +14,6 @@ import { testUretimIzleyicisiOlustur } from "./testUretimIzlemeService.js";
 
 const VARSAYILAN_KAYNAK_BUTCESI = 160_000;
 const MINIMUM_SORU_BASI_KARAKTER = 80;
-const TEST_KONU_SEMANTIK_MIN_SKOR = 0.5;
-const testSemantikMinSkorGetir = () => {
-    const ayar = Number.parseFloat(process.env.TEST_KONU_SEMANTIK_MIN_SKOR);
-    return Number.isFinite(ayar) ? Math.max(0, Math.min(1, ayar)) : TEST_KONU_SEMANTIK_MIN_SKOR;
-};
 const TEST_LISTE_ALANLARI = [
     "_id",
     "dersId",
@@ -66,10 +58,7 @@ const bagimliliklariGetir = (bagimliliklar = {}) => ({
     MetinParcasiModel: bagimliliklar.MetinParcasiModel || MetinParcasi,
     KonuHaritasiModel: bagimliliklar.KonuHaritasiModel || KonuHaritasi,
     TestModel: bagimliliklar.TestModel || Test,
-    semanticArama: bagimliliklar.semanticArama || semanticAramaYap,
     geminiTestUret: bagimliliklar.geminiTestUret || geminiIleTestSorulariUret,
-    geminiKaliteDenetle: bagimliliklar.geminiKaliteDenetle || geminiIleTestKalitesiniDenetle,
-    testKonuDogrulayicisiOlustur: bagimliliklar.testKonuDogrulayicisiOlustur || testKonuDogrulayicisiOlustur,
     kaynakButcesi: bagimliliklar.kaynakButcesi || kaynakButcesiGetir(),
     simdi: bagimliliklar.simdi || (() => new Date()),
     korelasyonIdOlustur: bagimliliklar.korelasyonIdOlustur || randomUUID,
@@ -313,7 +302,7 @@ const dersiGetir = async ({ kullaniciId, dersId }, DersModel) => {
 
 const konuHaritasiniGetir = async ({ kullaniciId, dersId }, deps) => (
     deps.KonuHaritasiModel.findOne({ kullaniciId, dersId, durum: "hazir" })
-        .select("anaKonular")
+        .select("anaKonular parcaAtamaSurumu parcaKonuAtamalari")
         .lean()
 );
 
