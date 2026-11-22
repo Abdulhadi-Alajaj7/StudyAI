@@ -746,7 +746,8 @@ const testOlusturTekIslem = async ({
                 0
             ),
         });
-        const zorlukDagilimi = zorlukDagiliminiOlustur(zorluk, soruSayisi);
+        const planlananSoruSayisi = kaynakVerisi.planlananSoruSayisi || soruSayisi;
+        const zorlukDagilimi = zorlukDagiliminiOlustur(zorluk, planlananSoruSayisi);
         asama = "GEMINI_URETIMI";
         // Soru gerçekten doğru alt konuya mı ait? Bütün ders haritasındaki
         // rakip konularla bağımsız embedding karşılaştırması kullanılır.
@@ -792,16 +793,36 @@ const testOlusturTekIslem = async ({
             hedefBasligi: hedef.materyal
                 ? (hedef.materyal.orijinalDosyaAdi || hedef.materyal.dosyaAdi)
                 : (hedef.konu?.baslik || ders.dersAdi),
-            soruSayisi,
+            soruSayisi: planlananSoruSayisi,
             zorlukDagilimi,
             konuDagilimi: kaynakVerisi.konuDagilimi,
             kaynaklar: kaynakVerisi.kaynaklar,
             izinliKonuIds: kaynakVerisi.izinliKonuIds,
             soruKonuDogrula,
             soruKalitesiDogrula,
+            kismiSonucKabul: kapsamTuru === "konu",
         }, {
             uretimIzleyicisi,
         });
+
+        // Kısmi dönüşte yalnızca doğrulanmış gerçek soru sayısı saklanır;
+        // her alt konu için en az bir soru bulunması şartı da korunur.
+        const gercekSoruSayisi = Array.isArray(geminiSonucu.sorular)
+            ? geminiSonucu.sorular.length : 0;
+        const konuKapsamiTam = kaynakVerisi.konuDagilimi.every((konu) =>
+            geminiSonucu.sorular.some((soru) => String(soru.konuId) === String(konu.konuId))
+        );
+        if (gercekSoruSayisi < 1 ||
+            gercekSoruSayisi > planlananSoruSayisi ||
+            (kapsamTuru === "konu" && !konuKapsamiTam)) {
+            throw uygunIcerikBulunamadiHatasi(
+                "Tüm alt konuları kapsayan güvenilir soru sayısına ulaşılamadı."
+            );
+        }
+        const eksikSoruNedeni = gercekSoruSayisi < planlananSoruSayisi
+            ? "KALITE_KONTROLU"
+            : (planlananSoruSayisi < soruSayisi
+                ? "KAYNAK_KAPASITESI" : "");
 
         // Denetim JSON'u için her sorunun gerçekten kullandığı parçaların
         // o sorunun alt konusuyla olan semantik skorlarını sakla.
@@ -843,7 +864,9 @@ const testOlusturTekIslem = async ({
             materyalId: kapsamTuru === "materyal" ? materyalId : null,
             konuId: kapsamTuru === "konu" ? konuId : "",
             konuBasligi: hedef.konu?.baslik || "",
-            soruSayisi,
+            soruSayisi: gercekSoruSayisi,
+            istenenSoruSayisi: soruSayisi,
+            eksikSoruNedeni,
             zorluk,
             sorular: denetimliSorular,
             kaynakSurumleri: kaynakVerisi.kaynakSurumleri,
