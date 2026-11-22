@@ -424,7 +424,7 @@ const kaynakKayitlariniOlustur = (parcaGruplari, materyaller) => {
     const materyalHaritasi = new Map(
         materyaller.map((materyal) => [kimlikMetni(materyal._id), materyal])
     );
-    return parcaGruplari.map(({ parca, konular }, index) => {
+    return parcaGruplari.map(({ parca, konular, konuSkorlari }, index) => {
         const materyal = materyalHaritasi.get(kimlikMetni(parca.materyalId));
         const konuIds = [...new Set(
             (konular || []).map((konu) => String(konu?.konuId || "")).filter(Boolean)
@@ -436,6 +436,7 @@ const kaynakKayitlariniOlustur = (parcaGruplari, materyaller) => {
             parcaIndex: parca.parcaIndex,
             konuId: konuIds[0] || "",
             konuIds,
+            konuSkorlari: Object.fromEntries(konuSkorlari || []),
             icerik: String(parca.icerik || "").trim(),
         };
     });
@@ -588,7 +589,7 @@ const kaynaklariHazirla = async ({
     for (const { parca, konu } of parcaKonulari) {
         const fizikselAnahtar = `${kimlikMetni(parca.materyalId)}:${parca.parcaIndex}`;
         if (!fizikselParcaGruplari.has(fizikselAnahtar)) {
-            fizikselParcaGruplari.set(fizikselAnahtar, { parca, konular: [] });
+            fizikselParcaGruplari.set(fizikselAnahtar, { parca, konular: [], konuSkorlari: new Map() });
         }
         const grup = fizikselParcaGruplari.get(fizikselAnahtar);
         // Aynı parça farklı konu bütçelerinde kırpılmışsa en kapsamlı
@@ -596,7 +597,13 @@ const kaynaklariHazirla = async ({
         if (String(parca.icerik || "").length > String(grup.parca.icerik || "").length) {
             grup.parca = parca;
         }
-        if (konu?.konuId) grup.konular.push(konu);
+        if (konu?.konuId) {
+            grup.konular.push(konu);
+            if (Number.isFinite(parca.semantikSkor)) {
+                const eskiSkor = grup.konuSkorlari.get(konu.konuId) ?? -1;
+                grup.konuSkorlari.set(konu.konuId, Math.max(eskiSkor, parca.semantikSkor));
+            }
+        }
     }
     const benzersizFizikselParcalar = [...fizikselParcaGruplari.values()];
     const toplamKarakter = benzersizFizikselParcalar.reduce(
@@ -744,6 +751,29 @@ const testOlusturTekIslem = async ({
             uretimIzleyicisi,
         });
 
+        // Denetim JSON'u için her sorunun gerçekten kullandığı parçaların
+        // o sorunun alt konusuyla olan semantik skorlarını sakla.
+        const skorHaritasi = new Map(kaynakVerisi.kaynaklar.map((kaynak) => [
+            `${kimlikMetni(kaynak.materyalId)}:${kaynak.parcaIndex}`, kaynak,
+        ]));
+        const denetimliSorular = geminiSonucu.sorular.map((soru) => ({
+            ...soru,
+            kaynaklar: (soru.kaynaklar || []).map((kaynak) => {
+                const parcaSkorlari = (kaynak.parcaIndeksleri || [])
+                    .map((parcaIndex) => {
+                        const kayit = skorHaritasi.get(
+                            `${kimlikMetni(kaynak.materyalId)}:${parcaIndex}`
+                        );
+                        const skor = kayit?.konuSkorlari?.[soru.konuId];
+                        return Number.isFinite(skor) ? {
+                            parcaIndex, skor: Number(skor.toFixed(4)),
+                        } : null;
+                    }).filter(Boolean);
+                return parcaSkorlari.length > 0
+                    ? { ...kaynak, parcaSkorlari }
+                    : kaynak;
+            }),
+        }));
         asama = "KAYNAK_SURUM_DOGRULAMA";
         await kaynakSurumleriniDogrula({
             kullaniciId,
@@ -763,7 +793,7 @@ const testOlusturTekIslem = async ({
             konuBasligi: hedef.konu?.baslik || "",
             soruSayisi,
             zorluk,
-            sorular: geminiSonucu.sorular,
+            sorular: denetimliSorular,
             kaynakSurumleri: kaynakVerisi.kaynakSurumleri,
             kullanilanModel: geminiSonucu.model ||
                 process.env.GEMINI_TEST_MODELI ||
