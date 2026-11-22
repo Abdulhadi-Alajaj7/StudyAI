@@ -1870,6 +1870,7 @@ export const geminiIleTestSorulariUret = async ({
     // İsteğe bağlı bağımsız soru-konusu denetimi (embedding tabanlı).
     soruKonuDogrula = null,
     soruKalitesiDogrula = null,
+    kismiSonucKabul = false,
     modelAdi = process.env.GEMINI_TEST_MODELI || VARSAYILAN_GEMINI_MODELI,
 }, bagimliliklar = {}) => {
     const istemci = bagimliliklar.istemci || null;
@@ -1932,6 +1933,8 @@ export const geminiIleTestSorulariUret = async ({
     };
     const toplamTokenKullanimi = { girdi: 0, cikti: 0, toplam: 0 };
     const tumHamSorular = [];
+    const kabulEdilenSoruPlani = [];
+    let atlananSoruSayisi = 0;
     let onarimDenemeSayisi = 0;
     let sonTanilama = null;
     let partiKucultmeSayisi = 0;
@@ -2401,6 +2404,17 @@ export const geminiIleTestSorulariUret = async ({
         }
     };
 
+    // Doğrulamayı geçemeyen tekil veya bölünemeyen parti atlanabilir;
+    // sağlayıcı bağlantısı, kota veya izin hatalarında kısmi başarı iddia edilmez.
+    const atlanabilirKaliteHatasiMi = (hata) => (
+        hata?.kod === "YETERSIZ_TEST_ICERIGI" ||
+        (
+            hata?.kod === "GEMINI_GECERSIZ_TEST_YANITI" &&
+            typeof hata?.tanilama?.dogrulamaAltKodu === "string" &&
+            !["URETIM_PLANI"].includes(hata.tanilama.dogrulamaAltKodu)
+        )
+    );
+
     const partiyiKurtararakUret = async ({
         plan,
         partiIndeksi,
@@ -2410,7 +2424,7 @@ export const geminiIleTestSorulariUret = async ({
         onarimDurumu,
     }) => {
         try {
-            return await tekPartiyiUretVeDogrula({
+            const sorular = await tekPartiyiUretVeDogrula({
                 plan,
                 partiIndeksi,
                 baslangicIndeksi,
@@ -2418,12 +2432,18 @@ export const geminiIleTestSorulariUret = async ({
                 oncekiSorular,
                 onarimDurumu,
             });
+            kabulEdilenSoruPlani.push(...plan);
+            return sorular;
         } catch (hata) {
             if (
                 !partiKucultmeyleKurtarilabilirMi(hata) ||
                 plan.length <= 1 ||
                 kurtarmaDerinligi >= maksimumKucultmeDerinligi
             ) {
+                if (kismiSonucKabul && atlanabilirKaliteHatasiMi(hata)) {
+                    atlananSoruSayisi += plan.length;
+                    return [];
+                }
                 throw hata;
             }
             partiKucultmeSayisi += 1;
@@ -2478,15 +2498,43 @@ export const geminiIleTestSorulariUret = async ({
         tumHamSorular.push(...partiHamSorular);
     }
 
+    const eksikUretim = tumHamSorular.length < soruSayisi;
+    const gercekPlan = eksikUretim
+        ? kabulEdilenSoruPlani.map((planlanan, index) => ({
+            ...planlanan, sira: index + 1,
+        }))
+        : etkinSoruPlani;
+    const gercekKonuDagilimi = [...new Set(
+        gercekPlan.map((soru) => soru.konuId).filter(Boolean)
+    )].map((konuId) => ({
+        konuId,
+        adet: gercekPlan.filter((soru) => soru.konuId === konuId).length,
+    }));
+    // En az bir alt konu yoksa ya da hiç güvenilir soru kalmadıysa
+    // eksik test sunmak yerine mevcut güvenli hata davranışını koru.
+    if (eksikUretim && (
+        !kismiSonucKabul ||
+        tumHamSorular.length === 0 ||
+        konuDagilimi.some((konu) => !gercekKonuDagilimi.some(
+            (gecerli) => gecerli.konuId === String(konu.konuId)
+        ))
+    )) {
+        throw new GeminiSohbetHatasi(
+            "Tüm alt konuları kapsayacak sayıda doğrulanmış soru üretilemedi.",
+            { status: 422, kod: "YETERSIZ_TEST_ICERIGI" }
+        );
+    }
     let sorular;
     try {
         sorular = testSorulariniDogrula({ sorular: tumHamSorular }, {
-            soruSayisi,
-            zorlukDagilimi,
-            konuDagilimi,
+            soruSayisi: tumHamSorular.length,
+            zorlukDagilimi: eksikUretim
+                ? dagilimiSay(gercekPlan.map((soru) => soru.zorluk))
+                : zorlukDagilimi,
+            konuDagilimi: eksikUretim ? gercekKonuDagilimi : konuDagilimi,
             kaynaklar: etkinKaynaklar,
             izinliKonuIds,
-            soruPlani: etkinSoruPlani,
+            soruPlani: gercekPlan,
         });
     } catch (hata) {
         hata.tanilama = {
@@ -2522,6 +2570,10 @@ export const geminiIleTestSorulariUret = async ({
         sorular,
         tokenKullanimi: toplamTokenKullanimi,
         model: modelAdi,
+        ...(atlananSoruSayisi > 0 ? {
+            kismiUretimNedeni: "KALITE_KONTROLU",
+            atlananSoruSayisi,
+        } : {}),
     };
 };
 
