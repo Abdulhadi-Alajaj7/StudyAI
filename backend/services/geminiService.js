@@ -1448,7 +1448,10 @@ const testYanitSemasiniOlustur = ({ soruSayisi, kaynakAnahtarlari, zorluklar, ki
                     kaynakReferanslari: {
                         type: "array",
                         minItems: 1,
-                        items: { type: "string", enum: kaynakAnahtarlari },
+                        // Kaynak anahtarlarını büyük bir enum'a dönüştürmek Gemini'nin
+                        // structured-output şemasını gereksiz büyütür. Gerçek
+                        // kaynak izinleri testSorulariniDogrula'da denetlenir.
+                        items: { type: "string" },
                     },
                     kaynakKanitlari: {
                         type: "array",
@@ -1460,7 +1463,7 @@ const testYanitSemasiniOlustur = ({ soruSayisi, kaynakAnahtarlari, zorluklar, ki
                             properties: {
                                 kaynakReferansi: {
                                     type: "string",
-                                    enum: kaynakAnahtarlari,
+                                    // Geçerli referanslar uygulama tarafında doğrulanır.
                                 },
                                 alinti: { type: "string" },
                             },
