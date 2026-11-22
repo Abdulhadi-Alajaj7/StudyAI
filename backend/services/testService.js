@@ -324,6 +324,9 @@ export const altKonuKotalariniDagit = (konuGruplari, soruSayisi) => {
         const uygunlar = gruplar.filter((grup) => grup.adet < grup.kapasite);
         if (uygunlar.length === 0) return [];
         uygunlar.sort((sol, sag) => (
+            // Önce her konuya eşit fırsat; eşit adette olanlarda
+            // daha kapsamlı kaynağı bulunan konu öncelikli.
+            sol.adet - sag.adet ||
             (sag.karakterSayisi / (sag.adet + 1)) -
             (sol.karakterSayisi / (sol.adet + 1)) ||
             sag.karakterSayisi - sol.karakterSayisi ||
