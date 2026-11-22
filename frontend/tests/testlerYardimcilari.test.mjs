@@ -8,6 +8,7 @@ import {
     soruSonucDurumunuGetir,
     testCozumOzetiniGetir,
     testCozmeYolu,
+    testDenetimVerisiniOlustur,
     testHedefBilgisi,
     testIlerlemeBilgisi,
     testOlusturmaButonuDevreDisiMi,
@@ -40,11 +41,17 @@ test("test oluşturma girdisi yalnızca seçilen kapsama ait kimliği taşır", 
     }), true);
     assert.deepEqual(testOlusturmaGirdisiOlustur({
         kapsamTuru: "materyal",
-        soruSayisi: 5,
+        soruSayisi: 10,
         zorluk: "kolay",
         materyalId: "m1",
         konuId: "k1",
-    }), { kapsamTuru: "materyal", soruSayisi: 5, zorluk: "kolay", materyalId: "m1" });
+    }), { kapsamTuru: "materyal", soruSayisi: 10, zorluk: "kolay", materyalId: "m1" });
+    assert.equal(testOlusturmaGirdisiOlustur({
+        kapsamTuru: "materyal",
+        soruSayisi: 5,
+        zorluk: "kolay",
+        materyalId: "m1",
+    }), null);
     assert.equal(testOlusturmaGirdisiOlustur({
         kapsamTuru: "konu",
         soruSayisi: 10,
@@ -128,4 +135,24 @@ test("sonuç durumu backend doğru cevabına göre belirlenir ve kaynak adları 
             { dosyaAdi: " " },
         ],
     }), ["Hafta 1.pdf", "Ders Notu.docx"]);
+});
+
+
+test("JSON denetimi soru, şık ve konu içerir; cevap anahtarını sızdırmaz", () => {
+    const veri = testDenetimVerisiniOlustur({
+        _id: "test1", konuBasligi: "Ana Konu", soruSayisi: 1,
+        sorular: [{
+            metin: "Örnek soru?",
+            secenekler: [{ anahtar: "A", metin: "Seçenek A" }],
+            konuId: "alt1",
+            dogruCevap: "A", aciklama: "Gizli açıklama",
+            kaynaklar: [{ dosyaAdi: "ders.pdf" }],
+        }],
+    }, [{ konuId: "alt1", baslik: "Alt Konu 1" }]);
+    assert.equal(veri.sorular[0].konuId, "alt1");
+    assert.equal(veri.sorular[0].konuBasligi, "Alt Konu 1");
+    assert.equal(veri.sorular[0].secenekler[0].metin, "Seçenek A");
+    assert.deepEqual(veri.sorular[0].kaynakDosyalari, ["ders.pdf"]);
+    assert.equal(JSON.stringify(veri).includes("dogruCevap"), false);
+    assert.equal(JSON.stringify(veri).includes("Gizli açıklama"), false);
 });
