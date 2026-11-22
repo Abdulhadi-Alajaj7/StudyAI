@@ -690,7 +690,13 @@ const kaynaklariHazirla = async ({
         if (!fizikselParcaGruplari.has(fizikselAnahtar)) {
             fizikselParcaGruplari.set(fizikselAnahtar, { parca, konular: [] });
         }
-        if (konu?.konuId) fizikselParcaGruplari.get(fizikselAnahtar).konular.push(konu);
+        const grup = fizikselParcaGruplari.get(fizikselAnahtar);
+        // Aynı parça farklı konu bütçelerinde kırpılmışsa en kapsamlı
+        // sürümü tut; bütün doğrulanmış konu bağlantılarını yine de birleştir.
+        if (String(parca.icerik || "").length > String(grup.parca.icerik || "").length) {
+            grup.parca = parca;
+        }
+        if (konu?.konuId) grup.konular.push(konu);
     }
     const benzersizFizikselParcalar = [...fizikselParcaGruplari.values()];
     const toplamKarakter = benzersizFizikselParcalar.reduce(
