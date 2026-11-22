@@ -1,4 +1,5 @@
-import { getGeminiClient, VARSAYILAN_GEMINI_MODELI } from "./geminiService.js";
+import { GoogleGenAI } from "@google/genai";
+import { VARSAYILAN_GEMINI_MODELI } from "./geminiService.js";
 
 // Harita kesinleştikten sonra öğretmen rolündeki Gemini her aktif parçayı
 // kalıcı konu kimliklerine bağlar. Tekrarlanan sorgularda sınıflandırma yapılmaz.
@@ -38,7 +39,7 @@ export const geminiIleParcalariKonularaAta = async ({
     istemci = null,
 }) => {
     if (!parcalar.length) return [];
-    const ai = istemci || getGeminiClient();
+    const ai = istemci || new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
     const konular = anaKonular.flatMap((ana) => [
         { id: ana.konuId, baslik: ana.baslik, aciklama: ana.aciklama, tur: "ana" },
         ...(ana.altKonular || []).map((alt) => ({
