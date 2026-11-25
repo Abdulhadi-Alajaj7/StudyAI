@@ -1,7 +1,7 @@
 /**
  * Ders kartı üretimi HTTP isteğinden bağımsız çalışan, MongoDB'de durumunu
- * tutan bir iştir. Tek tıklama yeterlidir: gruplar kaydedilerek ilerlenir,
- * geçici hatalar Gemini çağrısında sınırlı yeniden denenir, sunucu açılışında
+ * tutan bir iştir. Tek tıklama yeterlidir: parçalar kaydedilerek ilerlenir,
+ * geçici kota/ağ hataları otomatik yeniden denenir, sunucu açılışında
  * bekleyen işler sürdürülür. Kartlar tamamlanana kadar öğrenciye sunulmaz.
  */
 import Ders from "../models/Ders.js";
@@ -11,12 +11,18 @@ import { dersGeneliKartlariOlustur } from "./dersKartService.js";
 
 const calisanlar = new Set();
 const TARAMA_MS = 15_000;
+const ILK_BEKLEME_MS = 10_000;
+const AZAMI_BEKLEME_MS = 15 * 60_000;
+const AZAMI_KALICI_HATA = 4;
 let taramaZamani = null;
 let taramaSuruyor = false;
 
 const id = (v) => String(v);
 const int = (v) => Number.isFinite(Number(v)) ? Number(v) : 0;
 const hataKodu = (v) => String(v || "KART_URETIM_HATASI").slice(0, 90);
+const bekleme = (deneme, kota) =>
+    Math.min(AZAMI_BEKLEME_MS, (kota ? 60_000 : ILK_BEKLEME_MS) *
+        (2 ** Math.min(6, Math.max(0, deneme - 1))));
 
 export class KartOtomatikHatasi extends Error {
     constructor(mesaj, status = 422, kod = "KART_OTOMATIK_HATA") {
@@ -92,24 +98,47 @@ export const kartOtomatikUretiminiCalistir = async ({
                 });
                 return;
             }
-            throw new KartOtomatikHatasi(
-                "Kart üretimi tamamlanamadı.", 502, "KART_URETIM_DOGRULANAMADI"
-            );
-        } catch (hata) {
-            // Gemini geçici hataları kendi sınırlı retry döngüsünde ele alır.
-            // Burada ikinci bir üretim/retry katmanı başlatılmaz.
-            // Başka sunucu işlem kilidini taşıyorsa yalnız onun sonucunu bekle.
-            const cakisma = hata?.kod === "KART_URETIM_DEVAM_EDIYOR";
-            const status = Number(hata?.status) || 0;
-            const deneme = int(ders.kartDersDenemeSayisi) + (cakisma ? 0 : 1);
-            const kalici = !cakisma;
+            // Geçici servis sorunlarında backend kendisi kaldığı yerden sürer.
+            // Aynı kaynak sürekli geçersiz JSON dönüyorsa kalıcı hatayı
+            // sonsuz isteğe dönüştürmeyiz.
+            // Bazı gruplar tamamlandıysa hata sayacını sıfırla. Böylece
+            // büyük derslerde ilerleme sürerken birkaç aralıklı hata yüzünden
+            // üretim durmaz.
+            const ilerlemeVar = int(sonuc.islenenGrupSayisi) >
+                (ders.kartDersIslenenGrupImzalari || []).length;
+            const deneme = ilerlemeVar ? 1 : int(ders.kartDersDenemeSayisi) + 1;
+            const kota = Boolean(sonuc.kotaEngeli);
+            const kalici = !ilerlemeVar && deneme >= AZAMI_KALICI_HATA;
             await DersModel.updateOne({
                 _id: dersId, kullaniciId, kartDersOtomatikAktif: true,
                 temizleniyor: { $ne: true },
             }, { $set: {
                 kartDersOtomatikAktif: !kalici,
                 kartDersDenemeSayisi: deneme,
-                kartDersSonrakiDeneme: kalici ? null : new Date(Date.now() + 30_000),
+                kartDersSonrakiDeneme: kalici ? null
+                    : new Date(Date.now() + bekleme(deneme, kota)),
+                kartDersOtomatikHataKodu: kalici ? "KART_URETIM_DOGRULANAMADI" : "",
+            } });
+            console.warn("[CalismaKartlari][otomatik] Kalan kaynaklar yeniden denenecek", {
+                dersId: anahtar, deneme, kota, kalici,
+                islenen: sonuc.islenenGrupSayisi, toplam: sonuc.toplamGrupSayisi,
+            });
+        } catch (hata) {
+            // Başka sunucu işlem kilidini taşıyorsa onun sonucunu bekle.
+            const cakisma = hata?.kod === "KART_URETIM_DEVAM_EDIYOR";
+            const status = Number(hata?.status) || 0;
+            const gecici = cakisma || status === 429 || status === 503 ||
+                status >= 500 || ["ECONNRESET", "ETIMEDOUT", "ENOTFOUND"].includes(hata?.code);
+            const deneme = int(ders.kartDersDenemeSayisi) + (cakisma ? 0 : 1);
+            const kalici = !gecici || (!cakisma && deneme >= AZAMI_KALICI_HATA);
+            await DersModel.updateOne({
+                _id: dersId, kullaniciId, kartDersOtomatikAktif: true,
+                temizleniyor: { $ne: true },
+            }, { $set: {
+                kartDersOtomatikAktif: !kalici,
+                kartDersDenemeSayisi: deneme,
+                kartDersSonrakiDeneme: kalici ? null
+                    : new Date(Date.now() + (cakisma ? 30_000 : bekleme(deneme, status === 429))),
                 kartDersOtomatikHataKodu: kalici ? hataKodu(hata?.kod) : "",
             } });
             console.warn("[CalismaKartlari][otomatik] İşlem sürdürme durumu", {
