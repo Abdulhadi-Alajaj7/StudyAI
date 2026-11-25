@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { createHash } from "node:crypto";
 import Ders from "../models/Ders.js";
 import Materyal from "../models/Materyal.js";
 import MetinParcasi from "../models/MetinParcasi.js";
@@ -182,7 +183,7 @@ const hedefiDogrula = async ({
             kullaniciId,
             durum: "hazir",
         })
-            .select("anaKonular")
+            .select("anaKonular parcaAtamaSurumu parcaKonuAtamalari")
             .lean();
         if (!harita) {
             throw new DersOzetiHatasi(
@@ -197,7 +198,7 @@ const hedefiDogrula = async ({
                 { status: 404, kod: "KONU_BULUNAMADI" }
             );
         }
-        return { materyal: null, konu };
+        return { materyal: null, konu, harita };
     }
 
     return { materyal: null, konu: null };
@@ -347,7 +348,17 @@ const konuParcalariniSec = async ({
     konu,
     materyaller,
     tumParcalar,
+    harita,
 }, deps) => {
+    if (harita?.parcaAtamaSurumu === 1) {
+        const ana = (harita.anaKonular || []).find(a=>a.konuId===konu.konuId);
+        const ids=new Set([konu.konuId,...(ana?.altKonular||[]).map(a=>a.konuId)]);
+        const key=p=>`${kimlikMetni(p.materyalId)}:${kimlikMetni(p.islemeId)}:${p.parcaIndex}`;
+        const bagli=new Set((harita.parcaKonuAtamalari||[]).filter(a=>(a.konuIds||[]).some(id=>ids.has(id))).map(key));
+        const secilen=tumParcalar.filter(p=>bagli.has(key(p)));
+        if (!secilen.length) throw uygunIcerikBulunamadiHatasi("Seçilen konuya bağlı güncel metin parçası bulunamadı. Konu haritasını güncelleyin.");
+        return secilen;
+    }
     let anlamsalSonuclar = [];
     try {
         const sonuc = await deps.semanticArama({
@@ -499,6 +510,7 @@ const kaynakSurumleriEslesiyor = (kaynakSurumleri, materyaller) => {
 };
 
 const ozetKapsamiMateryalIds = (tur, hedef) => (
+    tur === "konu" && hedef.harita?.parcaAtamaSurumu === 1 ? null :
     tur === "materyal"
         ? [hedef.materyal._id]
         : (tur === "konu" && hedef.konu.kaynakMateryalIds.length > 0
@@ -506,6 +518,15 @@ const ozetKapsamiMateryalIds = (tur, hedef) => (
             : null)
 );
 
+const konuKaynakImzasi = (hedef) => {
+    const harita=hedef?.harita,konu=hedef?.konu;
+    if(harita?.parcaAtamaSurumu!==1||!konu)return "";
+    const ana=(harita.anaKonular||[]).find(a=>a.konuId===konu.konuId);
+    const ids=new Set([konu.konuId,...(ana?.altKonular||[]).map(a=>a.konuId)]);
+    const keys=(harita.parcaKonuAtamalari||[]).filter(a=>(a.konuIds||[]).some(id=>ids.has(id)))
+        .map(a=>`${kimlikMetni(a.materyalId)}:${kimlikMetni(a.islemeId)}:${a.parcaIndex}`).sort();
+    return createHash("sha256").update(JSON.stringify([konu.konuId,keys])).digest("hex");
+};
 const kayitliOzetGuncelMi = async ({
     kullaniciId,
     dersId,
@@ -513,6 +534,7 @@ const kayitliOzetGuncelMi = async ({
     hedef,
     ozet,
 }, deps) => {
+    if(konuKaynakImzasi(hedef)!==(ozet.konuKaynakImzasi||""))return false;
     const kaydedilmisSurumler = ozet.kaynakSurumleri?.length > 0
         ? ozet.kaynakSurumleri
         : ozet.kullanilanKaynaklar;
@@ -571,6 +593,7 @@ const kaynaklariHazirla = async ({
             konu: hedef.konu,
             materyaller,
             tumParcalar,
+            harita: hedef.harita,
         }, deps)
         : tumParcalar;
     const secilenParcalar = dengeliOzetParcalariniSec(
@@ -842,6 +865,7 @@ export const dersOzetiOlustur = async ({
                 konuId,
             }, deps)
             : hedef;
+        if(konuKaynakImzasi(hedef)!==konuKaynakImzasi(guncelHedef))throw new DersOzetiHatasi("Özet hazırlanırken konu kaynakları değişti.",{status:409,kod:"KAYNAK_SURUMU_DEGISTI"});
         await kaynakSurumleriniDogrula({
             kullaniciId,
             dersId,
@@ -859,6 +883,7 @@ export const dersOzetiOlustur = async ({
                     icerik: geminiSonucu.icerik,
                     kullanilanKaynaklar: kaynakVerisi.kaynaklar,
                     kaynakSurumleri: kaynakVerisi.kaynakSurumleri,
+                    konuKaynakImzasi: konuKaynakImzasi(hedef),
                     kullanilanModel: geminiSonucu.model ||
                         process.env.GEMINI_OZET_MODELI ||
                         VARSAYILAN_GEMINI_MODELI,

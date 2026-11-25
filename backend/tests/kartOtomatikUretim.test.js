@@ -104,22 +104,24 @@ test("429 sonrası kullanıcı yeniden tıklamadan backend kaldığı yerden tam
     assert.equal(x.getKartOkuma(), 1);
 });
 
-test("Kalıcı olmayan 503 ve 429 uzun süreli kotada otomatik yeniden denenir", async () => {
+test("503 ve 429 ilerleme yoksa sınırlı otomatik yeniden denenir", async () => {
     const x = kur();
     await kartOtomatikUretiminiBaslat(x.args, {
         DersModel: x.DersModel, devreDisiBirak: true,
     });
+    let gercekDeneme = 0;
     for (let deneme = 0; deneme < 6; deneme++) {
-        x.ders.kartDersSonrakiDeneme = new Date(Date.now() - 1000);
+        if (x.ders.kartDersOtomatikAktif) x.ders.kartDersSonrakiDeneme = new Date(Date.now() - 1000);
         await kartOtomatikUretiminiCalistir(x.args, {
             DersModel: x.DersModel,
-            uret: async () => ({ tamamlandi: false, kotaEngeli: true,
-                islenenGrupSayisi: 0, toplamGrupSayisi: 3 }),
+            uret: async () => { gercekDeneme++; return { tamamlandi: false, kotaEngeli: true,
+                islenenGrupSayisi: 0, toplamGrupSayisi: 3 }; },
         });
     }
-    assert.equal(x.ders.kartDersOtomatikAktif, true);
-    assert.equal(x.ders.kartDersOtomatikHataKodu, "");
-    assert.ok(x.ders.kartDersSonrakiDeneme > new Date());
+    assert.equal(x.ders.kartDersOtomatikAktif, false);
+    assert.equal(x.ders.kartDersOtomatikHataKodu, "KART_URETIM_DOGRULANAMADI");
+    assert.equal(x.ders.kartDersSonrakiDeneme, null);
+    assert.equal(gercekDeneme, 4);
 });
 
 test("Konu veya kart kaynakları sürekli geçersizse sonsuz çağrı yapmadan durum gösterir", async () => {

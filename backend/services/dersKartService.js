@@ -4,11 +4,12 @@ import Ders from "../models/Ders.js";
 import Materyal from "../models/Materyal.js";
 import MetinParcasi from "../models/MetinParcasi.js";
 import CalismaKarti from "../models/CalismaKarti.js";
+import KonuHaritasi from "../models/KonuHaritasi.js";
 import { kartKilidiniAl, kartKilidiniBirak } from "./calismaKartiLock.js";
 import { geminiIleDersKartlariUret } from "./geminiService.js";
 import {
     dersKartGruplariniOlustur, dersKartlariniDogrula,
-    kartDersKaynakImzasi,
+    kartDersKaynakImzasi, konuBaglantiliKartGruplariniOlustur,
 } from "./dersKartPlanlama.mjs";
 
 export class DersKartiHatasi extends Error {
@@ -23,6 +24,7 @@ const bagimliliklar = (d = {}) => ({
     MateryalModel: d.MateryalModel || Materyal,
     ParcaModel: d.ParcaModel || MetinParcasi,
     KartModel: d.KartModel || CalismaKarti,
+    KonuHaritasiModel: d.KonuHaritasiModel || (d.DersModel ? null : KonuHaritasi),
     uret: d.uret || geminiIleDersKartlariUret,
     gruplama: d.gruplama || dersKartGruplariniOlustur,
 });
@@ -50,13 +52,19 @@ export const dersKartKaynaklariniGetir = async (x, kullaniciId, dersId) => {
     if (!parcalar.length) throw new DersKartiHatasi(
         "Ders materyallerinde işlenmiş metin bulunamadı.", 422, "KART_METIN_YOK"
     );
-    const gruplar = x.gruplama(parcalar, materyaller);
+    const harita=await x.KonuHaritasiModel?.findOne({kullaniciId,dersId,durum:"hazir"})
+        .select("anaKonular parcaAtamaSurumu parcaKonuAtamalari").lean();
+    const konuBaglantili=harita?.parcaAtamaSurumu===1;
+    const gruplar = konuBaglantili
+        ? konuBaglantiliKartGruplariniOlustur(parcalar,materyaller,harita)
+        : x.gruplama(parcalar, materyaller);
     if (!gruplar.length) throw new DersKartiHatasi(
         "Ders materyallerinde çalışma kartına uygun metin bulunamadı.",
         422, "KART_METIN_BOS"
     );
     return { materyaller, parcalar, gruplar,
-        surum: kartDersKaynakImzasi(materyaller, parcalar) };
+        surum: konuBaglantili ? "konu-v2:"+sha(kartDersKaynakImzasi(materyaller,parcalar)+gruplar.map(g=>g.imza).join(":"))
+            : kartDersKaynakImzasi(materyaller, parcalar), konuBaglantili };
 };
 
 const yeniKartlariKaydet = async (x, { kullaniciId, dersId, token, kartlar }) => {
@@ -72,7 +80,7 @@ const yeniKartlariKaydet = async (x, { kullaniciId, dersId, token, kartlar }) =>
         const soruKimligi = sha(kart.soru.trim().toLocaleLowerCase("tr-TR"));
         return { updateOne: {
             // Eski konu bağlı kartlarda da bu soru varsa kayıt korunur.
-            filter: { kullaniciId, dersId, soruKimligi },
+            filter: { kullaniciId, dersId, soruKimligi, ...(kart.konuId?{konuId:kart.konuId}:{}) },
             update: { $setOnInsert: { kullaniciId, dersId,
                 ...kart, soruKimligi } },
             upsert: true,
@@ -109,6 +117,7 @@ export const dersGeneliKartlariOlustur = async ({
         const guncel = await dersGetir(x, kullaniciId, dersId);
         if (!guncel) throw new DersKartiHatasi("Ders bulunamadı.", 404);
         if (guncel.kartDersSurumImzasi !== kaynak.surum) {
+            const korunanImzalar= kaynak.konuBaglantili ? (guncel.kartDersIslenenGrupImzalari||[]).filter(imza=>kaynak.gruplar.some(g=>g.imza===imza)) : [];
             // Önceki kartlar ve çalışma durumları tutulur; yeni materyalin
             // bütün grupları yeniden taranır. Eski konu eşleştirmesi kullanılmaz.
             const r = await x.DersModel.updateOne({
@@ -116,13 +125,13 @@ export const dersGeneliKartlariOlustur = async ({
                 temizleniyor: { $ne: true },
             }, { $set: {
                 kartDersSurumImzasi: kaynak.surum,
-                kartDersIslenenGrupImzalari: [],
+                kartDersIslenenGrupImzalari: korunanImzalar,
                 kartDersToplamGrupSayisi: kaynak.gruplar.length,
                 kartDersTamamlandi: false,
             } });
             if ((r.matchedCount ?? r.n) !== 1)
                 throw new DersKartiHatasi("Ders kart üretimi başlatılamadı.", 409);
-            guncel.kartDersIslenenGrupImzalari = [];
+            guncel.kartDersIslenenGrupImzalari = korunanImzalar;
             guncel.kartDersTamamlandi = false;
         }
         const islenen = new Set(guncel.kartDersIslenenGrupImzalari || []);
@@ -145,7 +154,9 @@ export const dersGeneliKartlariOlustur = async ({
                 try {
                     const cevap = await x.uret({
                         dersAdi: ders.dersAdi, grup,
-                        oncekiSorular: mevcut,
+                        oncekiSorular: kaynak.konuBaglantili
+                            ? mevcut.filter(k=>grup.konular.some(konu=>konu.konuId===k.konuId)).slice(-30)
+                            : mevcut,
                     });
                     if (!Array.isArray(cevap?.kartlar))
                         throw new DersKartiHatasi(
@@ -156,6 +167,7 @@ export const dersGeneliKartlariOlustur = async ({
                             hamKartlar: cevap.kartlar,
                             kaynaklar: grup.kaynaklar,
                             mevcutKartlar: mevcut,
+                            konular: grup.konular || null,
                         });
                         if (cevap.kartlar.length && !kontrol.kartlar.length &&
                             kontrol.gecersiz > 0 && !kontrol.tekrar)

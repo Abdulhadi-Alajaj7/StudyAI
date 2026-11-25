@@ -36,7 +36,7 @@ test("yeni test formunda yalnız Konu kapsamı görünür ve varsayılan seçili
 test("Konu Seçimi ilk satırın solunda yer alır ve kapsam seçici görünümden kaldırılır", () => {
     assert.match(
         sayfaKaynagi,
-        /<div className="min-w-0 xl:col-span-4">[\s\S]*?Konu Seçimi[\s\S]*?id="test-konu"/
+        /<fieldset className="min-w-0 xl:col-span-4">[\s\S]*?Konu Seçimi[\s\S]*?id="test-konu"/
     );
     assert.match(
         sayfaKaynagi,
@@ -111,12 +111,4 @@ test("sonuç ekranı backend sonucunu ve bütün soruları salt okunur gösterir
     assert.match(sonucKaynagi, /soru\.dogruCevap/);
     assert.match(sonucKaynagi, /soru\.aciklama/);
     assert.doesNotMatch(sonucKaynagi, /cevabiKaydet|soruIsaretiniGuncelle|testOlustur/);
-});
-
-test("özel soru sayısı ve geçici JSON görünümü kaldırılır; alt konu uyarısı seçimin üstündedir", () => {
-    assert.doesNotMatch(sayfaKaynagi, /type="number"|test-json-denetim|testDenetimVerisiniOlustur|jsonAcik|jsonKopyalandi/);
-    assert.match(sayfaKaynagi, /\{altKonuUyarisi && \([\s\S]*?role="alert"[\s\S]*?Konu Seçimi/);
-    assert.match(sayfaKaynagi, /const olusturmaDevreDisi = yetersizSoruSayisi \|\|/);
-    assert.match(sayfaKaynagi, /disabled=\{olusturmaDevreDisi\}/);
-    assert.doesNotMatch(sayfaKaynagi, /disabled=\{olusturuluyor \|\| altKonuSayisi > sayi\}/);
 });

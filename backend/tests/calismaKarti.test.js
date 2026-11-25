@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import mongoose from "mongoose";
 import CalismaKarti from "../models/CalismaKarti.js";
 import {
-    dersKartGruplariniOlustur, dersKartlariniDogrula,
+    dersKartGruplariniOlustur, konuBaglantiliKartGruplariniOlustur, dersKartlariniDogrula,
     kartDersKaynakImzasi,
 } from "../services/dersKartPlanlama.mjs";
 
@@ -90,4 +90,22 @@ test("Yeni kart modelinde konuId zorunlu değildir, kaynak ve öğrenci durumu k
         dersId: new mongoose.Types.ObjectId(),
         soru: "Kaynağı olmayan soru?", cevap: "Yanıt", kaynaklar: [],
     }).validate());
+});
+
+test("konu bağlantılı gruplar gerçek kaynak ve konu kimliklerini korur",()=>{
+    const parcalar=[{materyalId:"m1",islemeId:"v1",parcaIndex:0,icerik:"Örnek veri"},
+        {materyalId:"m1",islemeId:"v1",parcaIndex:1,icerik:"Modelleme"}];
+    const harita={anaKonular:[{konuId:"top-1",baslik:"Ana",altKonular:[{konuId:"sub-1",baslik:"Veri"},{konuId:"sub-2",baslik:"Model"}]}],
+        parcaKonuAtamalari:[{...parcalar[0],konuIds:["sub-1"]},{...parcalar[1],konuIds:["sub-2"]}]};
+    const gruplar=konuBaglantiliKartGruplariniOlustur(parcalar,materyaller,harita);
+    assert.equal(gruplar.length,1);
+    assert.deepEqual(gruplar[0].kaynaklar.map(k=>k.konuIds),[["sub-1"],["sub-2"]]);
+    const sonuc=dersKartlariniDogrula({hamKartlar:[
+        {soru:"Veri?",cevap:"Cevap",konuId:"sub-1",kaynakKodlari:["K1"]},
+        {soru:"Yanlış bağlantı?",cevap:"Cevap",konuId:"sub-2",kaynakKodlari:["K1"]},
+    ],kaynaklar:gruplar[0].kaynaklar,konular:gruplar[0].konular});
+    assert.equal(sonuc.kartlar.length,1);
+    assert.equal(sonuc.kartlar[0].konuId,"sub-1");
+    assert.equal(sonuc.kartlar[0].konuBasligi,"Veri");
+    assert.equal(sonuc.gecersiz,1);
 });
