@@ -182,7 +182,7 @@ const hedefiDogrula = async ({
             kullaniciId,
             durum: "hazir",
         })
-            .select("anaKonular")
+            .select("anaKonular parcaAtamaSurumu parcaKonuAtamalari")
             .lean();
         if (!harita) {
             throw new DersOzetiHatasi(
@@ -197,7 +197,7 @@ const hedefiDogrula = async ({
                 { status: 404, kod: "KONU_BULUNAMADI" }
             );
         }
-        return { materyal: null, konu };
+        return { materyal: null, konu, harita };
     }
 
     return { materyal: null, konu: null };
@@ -347,7 +347,17 @@ const konuParcalariniSec = async ({
     konu,
     materyaller,
     tumParcalar,
+    harita,
 }, deps) => {
+    if (harita?.parcaAtamaSurumu === 1) {
+        const ana = (harita.anaKonular || []).find(a=>a.konuId===konu.konuId);
+        const ids=new Set([konu.konuId,...(ana?.altKonular||[]).map(a=>a.konuId)]);
+        const key=p=>`${kimlikMetni(p.materyalId)}:${kimlikMetni(p.islemeId)}:${p.parcaIndex}`;
+        const bagli=new Set((harita.parcaKonuAtamalari||[]).filter(a=>(a.konuIds||[]).some(id=>ids.has(id))).map(key));
+        const secilen=tumParcalar.filter(p=>bagli.has(key(p)));
+        if (!secilen.length) throw uygunIcerikBulunamadiHatasi("Seçilen konuya bağlı güncel metin parçası bulunamadı. Konu haritasını güncelleyin.");
+        return secilen;
+    }
     let anlamsalSonuclar = [];
     try {
         const sonuc = await deps.semanticArama({
@@ -543,7 +553,7 @@ const kaynaklariHazirla = async ({
     tur,
     hedef,
 }, deps) => {
-    const sinirliMateryalIds = ozetKapsamiMateryalIds(tur, hedef);
+    const sinirliMateryalIds = tur === "konu" && hedef.harita?.parcaAtamaSurumu === 1 ? null : ozetKapsamiMateryalIds(tur, hedef);
     const materyaller = await hazirMateryalleriGetir({
         kullaniciId,
         dersId,
@@ -571,6 +581,7 @@ const kaynaklariHazirla = async ({
             konu: hedef.konu,
             materyaller,
             tumParcalar,
+            harita: hedef.harita,
         }, deps)
         : tumParcalar;
     const secilenParcalar = dengeliOzetParcalariniSec(
@@ -595,6 +606,7 @@ const geminiOzetiniUret = async ({
     materyaller,
     parcalar,
     heartbeat,
+    sonZaman,
 }, deps) => {
     const materyalHaritasi = new Map(
         materyaller.map((materyal) => [kimlikMetni(materyal._id), materyal])
@@ -616,7 +628,7 @@ const geminiOzetiniUret = async ({
         return deps.geminiOzetUret({
             ...ortakGirdi,
             kaynakMetni: batchler[0],
-        });
+        }, { sonZaman });
     }
 
     const araOzetler = [];
@@ -626,7 +638,7 @@ const geminiOzetiniUret = async ({
             ...ortakGirdi,
             kaynakMetni: batch,
             araOzet: true,
-        });
+        }, { sonZaman });
         araOzetler.push(`ARA ÖZET ${index + 1}:\n${JSON.stringify(araSonuc.icerik)}`);
     }
 
@@ -634,7 +646,7 @@ const geminiOzetiniUret = async ({
     return deps.geminiOzetUret({
         ...ortakGirdi,
         kaynakMetni: araOzetler.join("\n\n"),
-    });
+    }, { sonZaman });
 };
 
 export const kayitliDersOzetiniGetir = async ({
@@ -690,6 +702,7 @@ export const dersOzetiOlustur = async ({
     uzunluk,
     yenidenOlustur = false,
 }, bagimliliklar = {}) => {
+    const sonZaman = Date.now()+112_000;
     const deps = bagimliliklariGetir(bagimliliklar);
     const ders = await dersiGetir({ kullaniciId, dersId }, deps.DersModel);
     const hedef = await hedefiDogrula({
@@ -829,7 +842,7 @@ export const dersOzetiOlustur = async ({
             uzunluk,
             materyaller: kaynakVerisi.materyaller,
             parcalar: kaynakVerisi.parcalar,
-            heartbeat,
+            heartbeat, sonZaman,
         }, deps);
 
         await heartbeat();

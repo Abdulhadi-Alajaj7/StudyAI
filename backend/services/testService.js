@@ -479,6 +479,7 @@ const testOlusturTekIslem = async ({
     soruSayisi = 10,
     zorluk = "karisik",
 }, bagimliliklar = {}) => {
+    const sonZaman = Date.now() + 112_000;
     const deps = bagimliliklariGetir(bagimliliklar);
     const tanilama = {
         korelasyonId: deps.korelasyonIdOlustur(),
@@ -547,7 +548,7 @@ const testOlusturTekIslem = async ({
             izinliKonuIds: kaynakVerisi.izinliKonuIds,
             konuEslesmeleriZorunlu: kaynakVerisi.konuEslesmeleriZorunlu,
         }, {
-            uretimIzleyicisi,
+            uretimIzleyicisi, sonZaman,
         });
 
         tanilama.apiCagriSayisi = Number.isInteger(geminiSonucu?.apiCagriSayisi)

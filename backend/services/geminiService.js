@@ -3,6 +3,7 @@ import { geminiHazirlamaHatasiniSiniflandir, geminiRetryBeklemesiniGetir, gemini
 import { haritaIstekAyarlari, haritaSinirlayiciOlustur } from "../utils/geminiHaritaSiniri.js";
 import { sureOlc } from "../utils/islemSuresi.js";
 import { GoogleGenAI } from "@google/genai";
+import { aiIstekYonetimiOlustur, aiModelSirasiGetir, ortakAiIstekYonetimi, groqIstemcisiOlustur } from "./aiIstekYonetimiService.js";
 import {
     TestDogrulamaHatasi, kaynakKonuKimlikleriniGetir, testDagilimKurallariniOlustur,
     testSorulariniDogrula,
@@ -178,7 +179,7 @@ const zamanAsimliCalistir = async (islem, timeoutMs) => {
     }
 };
 
-const yapilandirilmisGeminiCagrisi = async ({
+const tekGeminiCagrisi = async ({
     istemci,
     modelAdi,
     prompt,
@@ -196,6 +197,7 @@ const yapilandirilmisGeminiCagrisi = async ({
     responseJsonSchema = null,
     sonSureMs = null,
     istekYonetimi = ortakGeminiIstekYonetimi,
+    hariciSinyal = null, sdkDenemeNo = null, veriDogrula = null,
 }) => {
     maxDeneme = sinirliGeminiDenemesi(maxDeneme);
     const baslangic = performance.now();
@@ -223,11 +225,11 @@ const yapilandirilmisGeminiCagrisi = async ({
             const yeriBirak = istekYonetimi.yerAyir(etkinModel);
             let response;
             try {
-                response = await zamanAsimliCalistir((abortSignal) => {
+                const cagir = (abortSignal) => {
                     if (apiCagriButcesi) apiCagriButcesi.kullanilan += 1;
                     gercekDenemeSayisi += 1;
                     try {
-                        uretimIzleyicisi?.sdkCagrisiBasladi?.({ ...sdkCagriBaglami, sdkDenemesi: deneme, model: etkinModel });
+                        uretimIzleyicisi?.sdkCagrisiBasladi?.({ ...sdkCagriBaglami, sdkDenemesi: sdkDenemeNo ?? deneme, model: etkinModel });
                     } catch { /* İzleme, SDK çağrısını engellemez. */ }
                     return istemci.models.generateContent({
                         model: etkinModel, contents: prompt,
@@ -238,7 +240,8 @@ const yapilandirilmisGeminiCagrisi = async ({
                             abortSignal,
                         },
                     });
-                }, etkinTimeoutMs);
+                };
+                response = hariciSinyal ? await cagir(hariciSinyal) : await zamanAsimliCalistir(cagir, etkinTimeoutMs);
             } finally {
                 yeriBirak();
             }
@@ -253,6 +256,10 @@ const yapilandirilmisGeminiCagrisi = async ({
                 // Terminal izleme, Gemini yanıtının işlenmesini engellememelidir.
             }
             for (const alan of Object.keys(toplamToken)) toplamToken[alan] += tokenKullanimi[alan] || 0;
+            if (response?.promptFeedback?.blockReason ||
+                ["SAFETY","RECITATION","BLOCKLIST","PROHIBITED_CONTENT","SPII","IMAGE_SAFETY"].includes(response?.candidates?.[0]?.finishReason)) {
+                throw new GeminiSohbetHatasi("İçerik sağlayıcı tarafından engellendi.", { status: 403, kod: "AI_GUVENLIK_ENGELI" });
+            }
             const yanitMetni = String(response?.text || "").trim();
             const sdkTanilamasi = {
                 geminiYanitiBos: !yanitMetni,
@@ -286,6 +293,7 @@ const yapilandirilmisGeminiCagrisi = async ({
                 };
                 throw hata;
             }
+            if (veriDogrula) veriDogrula(veri);
             return {
                 veri,
                 model: etkinModel,
@@ -333,11 +341,65 @@ const yapilandirilmisGeminiCagrisi = async ({
     throw sonHata;
 };
 
+// Bütün metin üretimi aynı yöneticiye gider. Alttaki SDK işlevi yalnız bir deneme yapar.
+export const yapilandirilmisGeminiCagrisi = async (ayar) => {
+    const baslangic = performance.now();
+    const sonZaman = Math.min(ayar.sonZaman ?? Date.now()+120_000,
+        ayar.sonSureMs == null ? Date.now()+120_000 : Date.now()+Math.max(0,ayar.sonSureMs-baslangic));
+    const ozelIstemci = Boolean(ayar.istemci);
+    const yonetim = ayar.aiYonetimi || (ozelIstemci
+        ? aiIstekYonetimiOlustur({ bekle: ayar.bekle, rastgele: ayar.rastgele })
+        : ortakAiIstekYonetimi);
+    const adaylar = aiModelSirasiGetir(ayar.modelAdi, ozelIstemci ? {} : process.env,
+        ayar.yedekModelAdi).filter(a => !ozelIstemci || a.saglayici === "gemini");
+    const butce = ayar.apiCagriButcesi || { kullanilan: 0, maksimum: 6 };
+    const toplam = { girdi: 0, cikti: 0, toplam: 0 };
+    const tokenEkle = (k) => { for (const alan of Object.keys(toplam)) toplam[alan] += Number(k?.[alan]) || 0; };
+    let sonModel = ayar.modelAdi;
+    let gercekDeneme = 0;
+    try {
+        const r = await yonetim.calistir({
+            adaylar, tahminiGirdi: Math.ceil((ayar.prompt.length + ayar.systemInstruction.length)/3),
+            maxOutputTokens: ayar.maxOutputTokens || 0,
+            sonZaman, tekDenemeMs: Math.min(55_000, ayar.timeoutMs || 55_000),
+            maxDeneme: 2, oncelik: ayar.oncelik || "normal",
+            istek: async (aday, sure, signal) => {
+                sonModel = aday.saglayici === "groq" ? "groq/"+aday.model : aday.model;
+                const istemci = aday.saglayici === "groq" ? groqIstemcisiOlustur() : ayar.istemci;
+                try {
+                    const sonuc = await tekGeminiCagrisi({
+                        ...ayar, istemci, modelAdi: aday.model, maxDeneme: 1,
+                        retrySadece503: false, yedekModelAdi: null, sonSureMs: null,
+                        timeoutMs: sure, hariciSinyal: signal, apiCagriButcesi: butce,
+                        sdkDenemeNo: ++gercekDeneme,
+                        istekYonetimi: ayar.istekYonetimi && ayar.istekYonetimi !== ortakGeminiIstekYonetimi
+                            ? ayar.istekYonetimi : { yerAyir: () => () => {} },
+                    });
+                    tokenEkle(sonuc.tokenKullanimi);
+                    return sonuc;
+                } catch(hata) {
+                    tokenEkle(hata.tanilama?.tokenKullanimi);
+                    throw hata;
+                }
+            },
+        });
+        return { ...r.sonuc, model: sonModel, tokenKullanimi: toplam,
+            tanilama: { ...r.sonuc.tanilama, model: sonModel,
+                gercekDenemeSayisi: butce.kullanilan, toplamIslemSureMs: Math.round(performance.now()-baslangic) } };
+    } catch(hata) {
+        const sinif = geminiHatasiniSiniflandir(hata);
+        sinif.tanilama = { ...sinif.tanilama, model: sonModel, gercekDenemeSayisi: butce.kullanilan,
+            apiCagriSayisi: butce.kullanilan, toplamIslemSureMs: Math.round(performance.now()-baslangic) };
+        throw sinif;
+    }
+};
+
 export const geminiIleSohbetYanitiUret = async ({
     soru,
     konusmaBaglami = [],
     kaynaklar = [],
     yalnizcaMateryal = false,
+    sonZaman = null,
     modelAdi = process.env.GEMINI_SOHBET_MODELI || VARSAYILAN_GEMINI_MODELI,
 }, bagimliliklar = {}) => {
     const istemci = bagimliliklar.istemci || null;
@@ -384,6 +446,7 @@ ${soru}
         timeoutMs,
         maxDeneme,
         maxOutputTokens: 2_000,
+        sonZaman,
         bekle,
     });
     if (!veri || typeof veri.yanit !== "string" || !veri.yanit.trim()) {
@@ -560,13 +623,14 @@ ${ayrintiTalebi}
 ${kaynakMetni}
 </KAYNAK_ICERIGI>`;
 
-    const { veri, tokenKullanimi } = await yapilandirilmisGeminiCagrisi({
+    const { veri, tokenKullanimi, model } = await yapilandirilmisGeminiCagrisi({
         istemci,
         istekYonetimi: bagimliliklar.istekYonetimi || ortakGeminiIstekYonetimi,
         rastgele: bagimliliklar.rastgele || Math.random,
         modelAdi,
         prompt,
         systemInstruction: sistem,
+        sonZaman: bagimliliklar.sonZaman ?? null,
         timeoutMs: bagimliliklar.timeoutMs || 45_000,
         maxDeneme: sinirliGeminiDenemesi(bagimliliklar.maxDeneme ?? process.env.GEMINI_OZET_MAKS_DENEME),
         maxOutputTokens: araOzet ? Math.min(2_000, ayar.maxOutputTokens) : ayar.maxOutputTokens,
@@ -576,7 +640,7 @@ ${kaynakMetni}
     return {
         icerik: ozetIceriginiDogrula(veri, araOzet ? 10 : ayar.diziSiniri),
         tokenKullanimi,
-        model: modelAdi,
+        model,
     };
 };
 
@@ -617,14 +681,6 @@ const TEST_JSON_SEMASI = {
         },
     },
     required: ["sorular"],
-};
-
-const testYedekModeliniGetir = (model) => {
-    const ayar = process.env.GEMINI_TEST_YEDEK_MODELI;
-    const varsayilan = model === "gemini-3.1-flash-lite" ? "gemini-3.5-flash-lite"
-        : model === "gemini-3.5-flash-lite" ? "gemini-3.1-flash-lite" : "";
-    const yedek = (ayar ?? varsayilan).trim();
-    return yedek && yedek !== model ? yedek : null;
 };
 
 const testKaynakPaketiniSec = (kaynaklar, konuIds, eslesmeZorunlu) => {
@@ -683,13 +739,14 @@ export const geminiIleTestSorulariUret = async ({
         "</KAYNAK_ICERIGI>",
     ].join("\n\n");
     const zamanButcesi = Number.isFinite(bagimliliklar.timeoutMs) ? Math.max(1, bagimliliklar.timeoutMs) : 120_000;
-    const apiCagriButcesi = { kullanilan: 0, maksimum: 2 };
-    const yedekModelAdi = testYedekModeliniGetir(modelAdi);
+    const apiCagriButcesi = { kullanilan: 0, maksimum: 6 };
+    const yedekModelAdi = process.env.AI_GEMINI_YEDEK_MODELI?.trim() || null;
     const sonuc = await yapilandirilmisGeminiCagrisi({
         istemci: bagimliliklar.istemci || null, modelAdi, prompt, systemInstruction: TEST_SISTEM_TALIMATI,
         istekYonetimi: bagimliliklar.istekYonetimi || ortakGeminiIstekYonetimi,
         timeoutMs: Math.min(yedekModelAdi ? 55_000 : 90_000, zamanButcesi),
-        maxDeneme: 2, retrySadece503: true, sonSureMs: baslangic + zamanButcesi,
+        maxDeneme: 2, sonSureMs: baslangic + zamanButcesi,
+        sonZaman: bagimliliklar.sonZaman ?? null,
         yedekModelAdi,
         responseJsonSchema: process.env.GEMINI_TEST_JSON_SEMA === "false" ? null : TEST_JSON_SEMASI,
         maxOutputTokens: Math.min(28_000, 2_000 + soruSayisi * 1_200),
@@ -710,15 +767,15 @@ export const geminiIleTestSorulariUret = async ({
 
 export const geminiBaglantisiniDogrula = async (modelAdi = VARSAYILAN_GEMINI_MODELI) => {
     try {
-        const ai = getGeminiClient();
-        const response = await ai.models.generateContent({
+        const ai = getGeminiClient({ timeout: 10_000 });
+        const response = await zamanAsimliCalistir(abortSignal => ai.models.generateContent({
             model: modelAdi,
             contents: "Ping test. Sadece 'PONG' yaz.",
             config: {
                 maxOutputTokens: 10,
-                temperature: 0.1
+                temperature: 0.1, abortSignal
             }
-        });
+        }), 10_000);
 
         const text = response?.text?.trim() || "";
         return {
@@ -761,69 +818,34 @@ const haritaSiniri = haritaSinirlayiciOlustur();
 export const ortakHaritaSinirlayicisi = haritaSiniri;
 export async function callGeminiStructuredJson(ai, modelAdi, prompt, systemInstruction, bagimliliklar = {}) {
     const ayarlar = bagimliliklar.ayarlar || haritaIstekAyarlari();
-    const beklet = bagimliliklar.beklet || (ms => new Promise(r => setTimeout(r, ms)));
-    const simdi = bagimliliklar.simdi || Date.now;
-    const sinir = bagimliliklar.sinir || haritaSiniri;
     const logger = bagimliliklar.logger || console;
     const asama = bagimliliklar.asama || "konu_haritasi";
-    const tahminiToken = Math.ceil((prompt.length + systemInstruction.length) / 3);
-    const temelDeneme = Math.max(1, ayarlar.maksDeneme);
-    // 503 yoğunluk hatasında önceki iki çok hızlı deneme yetersiz kalıyordu.
-    // Sadece 503 için en az üç deneme yap; 429 veya kalıcı hataların kotasını artırma.
-    const azami503Deneme = Math.max(3, temelDeneme);
-    const yedekModel = bagimliliklar.yedekModel !== undefined
-        ? bagimliliklar.yedekModel
-        : process.env.GEMINI_KONU_HARITASI_YEDEK_MODELI;
-    let sonHata;
-    let istemci = ai;
-    for (let deneme = 1; deneme <= azami503Deneme; deneme++) {
-        const baslangic = performance.now();
-        let yanit;
-        try {
-            istemci ||= getGeminiClient({ timeout: ayarlar.timeoutMs });
-            sinir.kontrolEt(modelAdi, tahminiToken, ayarlar, simdi());
-            yanit = await sureOlc("gemini_konu_haritasi_istegi", () => zamanAsimliCalistir(abortSignal => istemci.models.generateContent({
-                model: modelAdi, contents: prompt,
-                config: { systemInstruction, temperature: 0.2, responseMimeType: "application/json", abortSignal,
-                    ...(ayarlar.maxOutputTokens ? { maxOutputTokens: ayarlar.maxOutputTokens } : {}),
-                },
-            }), ayarlar.timeoutMs));
-            const finishReason = yanit?.candidates?.[0]?.finishReason;
-            if (finishReason === "MAX_TOKENS") throw Object.assign(new Error("Çıktı sınırı"), { kod: "GEMINI_CIKTI_SINIRI", status: 502 });
-            if (!yanit?.text?.trim()) throw Object.assign(new Error("Boş yanıt"), { kod: "GEMINI_BOS_YANIT", status: 502 });
-            let parsed;
-            try { parsed = jsonMetniniAyikla(yanit.text); }
-            catch { throw Object.assign(new Error("Geçersiz JSON"), { kod: "GEMINI_GECERSIZ_JSON", status: 502 }); }
-            const konular = semaDogrulaVeNormalizeEt(parsed, { kaynakKodlariniKoru: bagimliliklar.kaynakKodlariniKoru === true });
-            if (!konular.length) throw Object.assign(new Error("Geçersiz şema"), { kod: "GEMINI_GECERSIZ_SEMA", status: 502 });
-            // Şema/JSON olarak dışarı çıkmayan yalnızca servis içi tanılama.
-            Object.defineProperty(konular, "kullanilanModel", { value: modelAdi, enumerable: false });
-            geminiTanilamasiniLogla({ asama, model: modelAdi, deneme, sureMs: performance.now() - baslangic, yanit, logger });
-            return konular;
-        } catch (hata) {
-            sonHata = geminiHazirlamaHatasiniSiniflandir(hata, simdi());
-            sinir.hataKaydet(modelAdi, sonHata, simdi());
-            geminiTanilamasiniLogla({ asama, model: modelAdi, deneme, sureMs: performance.now() - baslangic, hata: sonHata, yanit, logger });
-            const bekleme = geminiRetryBeklemesiniGetir(sonHata, deneme, ayarlar.maksBeklemeMs);
-            const izinliDeneme = sonHata.status === 503 ? azami503Deneme : temelDeneme;
-            if (deneme >= izinliDeneme || bekleme == null) break;
-            await beklet(bekleme);
-        }
-    }
-    // Kullanıcı ayrı bir model açıkça yapılandırdıysa, yalnızca tekrarlayan
-    // 503 için bir kez o modelde dene. 429/kota, 400, 401, 403 ve 404 için
-    // otomatik model değiştirilmez.
-    if (sonHata?.status === 503 && typeof yedekModel === "string" &&
-        /^[a-z0-9][a-z0-9._/-]{2,99}$/i.test(yedekModel.trim()) &&
-        yedekModel.trim() !== modelAdi) {
-        logger.info?.("[GeminiHazirlama] Yedek modele geçiliyor", {
-            asama, model: modelAdi, yedekModel: yedekModel.trim(), neden: "GEMINI_503",
+    const baslangic = performance.now();
+    try {
+        const sonuc = await yapilandirilmisGeminiCagrisi({
+            istemci: ai, modelAdi, prompt, systemInstruction,
+            timeoutMs: ayarlar.timeoutMs,
+            maxOutputTokens: ayarlar.maxOutputTokens || 16_000,
+            sonZaman: bagimliliklar.sonZaman ?? null,
+            bekle: bagimliliklar.beklet || (ms => new Promise(r=>setTimeout(r,ms))),
+            yedekModelAdi: bagimliliklar.yedekModel,
+            veriDogrula: veri => {
+                if (!semaDogrulaVeNormalizeEt(veri, {kaynakKodlariniKoru:bagimliliklar.kaynakKodlariniKoru===true}).length)
+                    throw Object.assign(new Error("Geçersiz şema"),{kod:"GEMINI_GECERSIZ_SEMA",status:502});
+            },
         });
-        return callGeminiStructuredJson(istemci, yedekModel.trim(), prompt, systemInstruction, {
-            ...bagimliliklar, yedekModel: null, asama,
-        });
+        const konular = semaDogrulaVeNormalizeEt(sonuc.veri,{kaynakKodlariniKoru:bagimliliklar.kaynakKodlariniKoru===true});
+        Object.defineProperty(konular,"kullanilanModel",{value:sonuc.model,enumerable:false});
+        geminiTanilamasiniLogla({asama,model:sonuc.model,deneme:sonuc.tanilama.gercekDenemeSayisi,
+            sureMs:performance.now()-baslangic,yanit:{usageMetadata:{promptTokenCount:sonuc.tokenKullanimi.girdi,
+                candidatesTokenCount:sonuc.tokenKullanimi.cikti,totalTokenCount:sonuc.tokenKullanimi.toplam}},logger});
+        return konular;
+    } catch(ham) {
+        const hata = geminiHazirlamaHatasiniSiniflandir(ham);
+        geminiTanilamasiniLogla({asama,model:ham.tanilama?.model||modelAdi,deneme:ham.tanilama?.gercekDenemeSayisi||0,
+            sureMs:performance.now()-baslangic,hata,logger});
+        throw hata;
     }
-    throw sonHata;
 }
 
 /**
@@ -1130,9 +1152,10 @@ export const geminiIleDersKartlariUret = async ({
         "BU METİN BÖLÜMÜNÜN TAMAMI — her [K] kodunun metnini ayrı ayrı incele:",
         grup.metin,
     ].join("\n\n");
-    const { veri, tokenKullanimi } = await yapilandirilmisGeminiCagrisi({
+    const { veri, tokenKullanimi, model } = await yapilandirilmisGeminiCagrisi({
         istemci: bagimliliklar.istemci || null,
         modelAdi, prompt, systemInstruction,
+        oncelik: "arka_plan",
         timeoutMs: bagimliliklar.timeoutMs ?? 45_000,
         maxDeneme: 1,
         maxOutputTokens: 12288,
@@ -1144,5 +1167,5 @@ export const geminiIleDersKartlariUret = async ({
             status: 502, kod: "GEMINI_GECERSIZ_YANIT",
         });
     }
-    return { kartlar: veri.kartlar, model: modelAdi, tokenKullanimi };
+    return { kartlar: veri.kartlar, model, tokenKullanimi };
 };

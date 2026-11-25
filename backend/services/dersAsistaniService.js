@@ -337,6 +337,7 @@ export const sohbetMesajinaYanitOlustur = async ({
     kullaniciMesaji: verilenKullaniciMesaji = null,
     kilitZatenAlindi = false,
 }, bagimliliklar = {}) => {
+    const sonZaman = Date.now()+112_000;
     const deps = depsGetir(bagimliliklar);
     const sohbet = await deps.SohbetModel.findOne({ _id: sohbetId, kullaniciId, dersId }).lean();
     if (!sohbet) throw sohbetBulunamadi();
@@ -484,7 +485,7 @@ export const sohbetMesajinaYanitOlustur = async ({
                 soru: icerik,
                 konusmaBaglami: baglam,
                 kaynaklar: kaynakAdaylari,
-                yalnizcaMateryal,
+                yalnizcaMateryal, sonZaman,
             });
         }
 

@@ -58,17 +58,17 @@ export const aiIstekYonetimiOlustur = ({
         for(let i=0;i<uygunlar.length;i++){
             const aday=uygunlar[i];
             for(let n=1;n<=Math.min(2,maxDeneme);n++){
-                if(bitis-simdi()<1500||!kapasite(aday,token(aday)))break;
+                if(bitis-simdi()<=0||!kapasite(aday,token(aday)))break;
                 const limit=oncelik==="arka_plan"?Math.max(1,eszamanli-1):eszamanli;
                 // Bekleme üst sınırı; uzun yerel kuyruklar alternatiflerin bütçesini yemez.
                 const kuyrukBitis=Math.min(bitis-1500,simdi()+3000);
                 while(aktif>=limit&&simdi()<kuyrukBitis)await bekle(100);
-                if(aktif>=limit||bitis-simdi()<1500||!kapasite(aday,token(aday)))break;
+                if(aktif>=limit||bitis-simdi()<=0||!kapasite(aday,token(aday)))break;
                 const d=durum(aday);
                 const digerleri=uygunlar.slice(i+1).filter(a=>kapasite(a,token(a))).length;
                 const rezerve=digerleri*23000;
                 const sure=Math.min(tekDenemeMs,bitis-simdi()-Math.min(rezerve,Math.max(0,bitis-simdi()-5000)));
-                if(sure<1500)break;
+                if(sure<=0)break;
                 d.gunluk++;d.dakika.push({zaman:simdi(),token:token(aday)});aktif++;denemeSayisi++;
                 let timer,gecikme=null;
                 const controller=new AbortController();
@@ -95,6 +95,7 @@ export const aiIstekYonetimiOlustur = ({
                     if(!retry)throw ham;
                     if(status===503){d.ardArda++;if(d.ardArda>=2)d.engel=simdi()+Math.max(60000,sinif.retryAfterMs??0);}
                     gecikme=Math.max(1200+Math.floor(rastgele()*300),sinif.retryAfterMs??0);
+                    if(sinif.retryAfterMs>5000)d.engel=Math.max(d.engel,simdi()+sinif.retryAfterMs);
                     if(n>=Math.min(2,maxDeneme)||gecikme>5000||bitis-simdi()-gecikme-rezerve<8000||d.engel>simdi())break;
                 }finally{clearTimeout(timer);aktif--;}
                 if(gecikme!=null)await bekle(gecikme);
