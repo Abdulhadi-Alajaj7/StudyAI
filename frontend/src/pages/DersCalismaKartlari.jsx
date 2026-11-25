@@ -27,6 +27,7 @@ function DersCalismaKartlari() {
   const uretimControllerRef = useRef(null);
   const [hata, setHata] = useState("");
   const [filtre, setFiltre] = useState("tum");
+  const [konuFiltre,setKonuFiltre]=useState("tum");
   const [index, setIndex] = useState(0);
   const [cevapAcik, setCevapAcik] = useState(false);
   const [kaydediliyor, setKaydediliyor] = useState(false);
@@ -46,6 +47,7 @@ function DersCalismaKartlari() {
     setIndex(0);
     setCevapAcik(false);
     setFiltre("tum");
+    setKonuFiltre("tum");
     api.listele(dersId, controller.signal)
       .then(r => { setKartlar(r.data.kartlar || []); setUretim(r.data); })
       .catch(e => { if (!controller.signal.aborted) setHata(kullaniciHataMesaji(e, "Kartlar yüklenemedi.")); })
@@ -71,7 +73,7 @@ function DersCalismaKartlari() {
           setUretimMesaji("");
           setHata("");
         } else {
-          setKartlar([]);
+          setKartlar(r.data.kartlar || []);
         }
       } catch (e) {
         // Geçici bağlantı sorunu arka plandaki üretimi durdurmaz.
@@ -94,18 +96,20 @@ function DersCalismaKartlari() {
       ? "Kartlar henüz tamamlanamadı. Kayıtlı ilerleme korunuyor; daha sonra tekrar başlatabilirsiniz."
       : "Dersin önemli bilgileri çalışma kartlarına dönüştürülecek.";
 
+  const konuSecenekleri=useMemo(()=>[...new Map(kartlar.map(k=>[k.konuId||"eski",k.konuBasligi||"Konu bağlantısı olmayan kartlar"])).entries()],[kartlar]);
+  const konuKartlari=useMemo(()=>kartlar.filter(k=>konuFiltre==="tum"||(k.konuId||"eski")===konuFiltre),[kartlar,konuFiltre]);
   const sayilar = useMemo(() => ({
-    tum: kartlar.length,
-    gorulmeyen: kartlar.filter(k => !k.goruldu).length,
-    gorulen: kartlar.filter(k => k.goruldu).length,
-    yildizli: kartlar.filter(k => k.yildizli).length,
-  }), [kartlar]);
-  const filtrelenmis = useMemo(() => kartlar.filter(k =>
+    tum: konuKartlari.length,
+    gorulmeyen: konuKartlari.filter(k => !k.goruldu).length,
+    gorulen: konuKartlari.filter(k => k.goruldu).length,
+    yildizli: konuKartlari.filter(k => k.yildizli).length,
+  }), [konuKartlari]);
+  const filtrelenmis = useMemo(() => konuKartlari.filter(k =>
     filtre === "tum" ||
     (filtre === "gorulmeyen" && !k.goruldu) ||
     (filtre === "gorulen" && k.goruldu) ||
     (filtre === "yildizli" && k.yildizli)
-  ), [kartlar, filtre]);
+  ), [konuKartlari, filtre]);
   const aktifIndex = Math.min(index, Math.max(0, filtrelenmis.length - 1));
   const aktif = filtrelenmis[aktifIndex];
 
@@ -132,7 +136,7 @@ function DersCalismaKartlari() {
       if (controller.signal.aborted) return;
       setUretim(eski => ({ ...eski, ...r.data }));
       if (r.data.uretimSuruyor) {
-        setKartlar([]);
+        // Önceden kaydedilmiş kartlar üretim sırasında kullanılabilir.
       } else {
         const mevcut = await api.listele(dersId, controller.signal);
         if (controller.signal.aborted) return;
@@ -213,6 +217,22 @@ function DersCalismaKartlari() {
         <p className="mt-2 text-3xl font-bold">{sayilar[id]}</p>
       </button>)}
     </div>
+    {!yukleniyor && kartlar.length>0 && (
+      <div className="flex flex-wrap items-center gap-3">
+        {konuSecenekleri.some(([id])=>id!=="eski") && <label className="flex flex-1 flex-wrap items-center gap-2 text-sm">
+          Konu Seçimi
+          <select value={konuFiltre} onChange={e=>{setKonuFiltre(e.target.value);setIndex(0);setCevapAcik(false);setFiltre("tum");}}
+            className={`min-w-0 max-w-full rounded-xl border px-3 py-2 ${panel} ${metin}`}>
+            <option value="tum">Tüm Konular</option>
+            {konuSecenekleri.map(([id,baslik])=><option key={id} value={id}>{baslik}</option>)}
+          </select>
+        </label>}
+        {!uretimAktif && !uretim.dersKartTamamlandi && !uretimHatasi &&
+          <button type="button" onClick={olustur} className="rounded-xl bg-[#705CF5] px-4 py-2 text-sm font-semibold text-white">
+            Kartları Oluştur
+          </button>}
+      </div>
+    )}
     {!yukleniyor && (uretimAktif || uretimHatasi) && (
       <div role="status" aria-live="polite"
         className={`flex flex-wrap items-center justify-between gap-3 rounded-xl border border-violet-400/30 bg-violet-500/10 px-4 py-3 text-sm ${metin}`}>
@@ -247,11 +267,11 @@ function DersCalismaKartlari() {
       <div className={`rounded-2xl border p-14 text-center ${panel}`}>
         <StarIcon className="mx-auto h-10 w-10 text-violet-400" />
         <p className="mt-4 font-semibold">Bu grupta henüz kart bulunmuyor.</p>
-        <button type="button" onClick={() => filtreDegistir("tum")} className="mt-4 text-sm font-semibold text-violet-400 hover:underline">Tüm kartlara dön</button>
+        <button type="button" onClick={() => {setKonuFiltre("tum");filtreDegistir("tum");}} className="mt-4 text-sm font-semibold text-violet-400 hover:underline">Tüm kartlara dön</button>
       </div> :
       <div className="mx-auto max-w-5xl space-y-4">
         <div className={`flex flex-wrap items-center justify-between gap-3 text-sm ${ikincil}`}>
-          <span className="min-w-0 break-words">Ders Çalışma Kartı {aktif.uretimYontemi === "kaynak" && <span className="ml-2 rounded-full border border-amber-400/40 px-2 py-0.5 text-[11px] text-amber-400">Kaynak metni</span>}
+          <span className="min-w-0 break-words">{aktif.konuBasligi || "Ders Çalışma Kartı"} {aktif.uretimYontemi === "kaynak" && <span className="ml-2 rounded-full border border-amber-400/40 px-2 py-0.5 text-[11px] text-amber-400">Kaynak metni</span>}
             {aktif.uretimYontemi === "genel" && <span className="ml-2 rounded-full border border-indigo-400/40 px-2 py-0.5 text-[11px] text-indigo-400">Genel bilgi</span>}</span>
           <span className="shrink-0">Kart {aktifIndex + 1} / {filtrelenmis.length}</span>
         </div>

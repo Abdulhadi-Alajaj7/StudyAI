@@ -73,11 +73,40 @@ export const dersKartGruplariniOlustur = (parcalar, materyaller, {
     return gruplar;
 };
 
+// Yeni haritalarda metin bir kez gönderilir; konu ve kaynak kimlikleri birlikte taşınır.
+export const konuBaglantiliKartGruplariniOlustur = (parcalar, materyaller, harita, secenekler) => {
+    const konular = new Map((harita.anaKonular||[]).flatMap(ana=>[
+        [ana.konuId,{konuId:ana.konuId,baslik:ana.baslik}],
+        ...(ana.altKonular||[]).map(alt=>[alt.konuId,{konuId:alt.konuId,baslik:alt.baslik,anaKonuId:ana.konuId}]),
+    ]));
+    const key=(p)=>`${id(p.materyalId)}:${id(p.islemeId)}:${p.parcaIndex}`;
+    const atamalar=new Map((harita.parcaKonuAtamalari||[]).map(a=>[key(a),
+        [...new Set((a.konuIds||[]).filter(k=>konular.has(k)))].sort()]));
+    const aktifSurumler=new Map(materyaller.map(m=>[id(m._id),id(m.aktifIslemeId)]));
+    const bagli=parcalar.filter(p=>aktifSurumler.get(id(p.materyalId))===id(p.islemeId));
+    if(bagli.some(p=>!atamalar.get(key(p))?.length))
+        throw Object.assign(new Error("Konu haritasında güncel metin bağlantısı eksik."),{status:422,kod:"KART_KONU_KAYNAGI_EKSIK"});
+    return dersKartGruplariniOlustur(bagli,materyaller,secenekler).map(grup=>{
+        const kaynaklar=grup.kaynaklar.map((k,i)=>{
+            const konuIds=atamalar.get(key({...k,islemeId:aktifSurumler.get(id(k.materyalId))}));
+            return {...k,kod:"K"+(i+1),konuIds};
+        });
+        const secilenKonular=[...new Set(kaynaklar.flatMap(k=>k.konuIds))].map(k=>konular.get(k));
+        const metin=kaynaklar.map(k=>`[${k.kod}] DOSYA: ${k.dosyaAdi} | BÖLÜM: ${k.parcaIndex} | KONULAR: ${k.konuIds.join(", ")}\n${k.icerik}`).join("\n\n");
+        return {...grup,kaynaklar,konular:secilenKonular,metin,
+            imza:hash("konu-v2:"+JSON.stringify(secilenKonular)+metin)};
+    });
+};
+export const konuKartSurumuGerekliMi=(ders,harita)=>harita?.parcaAtamaSurumu===1&&
+    !String(ders?.kartDersSurumImzasi||"").startsWith("konu-v2:");
+
 export const dersKartlariniDogrula = ({
-    hamKartlar, kaynaklar, mevcutKartlar = [],
+    hamKartlar, kaynaklar, mevcutKartlar = [], konular = null,
 }) => {
     const kaynakMap = new Map(kaynaklar.map((k) => [id(k.kod), k]));
-    const gorulen = new Set(mevcutKartlar.map((k) => sade(k.soru)));
+    const konuMap = new Map((konular||[]).map(k=>[k.konuId,k]));
+    const kartAnahtari=(k)=>konular?`${id(k.konuId)}:${sade(k.soru)}`:sade(k.soru);
+    const gorulen = new Set(mevcutKartlar.map(kartAnahtari));
     const kartlar = [];
     let gecersiz = 0, tekrar = 0;
     for (const kart of Array.isArray(hamKartlar) ? hamKartlar : []) {
@@ -89,11 +118,16 @@ export const dersKartlariniDogrula = ({
             kodlar.some((kod) => !kaynakMap.has(kod))) {
             gecersiz++; continue;
         }
-        const anahtar = sade(soru);
+        const konu=konular?konuMap.get(kart.konuId):null;
+        if(konular&&(!konu||!kodlar.every(kod=>(kaynakMap.get(kod)?.konuIds||[]).includes(konu.konuId)))) {
+            gecersiz++;continue;
+        }
+        const anahtar = kartAnahtari({soru,konuId:konu?.konuId});
         if (gorulen.has(anahtar)) { tekrar++; continue; }
         gorulen.add(anahtar);
         kartlar.push({
             soru, cevap, uretimYontemi: "gemini",
+            ...(konu?{konuId:konu.konuId,konuBasligi:konu.baslik}:{}),
             kaynaklar: kodlar.map((kod) => {
                 const k = kaynakMap.get(kod);
                 return { materyalId: k.materyalId, dosyaAdi: k.dosyaAdi,

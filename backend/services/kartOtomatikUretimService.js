@@ -5,6 +5,8 @@
  * bekleyen işler sürdürülür. Kartlar tamamlanana kadar öğrenciye sunulmaz.
  */
 import Ders from "../models/Ders.js";
+import KonuHaritasi from "../models/KonuHaritasi.js";
+import { konuKartSurumuGerekliMi } from "./dersKartPlanlama.mjs";
 import { dersGeneliKartlariOlustur } from "./dersKartService.js";
 
 const calisanlar = new Set();
@@ -39,13 +41,18 @@ export const kartOtomatikUretiminiBaslat = async ({
     if (!ders) throw new KartOtomatikHatasi("Ders bulunamadı.", 404, "DERS_BULUNAMADI");
     if (!ders.materyallerOnaylandi) throw new KartOtomatikHatasi(
         "Önce ders materyallerini onaylayın.");
-    if (ders.kartDersTamamlandi) return { tamamlandi: true, uretimSuruyor: false };
+    const HaritaModel=d.KonuHaritasiModel || (d.DersModel?null:KonuHaritasi);
+    const harita=ders.kartDersTamamlandi&&!String(ders.kartDersSurumImzasi||"").startsWith("konu-v2:")
+        ? await HaritaModel?.findOne({kullaniciId,dersId,durum:"hazir"}).select("parcaAtamaSurumu").lean():null;
+    const yeniKonuKartlariGerekli=konuKartSurumuGerekliMi(ders,harita);
+    if (ders.kartDersTamamlandi&&!yeniKonuKartlariGerekli) return { tamamlandi: true, uretimSuruyor: false };
     if (!ders.kartDersOtomatikAktif) {
         await DersModel.updateOne({
             _id: dersId, kullaniciId, kartDersOtomatikAktif: { $ne: true },
-            temizleniyor: { $ne: true }, kartDersTamamlandi: { $ne: true },
+            temizleniyor: { $ne: true }, ...(yeniKonuKartlariGerekli?{kartDersSurumImzasi:ders.kartDersSurumImzasi}:{kartDersTamamlandi:{$ne:true}}),
         }, { $set: {
             kartDersOtomatikAktif: true,
+            ...(yeniKonuKartlariGerekli?{kartDersTamamlandi:false}:{}),
             kartDersSonrakiDeneme: new Date(),
             kartDersDenemeSayisi: 0,
             kartDersOtomatikHataKodu: "",
@@ -101,7 +108,7 @@ export const kartOtomatikUretiminiCalistir = async ({
                 (ders.kartDersIslenenGrupImzalari || []).length;
             const deneme = ilerlemeVar ? 1 : int(ders.kartDersDenemeSayisi) + 1;
             const kota = Boolean(sonuc.kotaEngeli);
-            const kalici = !kota && !ilerlemeVar && deneme >= AZAMI_KALICI_HATA;
+            const kalici = !ilerlemeVar && deneme >= AZAMI_KALICI_HATA;
             await DersModel.updateOne({
                 _id: dersId, kullaniciId, kartDersOtomatikAktif: true,
                 temizleniyor: { $ne: true },
@@ -123,8 +130,7 @@ export const kartOtomatikUretiminiCalistir = async ({
             const gecici = cakisma || status === 429 || status === 503 ||
                 status >= 500 || ["ECONNRESET", "ETIMEDOUT", "ENOTFOUND"].includes(hata?.code);
             const deneme = int(ders.kartDersDenemeSayisi) + (cakisma ? 0 : 1);
-            const kalici = !gecici || (![429, 503].includes(status) && !cakisma &&
-                deneme >= AZAMI_KALICI_HATA);
+            const kalici = !gecici || (!cakisma && deneme >= AZAMI_KALICI_HATA);
             await DersModel.updateOne({
                 _id: dersId, kullaniciId, kartDersOtomatikAktif: true,
                 temizleniyor: { $ne: true },

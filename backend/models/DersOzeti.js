@@ -156,6 +156,7 @@ const dersOzetiSchema = new mongoose.Schema(
             type: [kaynakSurumuSchema],
             default: [],
         },
+        konuKaynakImzasi: { type: String, default: "" },
         kullanilanModel: {
             type: String,
             trim: true,

@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { createHash } from "node:crypto";
 import Ders from "../models/Ders.js";
 import Materyal from "../models/Materyal.js";
 import MetinParcasi from "../models/MetinParcasi.js";
@@ -509,6 +510,7 @@ const kaynakSurumleriEslesiyor = (kaynakSurumleri, materyaller) => {
 };
 
 const ozetKapsamiMateryalIds = (tur, hedef) => (
+    tur === "konu" && hedef.harita?.parcaAtamaSurumu === 1 ? null :
     tur === "materyal"
         ? [hedef.materyal._id]
         : (tur === "konu" && hedef.konu.kaynakMateryalIds.length > 0
@@ -516,6 +518,15 @@ const ozetKapsamiMateryalIds = (tur, hedef) => (
             : null)
 );
 
+const konuKaynakImzasi = (hedef) => {
+    const harita=hedef?.harita,konu=hedef?.konu;
+    if(harita?.parcaAtamaSurumu!==1||!konu)return "";
+    const ana=(harita.anaKonular||[]).find(a=>a.konuId===konu.konuId);
+    const ids=new Set([konu.konuId,...(ana?.altKonular||[]).map(a=>a.konuId)]);
+    const keys=(harita.parcaKonuAtamalari||[]).filter(a=>(a.konuIds||[]).some(id=>ids.has(id)))
+        .map(a=>`${kimlikMetni(a.materyalId)}:${kimlikMetni(a.islemeId)}:${a.parcaIndex}`).sort();
+    return createHash("sha256").update(JSON.stringify([konu.konuId,keys])).digest("hex");
+};
 const kayitliOzetGuncelMi = async ({
     kullaniciId,
     dersId,
@@ -523,6 +534,7 @@ const kayitliOzetGuncelMi = async ({
     hedef,
     ozet,
 }, deps) => {
+    if(konuKaynakImzasi(hedef)!==(ozet.konuKaynakImzasi||""))return false;
     const kaydedilmisSurumler = ozet.kaynakSurumleri?.length > 0
         ? ozet.kaynakSurumleri
         : ozet.kullanilanKaynaklar;
@@ -553,7 +565,7 @@ const kaynaklariHazirla = async ({
     tur,
     hedef,
 }, deps) => {
-    const sinirliMateryalIds = tur === "konu" && hedef.harita?.parcaAtamaSurumu === 1 ? null : ozetKapsamiMateryalIds(tur, hedef);
+    const sinirliMateryalIds = ozetKapsamiMateryalIds(tur, hedef);
     const materyaller = await hazirMateryalleriGetir({
         kullaniciId,
         dersId,
@@ -855,6 +867,7 @@ export const dersOzetiOlustur = async ({
                 konuId,
             }, deps)
             : hedef;
+        if(konuKaynakImzasi(hedef)!==konuKaynakImzasi(guncelHedef))throw new DersOzetiHatasi("Özet hazırlanırken konu kaynakları değişti.",{status:409,kod:"KAYNAK_SURUMU_DEGISTI"});
         await kaynakSurumleriniDogrula({
             kullaniciId,
             dersId,
@@ -872,6 +885,7 @@ export const dersOzetiOlustur = async ({
                     icerik: geminiSonucu.icerik,
                     kullanilanKaynaklar: kaynakVerisi.kaynaklar,
                     kaynakSurumleri: kaynakVerisi.kaynakSurumleri,
+                    konuKaynakImzasi: konuKaynakImzasi(hedef),
                     kullanilanModel: geminiSonucu.model ||
                         process.env.GEMINI_OZET_MODELI ||
                         VARSAYILAN_GEMINI_MODELI,

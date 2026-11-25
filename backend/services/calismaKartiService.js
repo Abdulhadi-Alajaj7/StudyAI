@@ -1,5 +1,7 @@
 import Ders from "../models/Ders.js";
 import CalismaKarti from "../models/CalismaKarti.js";
+import KonuHaritasi from "../models/KonuHaritasi.js";
+import { konuKartSurumuGerekliMi } from "./dersKartPlanlama.mjs";
 
 export class CalismaKartiHatasi extends Error {
     constructor(message, status = 422, kod = "KART_HATASI") {
@@ -11,6 +13,7 @@ export class CalismaKartiHatasi extends Error {
 const bagimliliklar = (d = {}) => ({
     DersModel: d.DersModel || Ders,
     KartModel: d.KartModel || CalismaKarti,
+    KonuHaritasiModel: d.KonuHaritasiModel || (d.DersModel ? null : KonuHaritasi),
 });
 const dersGetir = async (x, kullaniciId, dersId) => {
     const ders = await x.DersModel.findOne({
@@ -24,17 +27,21 @@ export const calismaKartlariDurumunuGetir = async ({ kullaniciId, dersId }, d = 
     const ders = await dersGetir(x, kullaniciId, dersId);
     const yeniSistem = Boolean(ders.kartDersSurumImzasi);
     const uretimSuruyor = Boolean(ders.kartDersOtomatikAktif);
+    const konuSistemi=String(ders.kartDersSurumImzasi||"").startsWith("konu-v2:");
+    const harita=ders.kartDersTamamlandi&&!konuSistemi
+        ? await x.KonuHaritasiModel?.findOne({kullaniciId,dersId,durum:"hazir"}).select("parcaAtamaSurumu").lean() : null;
+    const yeniKonuKartlariGerekli=konuKartSurumuGerekliMi(ders,harita);
     const tamamlandi = yeniSistem && Boolean(ders.kartDersTamamlandi) &&
-        !uretimSuruyor;
+        !uretimSuruyor && !yeniKonuKartlariGerekli;
     // Yarım üretilmiş kartlar ve eski kartlar öğrencinin önüne düşmez.
     // Tamamlanma anında bütün ders kartları tek defada açılır.
-    const kartlarGosterilsin = !uretimSuruyor && (!yeniSistem || tamamlandi);
+    const kartlarGosterilsin = konuSistemi || yeniKonuKartlariGerekli || (!uretimSuruyor && (!yeniSistem || tamamlandi));
     const kartlar = kartlarGosterilsin
         ? await x.KartModel.find({ kullaniciId, dersId })
             .sort({ createdAt: 1, _id: 1 }).lean()
         : [];
     return {
-        kartlar, tamamlandi,
+        kartlar, tamamlandi, yeniKonuKartlariGerekli,
         dersKartTamamlandi: tamamlandi,
         uretimSuruyor,
         uretimHatasi: !uretimSuruyor
