@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { testSorulariniDogrula, gecerliTestSorulariniSec } from "../services/testDogrulamaService.js";
+import { testSorulariniDogrula } from "../services/testDogrulamaService.js";
 import { ornekPaket, geminiTaklidi } from "./helpers/testUretimOrnekleri.js";
 import { geminiIleTestSorulariUret } from "../services/geminiService.js";
 import { zorlukDagiliminiOlustur } from "../services/testService.js";
@@ -8,67 +8,39 @@ import { zorlukDagiliminiOlustur } from "../services/testService.js";
 for (const [alan, boz] of Object.entries({
     metin: (s) => ({ ...s, metin: {} }),
     aciklama: (s) => ({ ...s, aciklama: " " }),
-    hedef: (s) => ({ ...s, ogrenmeHedefi: "" }),
     secenekSayisi: (s) => ({ ...s, secenekler: s.secenekler.slice(0, 3) }),
-    ayniSecenek: (s) => ({ ...s, secenekler: s.secenekler.map((o) => ({ ...o, metin: "Aynı seçenek" })) }),
     secenekAnahtari: (s) => ({ ...s, secenekler: s.secenekler.map((o) => ({ ...o, anahtar: "A" })) }),
     cevap: (s) => ({ ...s, dogruCevap: "A veya B" }),
-    yanlisCevap: (s) => ({ ...s, dogruCevap: "B" }),
-    aciklamaAnahtari: (s) => ({ ...s, aciklama: s.aciklama + " Doğru cevap B." }),
-    zorluk: (s) => ({ ...s, zorluk: "zor" }),
-    konu: (s) => ({ ...s, konuId: "sub-olmayan" }),
-    bosKonu: (s) => ({ ...s, konuId: "" }),
-    kaynak: (s) => ({ ...s, kaynakReferanslari: ["K99"] }),
-    bosKaynak: (s) => ({ ...s, kaynakReferanslari: [] }),
-    kanit: (s) => ({ ...s, kaynakKanitlari: [{ kaynakReferansi: "K1", alinti: "Kaynakta olmayan bir alıntı." }] }),
-    bosKanit: (s) => ({ ...s, kaynakKanitlari: [] }),
+    zorluk: (s) => ({ ...s, zorluk: "bilinmeyen" }),
 })) {
-    test(`${alan} hatası kayıt öncesi doğrulamada reddedilir`, () => {
+    test(`${alan} biçim hatası kaydı önler`, () => {
         const { girdi, sorular } = ornekPaket([1]);
         assert.throws(() => testSorulariniDogrula({ sorular: [boz(sorular[0])] }, girdi), { kod: "TEST_HEDEFI_KARSILANAMADI" });
     });
 }
 
-test("konu ID doğru olsa bile başka konuya ait kaynak kullanılamaz", () => {
+test("kalite kuralları prompta bırakılır; alıntı, konu dağılımı ve tekrar nedeniyle soru elenmez", () => {
     const { girdi, sorular } = ornekPaket([1, 1]);
-    const bozuk = { ...sorular[1], konuId: "sub-0" };
-    assert.throws(() => testSorulariniDogrula({ sorular: [sorular[0], bozuk] }, girdi), (h) => h.tanilama.dogrulamaAltKodu === "KAYNAK_KONU_UYUSMAZLIGI");
+    const ham = { ...sorular[0], kaynakKanitlari: undefined, ogrenmeHedefi: undefined, zorluk: "zor" };
+    const sonuc = testSorulariniDogrula({ sorular: [ham, ham] }, girdi);
+    assert.equal(sonuc.length, 2);
+    assert.equal(sonuc[0].metin, sonuc[1].metin);
+    assert.equal(sonuc[0].zorluk, "zor");
 });
 
-test("soru sırası ve seçenek sırası cevap anahtarını değiştirmez", () => {
+test("bilinmeyen kaynak ve konu kimlikleri kullanıcı verisine bağlanmaz", () => {
+    const { girdi, sorular } = ornekPaket([1]);
+    const [s] = testSorulariniDogrula({ sorular: [{ ...sorular[0], konuId: "uydurma", kaynakReferanslari: ["K1", "K999"] }] }, girdi);
+    assert.equal(s.konuId, "");
+    assert.deepEqual(s.kaynakReferanslari, ["K1"]);
+    assert.equal(s.kaynaklar.length, 1);
+});
+
+test("seçenek sırası cevap anahtarını değiştirmez", () => {
     const { girdi, sorular } = ornekPaket([2]);
     const sonuc = testSorulariniDogrula({ sorular: sorular.map((s) => ({ ...s, secenekler: [...s.secenekler].reverse() })) }, girdi);
     assert.equal(sonuc[0].secenekler[0].anahtar, "A");
     assert.equal(sonuc[0].secenekler[0].metin, sorular[0].secenekler[0].metin);
-});
-
-test("farklı teknik semboller seçenekleri yanlışlıkla aynı yapmaz", () => {
-    const { girdi, sorular } = ornekPaket([1]);
-    sorular[0].secenekler[1].metin = "C++";
-    sorular[0].secenekler[2].metin = "C#";
-    assert.equal(testSorulariniDogrula({ sorular }, girdi).length, 1);
-});
-
-test("aynı hedefi farklı sözcüklerle soran soru tekrar sayılır", () => {
-    const { girdi, sorular } = ornekPaket([2]);
-    const tekrar = { ...sorular[0], metin: "Yığın yapısının çıkarma sırasını belirleyen kural nedir?", ogrenmeHedefi: "Son giren ilk çıkar sırasıyla yığın çalışır." };
-    assert.throws(() => testSorulariniDogrula({ sorular: [sorular[0], tekrar] }, girdi), (h) => h.tanilama.dogrulamaAltKodu === "TEKRARLAYAN_SORU");
-});
-
-test("kanıt alıntısındaki matematiksel işlem işareti değiştirilemez", () => {
-    const { girdi, sorular } = ornekPaket([1]);
-    girdi.kaynaklar[0].icerik += " Hesap sonucu 8 + 2 = 10 olur.";
-    sorular[0].kaynakKanitlari = [{ kaynakReferansi: "K1", alinti: "Hesap sonucu 8 - 2 = 10 olur." }];
-    assert.throws(() => testSorulariniDogrula({ sorular }, girdi), (h) => h.tanilama.dogrulamaAltKodu === "KAYNAK_KANITI");
-});
-
-test("karışık zorluk ve konu kotaları birlikte eşleşir; ilk seçim gereksiz tamamlama yaratmaz", () => {
-    const { girdi, soru } = ornekPaket([1, 1]);
-    const ayarlar = { ...girdi, zorlukDagilimi: { kolay: 1, zor: 1 } };
-    // İlk konunun kolay sorusu yerine zor sorusu seçilmeli.
-    const secim = gecerliTestSorulariniSec([soru(0, 0, "kolay"), soru(0, 1, "zor"), soru(1, 0, "kolay")], ayarlar);
-    assert.equal(secim.sorular.length, 2);
-    assert.equal(secim.sorular.find((s) => s.konuId === "sub-0").zorluk, "zor");
 });
 
 for (const kapsamTuru of ["konu", "materyal", "tum_ders"]) {

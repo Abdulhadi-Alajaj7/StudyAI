@@ -533,7 +533,7 @@ const testOlusturTekIslem = async ({
         });
         const zorlukDagilimi = zorlukDagiliminiOlustur(zorluk, soruSayisi);
         asama = "GEMINI_URETIMI";
-        // Normal akış tek istek; gerekirse yalnızca eksik sorular tamamlanır.
+        // Tek üretim; kalite kuralları prompt içinde, ek onarım isteği yok.
         const geminiSonucu = await deps.geminiTestUret({
             dersBilgisi: { dersAdi: ders.dersAdi, aciklama: ders.aciklama },
             kapsamTuru,

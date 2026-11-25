@@ -16,78 +16,28 @@ for (const dagilim of [[2, 2, 2, 2, 2], [4, 4, 4, 4, 4], [3, 3, 3, 3], [2, 2, 1,
         assert.equal(mock.istekler[0].config.responseMimeType, "application/json");
         assert.equal("responseJsonSchema" in mock.istekler[0].config, false);
         assert.equal("responseSchema" in mock.istekler[0].config, false);
-        assert.match(mock.istekler[0].contents, new RegExp("tam " + girdi.soruSayisi + " yeni soru"));
-        assert.match(mock.istekler[0].config.systemInstruction, /"kaynakKanitlari":/);
-        assert.match(mock.istekler[0].config.systemInstruction, /farklı öğrenme hedefi/);
+        assert.match(mock.istekler[0].contents, new RegExp("Tam " + girdi.soruSayisi + " soru"));
+        assert.match(mock.istekler[0].config.systemInstruction, /"kaynakReferanslari":/);
+        assert.match(mock.istekler[0].config.systemInstruction, /Farklı öğrenme hedefleri/);
         assert.ok(mock.istekler[0].config.maxOutputTokens >= girdi.soruSayisi * 1200);
     });
 }
 
-test("eksik iki soru tek ek çağrıda tamamlanır ve önceki sorular aynen korunur", async () => {
+test("alıntı veya öğrenme hedefi olmadan ve tekrar içeren yanıt ek çağrısız kabul edilir", async () => {
     const { girdi, sorular } = ornekPaket();
-    const mock = geminiTaklidi([{ sorular: sorular.slice(0, 8) }, { sorular: sorular.slice(8) }]);
-    const sonuc = await geminiIleTestSorulariUret(girdi, mock.bagimliliklar);
-    assert.equal(mock.istekler.length, 2);
-    assert.equal(sonuc.sorular.length, 10);
-    assert.deepEqual(sonuc.sorular.slice(0, 8).map((s) => s.metin), sorular.slice(0, 8).map((s) => s.metin));
-    assert.match(mock.istekler[1].contents, /tam 2 yeni soru/);
-    assert.match(mock.istekler[1].contents, /"konuId":"sub-4","adet":2/);
-    assert.ok(mock.istekler[1].contents.includes(sorular[0].ogrenmeHedefi));
-    assert.deepEqual(sonuc.tokenKullanimi, { girdi: 20, cikti: 40, toplam: 60 });
-});
-
-test("yanlış eşit dağılımda yalnızca eksik konuların soruları tamamlanır", async () => {
-    const { girdi, sorular, soru } = ornekPaket();
-    const mock = geminiTaklidi([{ sorular: [...sorular.slice(0, 8), soru(0, 2), soru(0, 3)] }, { sorular: sorular.slice(8) }]);
+    const ham = sorular.map(({ kaynakKanitlari, ogrenmeHedefi, ...s }) => s);
+    ham[1] = { ...ham[0] };
+    const mock = geminiTaklidi([{ sorular: ham }]);
     const sonuc = await geminiIleTestSorulariUret(girdi, mock.bagimliliklar);
     assert.equal(sonuc.sorular.length, 10);
-    assert.equal(mock.istekler.length, 2);
-    assert.equal(sonuc.sorular.filter((s) => s.konuId === "sub-0").length, 2);
-});
-
-test("tam ve farklı ifadeli tekrarlar eksik sayılır; yeni öğrenme hedefi istenir", async () => {
-    const { girdi, sorular } = ornekPaket([3]);
-    const tekrar = { ...sorular[0], metin: "Yığındaki çıkarma sırası nasıl belirlenir?" };
-    const mock = geminiTaklidi([{ sorular: [sorular[0], { ...sorular[0] }, tekrar] }, { sorular: sorular.slice(1) }]);
-    const sonuc = await geminiIleTestSorulariUret(girdi, mock.bagimliliklar);
-    assert.equal(sonuc.sorular.length, 3);
-    assert.match(mock.istekler[1].contents, /tam 2 yeni soru/);
-});
-
-for (const [alan, degistir] of Object.entries({
-    secenek: (s) => ({ ...s, secenekler: [] }),
-    konu: (s) => ({ ...s, konuId: "bilinmeyen" }),
-    kaynak: (s) => ({ ...s, kaynakReferanslari: ["K99"] }),
-    aciklama: (s) => ({ ...s, aciklama: "" }),
-    cevap: (s) => ({ ...s, dogruCevap: "AB" }),
-})) {
-    test(`geçersiz ${alan} alanı geçerli soruları kaybetmeden bir kez tamamlanır`, async () => {
-        const { girdi, sorular } = ornekPaket([2]);
-        const mock = geminiTaklidi([{ sorular: [sorular[0], degistir(sorular[1])] }, { sorular: [sorular[1]] }]);
-        const sonuc = await geminiIleTestSorulariUret(girdi, mock.bagimliliklar);
-        assert.equal(sonuc.sorular.length, 2);
-        assert.match(mock.istekler[1].contents, /tam 1 yeni soru/);
-    });
-}
-
-test("tamamlama da eksik/tekrar ise üçüncü çağrı ve kısmi başarı yoktur", async () => {
-    const { girdi, sorular } = ornekPaket([3]);
-    const mock = geminiTaklidi([{ sorular: [sorular[0]] }, { sorular: [sorular[0]] }]);
-    await assert.rejects(geminiIleTestSorulariUret(girdi, mock.bagimliliklar), (h) => h.status === 422 && /Eksik test kaydedilmedi/.test(h.message));
-    assert.equal(mock.istekler.length, 2);
-});
-
-test("kaynak yetersizliği açıkça bildirilirse yeni çağrı yapılmaz", async () => {
-    const { girdi, sorular } = ornekPaket([5]);
-    const mock = geminiTaklidi([{ durum: "yetersiz_kaynak", sorular: sorular.slice(0, 1) }]);
-    await assert.rejects(geminiIleTestSorulariUret(girdi, mock.bagimliliklar), { kod: "TEST_HEDEFI_KARSILANAMADI" });
+    assert.equal(sonuc.sorular[0].metin, sonuc.sorular[1].metin);
     assert.equal(mock.istekler.length, 1);
 });
 
-test("sayı tam olsa bile modelin kaynak yetersizliği bildirimi başarıya çevrilmez", async () => {
-    const { girdi, sorular } = ornekPaket([5]);
-    const mock = geminiTaklidi([{ durum: "yetersiz_kaynak", sorular }]);
-    await assert.rejects(geminiIleTestSorulariUret(girdi, mock.bagimliliklar), (h) => h.tanilama.dogrulamaAltKodu === "YETERSIZ_KAYNAK");
+test("eksik sayı hatasında kalite onarımı veya yeni çağrı yapılmaz", async () => {
+    const { girdi, sorular } = ornekPaket();
+    const mock = geminiTaklidi([{ sorular: sorular.slice(0, 8) }]);
+    await assert.rejects(geminiIleTestSorulariUret(girdi, mock.bagimliliklar), (h) => h.tanilama.dogrulamaAltKodu === "SORU_SAYISI");
     assert.equal(mock.istekler.length, 1);
 });
 
@@ -125,29 +75,11 @@ test("iki ardışık 503 sonrasında üçüncü üretim çağrısı yapılmaz", 
     assert.equal(mock.istekler.length, 2);
 });
 
-test("ilk üretim retry kullandıysa eksik sorular için yalnızca bir çağrı kalır", async () => {
+test("503 retry sonrası eksik yanıt ek çağrı oluşturmaz", async () => {
     const { girdi, sorular } = ornekPaket();
-    const mock = geminiTaklidi([gecici503(), { sorular: sorular.slice(0, 8) }, { sorular: sorular.slice(8) }]);
-    const sonuc = await geminiIleTestSorulariUret(girdi, { ...mock.bagimliliklar, bekle: async () => {} });
-    assert.equal(sonuc.sorular.length, 10);
-    assert.equal(sonuc.apiCagriSayisi, 3);
-    assert.match(mock.istekler[2].contents, /tam 2 yeni soru/);
-});
-
-test("tamamlama 503 alırsa kullanılmamış tek retry ile eksikler tamamlanır", async () => {
-    const { girdi, sorular } = ornekPaket();
-    const mock = geminiTaklidi([{ sorular: sorular.slice(0, 8) }, gecici503(), { sorular: sorular.slice(8) }]);
-    const sonuc = await geminiIleTestSorulariUret(girdi, { ...mock.bagimliliklar, bekle: async () => {} });
-    assert.equal(sonuc.sorular.length, 10);
-    assert.equal(sonuc.apiCagriSayisi, 3);
-    assert.equal(mock.istekler[1].contents, mock.istekler[2].contents);
-});
-
-test("üretim retry kullandıktan sonra tamamlama 503 alırsa dördüncü çağrı ve kısmi başarı yoktur", async () => {
-    const { girdi, sorular } = ornekPaket();
-    const mock = geminiTaklidi([gecici503(), { sorular: sorular.slice(0, 8) }, gecici503()]);
-    await assert.rejects(geminiIleTestSorulariUret(girdi, { ...mock.bagimliliklar, bekle: async () => {} }), { status: 503 });
-    assert.equal(mock.istekler.length, 3);
+    const mock = geminiTaklidi([gecici503(), { sorular: sorular.slice(0, 8) }]);
+    await assert.rejects(geminiIleTestSorulariUret(girdi, { ...mock.bagimliliklar, bekle: async () => {} }), { kod: "TEST_HEDEFI_KARSILANAMADI" });
+    assert.equal(mock.istekler.length, 2);
 });
 
 test("503 beklemesi toplam süreye sığmıyorsa tekrar çağrılmaz", async () => {
@@ -220,22 +152,4 @@ test("kurulu Gemini SDK 7 konu, 15 soru ve 42 kaynak için şemasız JSON isteğ
     assert.equal(girdi.kaynaklar.length, 42);
     assert.match(JSON.stringify(govdeler[0].contents), /KAYNAK K42/);
     assert.deepEqual(girdi.izinliKonuIds.map((konu) => sonuc.sorular.filter((soru) => soru.konuId === konu.konuId).length), [3, 3, 3, 2, 2, 1, 1]);
-});
-
-
-test("tamamlama 503 olsa da ilk yanıtın red nedenleri ve eksik sayısı izlenir", async () => {
-    const { girdi, sorular } = ornekPaket();
-    const hatali = { ...sorular[8], kaynakKanitlari: [] };
-    const mock = geminiTaklidi([{ sorular: [...sorular.slice(0, 8), hatali] }, gecici503(), gecici503()]);
-    const izleme = [];
-    await assert.rejects(geminiIleTestSorulariUret(girdi, {
-        ...mock.bagimliliklar, bekle: async () => {},
-        uretimIzleyicisi: { soruDogrulamasiTamamlandi: (v) => izleme.push(v) },
-    }), { status: 503 });
-    assert.equal(izleme.length, 1);
-    assert.equal(izleme[0].gelenYeniSoru, 9);
-    assert.equal(izleme[0].gecerliSoru, 8);
-    assert.equal(izleme[0].eksikSoru, 2);
-    assert.deepEqual(izleme[0].redNedenleri, { KAYNAK_KANITI: 1 });
-    assert.equal(mock.istekler.length, 3);
 });

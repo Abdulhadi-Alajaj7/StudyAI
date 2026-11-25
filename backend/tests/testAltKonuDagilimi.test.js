@@ -58,21 +58,18 @@ for (const dagilim of [[2, 2, 2, 2, 2], [4, 4, 4, 4, 4], [3, 3, 3, 3], [2, 2, 1,
     });
 }
 
-test("servis eksik üretimi tamamlar, hâlâ eksikse MongoDB create çağrılmaz", async () => {
-    const ortam = ortamOlustur([2, 2, 2, 2, 2], ({ sorular }) => [{ sorular: sorular.slice(0, 8) }, { sorular: sorular.slice(8) }]);
-    await testOlustur(ortam.istek, ortam.bagimliliklar);
-    assert.equal(ortam.kaydiGetir().soruSayisi, 10);
-    assert.equal(ortam.mock.istekler.length, 2);
-    const eksik = ortamOlustur([2, 2, 2, 2, 2], ({ sorular }) => [{ sorular: sorular.slice(0, 8) }, { sorular: [] }]);
-    await assert.rejects(testOlustur(eksik.istek, eksik.bagimliliklar), { kod: "TEST_HEDEFI_KARSILANAMADI" });
-    assert.equal(eksik.kaydiGetir(), undefined);
+test("eksik sayı için yeni üretim yapılmaz ve MongoDB create çağrılmaz", async () => {
+    const ortam = ortamOlustur([2, 2, 2, 2, 2], ({ sorular }) => [{ sorular: sorular.slice(0, 8) }]);
+    await assert.rejects(testOlustur(ortam.istek, ortam.bagimliliklar), { kod: "TEST_HEDEFI_KARSILANAMADI" });
+    assert.equal(ortam.mock.istekler.length, 1);
+    assert.equal(ortam.kaydiGetir(), undefined);
 });
 
-test("üretici doğrulamayı atlasa bile kayıt kapısı yanlış dağılımı reddeder", async () => {
+test("dağılım prompta bırakılır ve biçimi geçerli yanıt kaydedilir", async () => {
     const ortam = ortamOlustur([2, 2, 2, 2, 2]);
     ortam.bagimliliklar.geminiTestUret = async () => ({ sorular: [...ortam.paket.sorular.slice(0, 8), ortam.paket.soru(0, 2), ortam.paket.soru(0, 3)] });
-    await assert.rejects(testOlustur(ortam.istek, ortam.bagimliliklar), { kod: "TEST_HEDEFI_KARSILANAMADI" });
-    assert.equal(ortam.kaydiGetir(), undefined);
+    await testOlustur(ortam.istek, ortam.bagimliliklar);
+    assert.equal(ortam.kaydiGetir().soruSayisi, 10);
 });
 
 test("üretim sırasında kaynak sürümü değişirse geçerli test de kaydedilmez", async () => {

@@ -625,7 +625,7 @@ const hamSoru = ({ metin, dogru, aciklama, kaynak, kanit }) => ({
     kaynakKanitlari: [{ kaynakReferansi: kaynak, alinti: kanit }],
 });
 
-test("Gemini test çıktısı yapı, kaynak ve tekrar bakımından doğrulanır", () => {
+test("Gemini test çıktısında biçim ve gerçek kaynak bağlantıları korunur", () => {
     const veri = {
         sorular: [
             hamSoru({
@@ -653,26 +653,9 @@ test("Gemini test çıktısı yapı, kaynak ve tekrar bakımından doğrulanır"
     assert.deepEqual(dogrulanan[0].kaynaklar[0].parcaIndeksleri, [0]);
 
     const tekrarli = { sorular: [veri.sorular[0], { ...veri.sorular[0] }] };
-    assert.throws(
-        () => testSorulariniDogrula(tekrarli, {
-            soruSayisi: 2,
-            zorlukDagilimi: { kolay: 2 },
-            kaynaklar: dogrulamaKaynaklari,
-        }),
-        (hata) => hata.kod === "TEST_HEDEFI_KARSILANAMADI"
-    );
-
-    const uydurmaKaynak = {
-        sorular: [{ ...veri.sorular[0], kaynakReferanslari: ["K99"] }],
-    };
-    assert.throws(
-        () => testSorulariniDogrula(uydurmaKaynak, {
-            soruSayisi: 1,
-            zorlukDagilimi: { kolay: 1 },
-            kaynaklar: dogrulamaKaynaklari,
-        }),
-        (hata) => hata.kod === "TEST_HEDEFI_KARSILANAMADI"
-    );
+    assert.equal(testSorulariniDogrula(tekrarli, { soruSayisi: 2, kaynaklar: dogrulamaKaynaklari }).length, 2);
+    const uydurmaKaynak = { sorular: [{ ...veri.sorular[0], kaynakReferanslari: ["K99"] }] };
+    assert.deepEqual(testSorulariniDogrula(uydurmaKaynak, { soruSayisi: 1, kaynaklar: dogrulamaKaynaklari })[0].kaynaklar, []);
 });
 
 const durumModeliniOlustur = ({ adet = 2 } = {}) => {
