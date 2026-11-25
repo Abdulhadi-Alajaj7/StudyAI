@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import Ders from "../models/Ders.js";
 import Materyal from "../models/Materyal.js";
 import MetinParcasi from "../models/MetinParcasi.js";
@@ -19,6 +20,9 @@ const minimumSkorGetir = () => {
 };
 
 const kimlikMetni = (deger) => String(deger ?? "");
+const sorguOnbellek = new Map();
+const ONBELLEK_SURE_MS=5*60_000;
+const ONBELLEK_ADET=200;
 
 const esitAralikliIndeksler = (uzunluk, adet) => {
     if (adet >= uzunluk) return Array.from({ length: uzunluk }, (_, index) => index);
@@ -177,10 +181,17 @@ export const semanticAramaYap = async ({
         };
     }
 
-    const [sorguEmbedding] = await embeddingUret([sorgu], {
-        tur: "sorgu",
-        ayarlar,
-    });
+    const cacheKey=crypto.createHash("sha256").update(JSON.stringify([String(kullaniciId),String(dersId),ayarlar.model,ayarlar.boyut,sorgu])).digest("hex");
+    const cache=bagimliliklar.embeddingUret?null:sorguOnbellek.get(cacheKey);
+    let sorguEmbedding=cache?.sonZaman>Date.now()?cache.vektor:null;
+    if(!sorguEmbedding){
+        [sorguEmbedding]=await embeddingUret([sorgu], {tur:"sorgu",ayarlar});
+        if(!bagimliliklar.embeddingUret&&Array.isArray(sorguEmbedding)&&sorguEmbedding.length===ayarlar.boyut){
+            sorguOnbellek.delete(cacheKey);
+            sorguOnbellek.set(cacheKey,{vektor:sorguEmbedding,sonZaman:Date.now()+ONBELLEK_SURE_MS});
+            while(sorguOnbellek.size>ONBELLEK_ADET)sorguOnbellek.delete(sorguOnbellek.keys().next().value);
+        }
+    }
     if (!sorguEmbedding) {
         const hata = new Error("Arama sorgusu için embedding oluşturulamadı.");
         hata.kod = "SORGU_EMBEDDING_HATASI";

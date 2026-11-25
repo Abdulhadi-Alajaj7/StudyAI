@@ -39,7 +39,7 @@ export const aiIstekYonetimiOlustur = ({
         const key=aday.saglayici+"/"+aday.model,t=simdi(),tarih=gun(t);
         let d=durumlar.get(key);
         if(!d){d={tarih,gunluk:0,dakika:[],engel:0,ardArda:0};durumlar.set(key,d);}
-        if(d.tarih!==tarih){d.tarih=tarih;d.gunluk=0;d.gunlukDolu=false;}
+        if(d.tarih!==tarih){d.tarih=tarih;d.gunluk=0;d.gunlukDolu=false;d.sonHata=null;}
         d.dakika=d.dakika.filter(k=>t-k.zaman<60000);
         return d;
     };
@@ -58,7 +58,8 @@ export const aiIstekYonetimiOlustur = ({
         for(let i=0;i<uygunlar.length;i++){
             const aday=uygunlar[i];
             for(let n=1;n<=Math.min(2,maxDeneme);n++){
-                if(bitis-simdi()<=0||!kapasite(aday,token(aday)))break;
+                if(bitis-simdi()<=0)break;
+                if(!kapasite(aday,token(aday))){sonHata??=durum(aday).sonHata;break;}
                 const limit=oncelik==="arka_plan"?Math.max(1,eszamanli-1):eszamanli;
                 // Bekleme üst sınırı; uzun yerel kuyruklar alternatiflerin bütçesini yemez.
                 const kuyrukBitis=Math.min(bitis-1500,simdi()+3000);
@@ -79,10 +80,10 @@ export const aiIstekYonetimiOlustur = ({
                             controller.abort();reject(hata("GEMINI_ZAMAN_ASIMI",504,"Yapay zekâ isteği zaman aşımına uğradı."));
                         },sure);}),
                     ]);
-                    d.ardArda=0;d.engel=0;
+                    d.ardArda=0;d.engel=0;d.sonHata=null;
                     return {sonuc,aday,denemeSayisi};
                 }catch(ham){
-                    sonHata=ham;
+                    sonHata=ham;d.sonHata=ham;
                     const sinif=geminiHazirlamaHatasiniSiniflandir(ham,simdi());
                     const status=sinif.status,kod=ham?.kod||sinif.kod;
                     const retry=[429,500,502,503,504].includes(status)||
@@ -92,7 +93,7 @@ export const aiIstekYonetimiOlustur = ({
                     if(status===429){d.engel=simdi()+Math.max(1000,sinif.retryAfterMs??60000);break;}
                     if(status===404||status===402){d.engel=simdi()+300000;break;}
                     if([400,401,403].includes(status)||kod==="GEMINI_YAPILANDIRMA"||kod==="AI_GUVENLIK_ENGELI")throw ham;
-                    if(!retry)throw ham;
+                    if(kod==="GEMINI_ISTEK_YOGUNLUGU" || kod==="GEMINI_SERVIS_HATASI" && ham?.tanilama?.orijinalHttpDurumu==null || !retry)throw ham;
                     if(status===503){d.ardArda++;if(d.ardArda>=2)d.engel=simdi()+Math.max(60000,sinif.retryAfterMs??0);}
                     gecikme=Math.max(1200+Math.floor(rastgele()*300),sinif.retryAfterMs??0);
                     if(sinif.retryAfterMs>5000)d.engel=Math.max(d.engel,simdi()+sinif.retryAfterMs);

@@ -76,7 +76,6 @@ export const kosinusBenzerligi = (sol, sag) => {
 
 const bekle = (milisaniye) => new Promise((resolve) => setTimeout(resolve, milisaniye));
 
-let kotaZinciri = Promise.resolve();
 let gunlukKotaAnahtari = "";
 let gunlukIstekSayisi = 0;
 let dakikaIstekleri = [];
@@ -93,44 +92,28 @@ const tahminiTokenSayisi = (metinler) => Math.max(
     Math.ceil(metinler.reduce((toplam, metin) => toplam + String(metin).length, 0) / 3)
 );
 
-const kotaSirasinaGir = (tahminiToken, ayarlar, beklet) => {
-    const gorev = kotaZinciri.then(async () => {
+const sureHatasi = () => Object.assign(new Error("Embedding yanıtı için süre doldu."), {kod:"GEMINI_ZAMAN_ASIMI",status:504});
+const kotaSirasinaGir = async (tahminiToken, ayarlar, beklet, sonZaman) => {
+    // Her rezervasyon eşzamanlı JS bloğunda yapılır; uzun belge beklemeleri sorguyu bloke etmez.
+    while (true) {
+        if (Date.now() >= sonZaman) throw sureHatasi();
         const gunAnahtari = pasifikGunAnahtari();
         if (gunAnahtari !== gunlukKotaAnahtari) {
             gunlukKotaAnahtari = gunAnahtari;
             gunlukIstekSayisi = 0;
         }
-
-        if (gunlukIstekSayisi >= ayarlar.rpd) {
-            const hata = new Error("Embedding için yapılandırılan günlük istek sınırına ulaşıldı.");
-            hata.kod = "EMBEDDING_GUNLUK_LIMIT";
-            hata.status = 429;
-            throw hata;
+        if (gunlukIstekSayisi >= ayarlar.rpd) throw Object.assign(new Error("Embedding günlük sınırı doldu."), {kod:"EMBEDDING_GUNLUK_LIMIT",status:429});
+        if (tahminiToken > ayarlar.tpm) throw Object.assign(new Error("Embedding token sınırı aşıldı."), {kod:"EMBEDDING_TOKEN_LIMIT",status:400});
+        const simdi=Date.now();
+        dakikaIstekleri=dakikaIstekleri.filter(k=>simdi-k.zaman<60_000);
+        const kullanilanToken=dakikaIstekleri.reduce((toplam,k)=>toplam+k.token,0);
+        if(dakikaIstekleri.length<ayarlar.rpm && kullanilanToken+tahminiToken<=ayarlar.tpm){
+            dakikaIstekleri.push({zaman:simdi,token:tahminiToken});gunlukIstekSayisi++;return;
         }
-        if (tahminiToken > ayarlar.tpm) {
-            const hata = new Error("Tek embedding isteği yapılandırılan dakikalık token sınırını aşıyor.");
-            hata.kod = "EMBEDDING_TOKEN_LIMIT";
-            hata.status = 400;
-            throw hata;
-        }
-
-        while (true) {
-            const simdi = Date.now();
-            dakikaIstekleri = dakikaIstekleri.filter((kayit) => simdi - kayit.zaman < 60_000);
-            const kullanilanToken = dakikaIstekleri.reduce((toplam, kayit) => toplam + kayit.token, 0);
-            if (dakikaIstekleri.length < ayarlar.rpm && kullanilanToken + tahminiToken <= ayarlar.tpm) {
-                dakikaIstekleri.push({ zaman: simdi, token: tahminiToken });
-                gunlukIstekSayisi += 1;
-                return;
-            }
-
-            const enEski = dakikaIstekleri[0]?.zaman ?? simdi;
-            await beklet(Math.max(50, 60_000 - (simdi - enEski)));
-        }
-    });
-
-    kotaZinciri = gorev.catch(() => {});
-    return gorev;
+        const gecikme=Math.max(50,60_000-(simdi-(dakikaIstekleri[0]?.zaman??simdi)));
+        if(simdi+gecikme>=sonZaman) throw Object.assign(new Error("Embedding için dakika kotası doldu."),{status:429,retryAfterMs:gecikme});
+        await beklet(gecikme);
+    }
 };
 
 const embeddingHatasiniSiniflandir = hata => {
@@ -153,6 +136,8 @@ const embeddingIstegiYap = async ({
     beklet,
     limitUygula,
     sahipligiDogrula,
+    sonZaman,
+    tekDenemeMs,
 }) => {
     let sonHata;
     const metinler = Array.isArray(contents) ? contents : [contents];
@@ -162,17 +147,26 @@ const embeddingIstegiYap = async ({
         try {
             await sahipligiDogrula?.();
             if (limitUygula) {
-                await kotaSirasinaGir(tahminiTokenSayisi(metinler), ayarlar, beklet);
+                await kotaSirasinaGir(tahminiTokenSayisi(metinler), ayarlar, beklet, sonZaman);
             }
             await sahipligiDogrula?.();
-            const yanit = await istemci.models.embedContent({ model, contents, config });
+            const kalan=Math.min(tekDenemeMs,sonZaman-Date.now());
+            if(kalan<=0)throw sureHatasi();
+            const controller=new AbortController();let timer;
+            let yanit;
+            try {
+                yanit=await Promise.race([
+                    Promise.resolve().then(()=>istemci.models.embedContent({model,contents,config:{...config,abortSignal:controller.signal}})),
+                    new Promise((_,reject)=>{timer=setTimeout(()=>{controller.abort();reject(sureHatasi());},kalan);}),
+                ]);
+            } finally {clearTimeout(timer);}
             geminiTanilamasiniLogla({ asama: "embedding", model, deneme, sureMs: performance.now() - baslangic, yanit });
             return yanit;
         } catch (hata) {
             sonHata = embeddingHatasiniSiniflandir(hata);
             geminiTanilamasiniLogla({ asama: "embedding", model, deneme, sureMs: performance.now() - baslangic, hata: sonHata });
             const bekleme = geminiRetryBeklemesiniGetir(sonHata, deneme);
-            if (deneme === ayarlar.maksDeneme || bekleme == null) break;
+            if (deneme === ayarlar.maksDeneme || bekleme == null || Date.now()+bekleme>=sonZaman) break;
             await beklet(bekleme);
         }
     }
@@ -207,11 +201,14 @@ export const embeddingleriUret = async (metinler, {
     limitUygula = true,
     sahipligiDogrula,
     partiKaydet,
+    sonZaman = null,
 } = {}) => {
     if (!Array.isArray(metinler) || metinler.length === 0) return [];
     // Kurulu SDK'nin models çağrıları tek HTTP isteği yapar; sınırlı retry yukarıdadır.
     const ai = istemci || getGeminiClient({ timeout: 60_000 });
     const embedding2 = ayarlar.model === "gemini-embedding-2";
+    const sorguSonZamani=tur==="sorgu"?Math.min(sonZaman??Infinity,Date.now()+20_000):null;
+    const zamanAyarlari=()=>({sonZaman:sorguSonZamani??Math.min(sonZaman??Infinity,Date.now()+120_000),tekDenemeMs:tur==="sorgu"?10_000:55_000});
     const sonuclar = [];
 
     if (embedding2) {
@@ -228,6 +225,7 @@ export const embeddingleriUret = async (metinler, {
                 beklet,
                 limitUygula,
                 sahipligiDogrula,
+                ...zamanAyarlari(),
             });
             const vektorler = yanitVektorleriniDogrula(yanit, 1, ayarlar.boyut);
             await partiKaydet?.(sonuclar.length, vektorler);
@@ -253,6 +251,7 @@ export const embeddingleriUret = async (metinler, {
             beklet,
             limitUygula,
             sahipligiDogrula,
+            ...zamanAyarlari(),
         });
         const vektorler = yanitVektorleriniDogrula(yanit, grup.length, ayarlar.boyut);
         await partiKaydet?.(index, vektorler);
