@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import {
     geminiIleParcalariKonularaAta,
     parcaAtamalariniDogrula,
-    eksikParcaAtamalariniTamamla,
     atamaYanitiniIncele,
 } from "../services/parcaKonuAtamaService.js";
 
@@ -45,6 +44,7 @@ test("Gemini bir chunkı atladığında veya bilinmeyen ID verdiğinde harita re
 
 test("chunk sınıflandırması ortak kota sayacını kullanır ve 503'ü kontrollü tekrar dener", async () => {
     let apiCagriSayisi = 0;
+    let kotaKontrolSayisi = 0;
     const beklemeler = [];
     const loglar = [];
     const istemci = { models: { generateContent: async () => {
@@ -57,18 +57,22 @@ test("chunk sınıflandırması ortak kota sayacını kullanır ve 503'ü kontro
             { index: 1, konuIds: ["sub-2"] },
         ] }) };
     } } };
+    const sinir = {
+        kontrolEt: () => { kotaKontrolSayisi++; },
+        hataKaydet: () => {},
+    };
     const sonuc = await geminiIleParcalariKonularaAta({
         parcalar, anaKonular, istemci, modelAdi: "mock",
-        ayarlar: { maksDeneme: 2, timeoutMs: 60000, maksBeklemeMs: 30000 },
+        sinir, ayarlar: { maksDeneme: 2, timeoutMs: 60000, maksBeklemeMs: 30000 },
         beklet: async (ms) => { beklemeler.push(ms); },
         logger: { info: (...args) => loglar.push(args), error: (...args) => loglar.push(args) },
     });
     assert.equal(sonuc.length, 2);
     assert.equal(apiCagriSayisi, 2);
-    assert.equal(beklemeler.length,1);
-    assert.ok(beklemeler[0]>=2500);
+    assert.equal(kotaKontrolSayisi, 2);
+    assert.deepEqual(beklemeler, [2500]);
     assert.ok(loglar.some(([etiket, veri]) =>
-        etiket === "[ParcaAtama] Batch tamamlandı" && veri.toplamApiCagrisi===2));
+        etiket === "[ParcaAtama] Batch hatası" && veri.httpDurumu === 503));
 });
 
 test("429 günlük kota hatasında tekrar deneme yapmaz ve terminalde batch'i bildirir", async () => {
@@ -101,7 +105,7 @@ test("şema tanısı eksik, tekrar eden ve bilinmeyen konu indexlerini ayırır"
     ], 2, ids).neden, "UNKNOWN_TOPIC_ID");
 });
 
-test("503 ve eksik index sonrası aynı batch yedek modelle kurtarılır", async () => {
+test("503 sonrası eksik index dönerse sadece başarısız batch yeniden istenir", async () => {
     let cagrilar = 0;
     const loglar = [];
     const istemci = { models: { generateContent: async () => {
@@ -113,7 +117,7 @@ test("503 ve eksik index sonrası aynı batch yedek modelle kurtarılır", async
         ] }) };
     } } };
     const sonuc = await geminiIleParcalariKonularaAta({
-        parcalar, anaKonular, istemci, modelAdi: "mock", yedekModelAdi:"mock-backup",
+        parcalar, anaKonular, istemci, modelAdi: "mock",
         sinir: { kontrolEt: () => {}, hataKaydet: () => {} },
         ayarlar: { maksDeneme: 2, timeoutMs: 60000, maksBeklemeMs: 30000 },
         beklet: async () => {},
@@ -122,35 +126,4 @@ test("503 ve eksik index sonrası aynı batch yedek modelle kurtarılır", async
     assert.equal(sonuc.length, 2);
     assert.equal(cagrilar, 3);
     assert.ok(loglar.some(([etiket, veri]) => etiket === "[ParcaAtama] Şema ayrıntısı" && veri.neden === "MISSING_INDEX"));
-});
-
-test("yalnız eksik parçalar sınıflandırılır, geçerli bağlantı korunur", async () => {
-    const sonuc = await eksikParcaAtamalariniTamamla({
-        parcalar, anaKonular, mevcutAtamalar: [{ ...parcalar[0], konuIds: ["sub-1"] }],
-        siniflandir: async eksikler => {
-            assert.deepEqual(eksikler, [parcalar[1]]);
-            return [{ ...eksikler[0], konuIds: ["sub-2"] }];
-        },
-    });
-    assert.deepEqual(sonuc.map(x => x.konuIds), [["sub-1"], ["sub-2"]]);
-});
-test("eski sürüm ve silinen konu bağlantıları kullanılmaz", async () => {
-    const sonuc = await eksikParcaAtamalariniTamamla({
-        parcalar, anaKonular, mevcutAtamalar: [
-            { ...parcalar[0], islemeId: "eski", konuIds: ["sub-1"] },
-            { ...parcalar[1], konuIds: ["silinmis"] },
-        ],
-        siniflandir: async eksikler => {
-            assert.deepEqual(eksikler, parcalar);
-            return eksikler.map(p => ({ ...p, konuIds: ["sub-2"] }));
-        },
-    });
-    assert.equal(sonuc.length, 2);
-});
-test("bütün bağlantılar geçerliyse Gemini çağrılmaz", async () => {
-    const sonuc = await eksikParcaAtamalariniTamamla({
-        parcalar, anaKonular, mevcutAtamalar: parcalar.map(p => ({ ...p, konuIds: ["sub-1"] })),
-        siniflandir: async () => { throw Error("Gemini çağrılmamalı"); },
-    });
-    assert.equal(sonuc.length, 2);
 });

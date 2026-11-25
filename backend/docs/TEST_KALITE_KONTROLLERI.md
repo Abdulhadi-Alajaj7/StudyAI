@@ -1,6 +1,6 @@
 # StudyAI Test Üretimi: Basit Akış
 
-1. Kullanıcı sahipliği, kaynak sürümleri, istek sayı aralığı ve seçilen kapsam korunur.
+1. Kullanıcı sahipliği, kaynak sürümleri ve seçilen kapsam korunur. Yeni test API'si ana konu için 10/15/20, alt konu için 5/10 seçeneklerini kabul eder. Eski kayıtların soru sayısı değişmez. Geçici JSON inceleme arayüzü kaldırılmıştır.
 2. Mevcut chunk-konu atamaları ve kaynak bütçesiyle tek kaynak paketi hazırlanır. Embedding veya yeniden sınıflandırma çağrısı yapılmaz.
 3. Gemini'ye istenen sayı, konu ve zorluk dağılımı, farklı sorular, yalnızca kaynaklara dayanma, dört seçenek, doğru cevap ve açıklama prompt ile iletilir. Alıntı/öğrenme hedefi zorunlu değildir. JSON MIME ve sabit, küçük `responseJsonSchema` kullanılır. Şema uyumsuzluğu görülürse `GEMINI_TEST_JSON_SEMA=false` ile kapatılabilir.
 4. Modelin içerik kalitesi, anlamsal tekrarları, alıntı eşleşmesi ve dağılımı yerel olarak denetlenmez. Sadece sayı ve uygulama için gerekli veri biçimi doğrulanır; gerçek kaynak kodları sunucu kayıtlarına dönüştürülür. Bilinmeyen kaynak/konu kimlikleri bağlanmaz.

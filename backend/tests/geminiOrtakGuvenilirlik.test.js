@@ -12,7 +12,7 @@ const saglayiciHatasi = (status, ek = {}) => Object.assign(new Error(JSON.string
     error: { code: status, status: status === 503 ? "UNAVAILABLE" : "RESOURCE_EXHAUSTED", ...ek },
 })), { name: "ApiError", status });
 
-test("özet iki ana denemeden sonra yedek model ile 503'ten kurtulur; başarıyı tekrar çağırmaz", async () => {
+test("özet varsayılan üç SDK denemesinde 503'ten kurtulur; başarıyı tekrar çağırmaz", async () => {
     let sayi = 0;
     const beklemeler = [];
     const sonuc = await cagir(async () => {
@@ -21,10 +21,10 @@ test("özet iki ana denemeden sonra yedek model ile 503'ten kurtulur; başarıy�
     }, { bekle: async ms => beklemeler.push(ms), rastgele: () => 1 });
     assert.equal(sonuc.icerik.genelBakis, "Özet");
     assert.equal(sayi, 3);
-    assert.deepEqual(beklemeler, [2800]);
+    assert.deepEqual(beklemeler, [1250, 2250]);
 });
 
-test("sürekli 503 iki modelde toplam dört denemeyle sınırlanır ve provider/HTTP/süre bilgisi korunur", async () => {
+test("sürekli 503 üç denemeyle sınırlanır ve provider/HTTP/süre bilgisi korunur", async () => {
     let sayi = 0;
     const beklemeler = [];
     await assert.rejects(cagir(async () => { sayi++; throw saglayiciHatasi(503); }, {
@@ -33,12 +33,12 @@ test("sürekli 503 iki modelde toplam dört denemeyle sınırlanır ve provider/
         assert.equal(hata.status, 503);
         assert.equal(hata.kod, "GEMINI_GECICI_HATA");
         assert.equal(hata.tanilama.saglayiciHataKodu, "UNAVAILABLE");
-        assert.equal(hata.tanilama.gercekDenemeSayisi, 4);
+        assert.equal(hata.tanilama.gercekDenemeSayisi, 3);
         assert.ok(hata.tanilama.toplamIslemSureMs >= 0);
         return true;
     });
-    assert.equal(sayi, 4);
-    assert.deepEqual(beklemeler, [2500, 2500]);
+    assert.equal(sayi, 3);
+    assert.deepEqual(beklemeler, [1000, 2000]);
 });
 
 test("günlük kota RetryInfo olsa bile otomatik tekrar edilmez", async () => {
@@ -52,7 +52,7 @@ test("günlük kota RetryInfo olsa bile otomatik tekrar edilmez", async () => {
     }, { bekle: async () => assert.fail("Günlük kota beklenip tekrarlanmamalı") }), hata => (
         hata.kod === "GEMINI_GUNLUK_KOTA" && hata.tanilama.kotaTuru === "gunluk"
     ));
-    assert.equal(sayi, 2);
+    assert.equal(sayi, 1);
 });
 
 test("dakikalık kota Retry-After ve RetryInfo sürelerinden önce tekrar edilmez", async () => {
@@ -70,7 +70,7 @@ test("dakikalık kota Retry-After ve RetryInfo sürelerinden önce tekrar edilme
             }
             return yanit;
         }, { bekle: async ms => beklemeler.push(ms) });
-        assert.deepEqual(beklemeler, []);
+        assert.deepEqual(beklemeler, [header ? 3000 : 2000]);
         assert.equal(sayi, 2);
     }
 });
@@ -84,7 +84,7 @@ test("uzun veya bilinmeyen kota beklemesinde hızlı retry yok; 503 kota kelimes
             hata.headers = { "retry-after": "60" };
             throw hata;
         }, { bekle: async () => assert.fail("60 saniyelik kuyruğa girilmemeli") }), hata => hata.status === status);
-        assert.equal(sayi, 2);
+        assert.equal(sayi, 1);
     }
 });
 
@@ -141,7 +141,7 @@ test("kurulu gerçek SDK timeout AbortSignal'ini fetch'e iletir ve HTTP isteğin
             istemci: new GoogleGenAI({ apiKey: "yalnizca-test-anahtari" }),
             timeoutMs: 150, maxDeneme: 1,
         }), hata => hata.kod === "GEMINI_ZAMAN_ASIMI");
-        assert.equal(fetchSayisi, 2, "Her model bir kez denenir; SDK gizli HTTP retry yapmamalı");
+        assert.equal(fetchSayisi, 1, "SDK gizli HTTP retry yapmamalı");
         assert.equal(httpSignal?.aborted, true, "Gerçek HTTP sinyali iptal edilmeli");
     } finally { globalThis.fetch = oncekiFetch; }
 });

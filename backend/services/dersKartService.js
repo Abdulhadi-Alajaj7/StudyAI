@@ -148,7 +148,7 @@ export const dersGeneliKartlariOlustur = async ({
             return islem;
         };
         const isci = async () => {
-            while (sira < kalan.length && !kota && (!kaynak.konuBaglantili || Date.now()-bas < 105_000)) {
+            while (sira < kalan.length && !kota) {
                 const grup = kalan[sira++];
                 const t0 = Date.now();
                 try {
@@ -157,7 +157,7 @@ export const dersGeneliKartlariOlustur = async ({
                         oncekiSorular: kaynak.konuBaglantili
                             ? mevcut.filter(k=>grup.konular.some(konu=>konu.konuId===k.konuId)).slice(-30)
                             : mevcut,
-                    }, kaynak.konuBaglantili?{sonZaman:bas+112_000}:{});
+                    });
                     if (!Array.isArray(cevap?.kartlar))
                         throw new DersKartiHatasi(
                             "Kart üretimi geçerli yanıt dönmedi.", 502, "KART_GECERSIZ_YANIT"
@@ -212,7 +212,7 @@ export const dersGeneliKartlariOlustur = async ({
                 }
             }
         };
-        await Promise.all(Array.from({ length: Math.min(kaynak.konuBaglantili?1:2, kalan.length) },
+        await Promise.all(Array.from({ length: Math.min(2, kalan.length) },
             () => isci()));
         const tamamlandi = kaynak.gruplar.every((g) => islenen.has(g.imza));
         const r = await x.DersModel.updateOne({

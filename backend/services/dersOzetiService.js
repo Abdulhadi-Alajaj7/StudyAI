@@ -618,7 +618,6 @@ const geminiOzetiniUret = async ({
     materyaller,
     parcalar,
     heartbeat,
-    sonZaman,
 }, deps) => {
     const materyalHaritasi = new Map(
         materyaller.map((materyal) => [kimlikMetni(materyal._id), materyal])
@@ -640,7 +639,7 @@ const geminiOzetiniUret = async ({
         return deps.geminiOzetUret({
             ...ortakGirdi,
             kaynakMetni: batchler[0],
-        }, { sonZaman });
+        });
     }
 
     const araOzetler = [];
@@ -650,7 +649,7 @@ const geminiOzetiniUret = async ({
             ...ortakGirdi,
             kaynakMetni: batch,
             araOzet: true,
-        }, { sonZaman });
+        });
         araOzetler.push(`ARA ÖZET ${index + 1}:\n${JSON.stringify(araSonuc.icerik)}`);
     }
 
@@ -658,7 +657,7 @@ const geminiOzetiniUret = async ({
     return deps.geminiOzetUret({
         ...ortakGirdi,
         kaynakMetni: araOzetler.join("\n\n"),
-    }, { sonZaman });
+    });
 };
 
 export const kayitliDersOzetiniGetir = async ({
@@ -714,7 +713,6 @@ export const dersOzetiOlustur = async ({
     uzunluk,
     yenidenOlustur = false,
 }, bagimliliklar = {}) => {
-    const sonZaman = Date.now()+112_000;
     const deps = bagimliliklariGetir(bagimliliklar);
     const ders = await dersiGetir({ kullaniciId, dersId }, deps.DersModel);
     const hedef = await hedefiDogrula({
@@ -854,7 +852,7 @@ export const dersOzetiOlustur = async ({
             uzunluk,
             materyaller: kaynakVerisi.materyaller,
             parcalar: kaynakVerisi.parcalar,
-            heartbeat, sonZaman,
+            heartbeat,
         }, deps);
 
         await heartbeat();
