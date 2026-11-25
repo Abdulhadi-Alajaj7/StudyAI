@@ -226,6 +226,7 @@ mock.module("../models/Ders.js", {
 mock.module("../services/geminiService.js", {
     namedExports: {
         VARSAYILAN_GEMINI_MODELI: "test-model",
+        yapilandirilmisGeminiCagrisi: async () => { throw new Error("Bu eski harita senaryosunda parça ataması çağrılmamalı"); },
         geminiIleKonuHaritasiUret: async () => {
             if (mockGeminiBekleme) {
                 await mockGeminiBekleme();
