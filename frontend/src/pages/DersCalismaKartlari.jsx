@@ -73,7 +73,7 @@ function DersCalismaKartlari() {
           setUretimMesaji("");
           setHata("");
         } else {
-          setKartlar(r.data.kartlar || []);
+          setKartlar([]);
         }
       } catch (e) {
         // Geçici bağlantı sorunu arka plandaki üretimi durdurmaz.
@@ -96,8 +96,9 @@ function DersCalismaKartlari() {
       ? "Kartlar henüz tamamlanamadı. Kayıtlı ilerleme korunuyor; daha sonra tekrar başlatabilirsiniz."
       : "Dersin önemli bilgileri çalışma kartlarına dönüştürülecek.";
 
-  const konuSecenekleri=useMemo(()=>[...new Map(kartlar.map(k=>[k.konuId||"eski",k.konuBasligi||"Konu bağlantısı olmayan kartlar"])).entries()],[kartlar]);
-  const konuKartlari=useMemo(()=>kartlar.filter(k=>konuFiltre==="tum"||(k.konuId||"eski")===konuFiltre),[kartlar,konuFiltre]);
+  const gosterilenKartlar = uretimAktif || uretimHatasi || uretim.yeniKonuKartlariGerekli ? [] : kartlar;
+  const konuSecenekleri=useMemo(()=>[...new Map(gosterilenKartlar.map(k=>[k.konuId||"eski",k.konuBasligi||"Konu bağlantısı olmayan kartlar"])).entries()],[gosterilenKartlar]);
+  const konuKartlari=useMemo(()=>gosterilenKartlar.filter(k=>konuFiltre==="tum"||(k.konuId||"eski")===konuFiltre),[gosterilenKartlar,konuFiltre]);
   const sayilar = useMemo(() => ({
     tum: konuKartlari.length,
     gorulmeyen: konuKartlari.filter(k => !k.goruldu).length,
@@ -136,7 +137,10 @@ function DersCalismaKartlari() {
       if (controller.signal.aborted) return;
       setUretim(eski => ({ ...eski, ...r.data }));
       if (r.data.uretimSuruyor) {
-        // Önceden kaydedilmiş kartlar üretim sırasında kullanılabilir.
+        // Tamamlanana kadar kısmi kartlar öğrenciye sunulmaz.
+        setKartlar([]);
+        setIndex(0);
+        setCevapAcik(false);
       } else {
         const mevcut = await api.listele(dersId, controller.signal);
         if (controller.signal.aborted) return;
@@ -217,7 +221,7 @@ function DersCalismaKartlari() {
         <p className="mt-2 text-3xl font-bold">{sayilar[id]}</p>
       </button>)}
     </div>
-    {!yukleniyor && kartlar.length>0 && (
+    {!yukleniyor && gosterilenKartlar.length>0 && (
       <div className="flex flex-wrap items-center gap-3">
         {konuSecenekleri.some(([id])=>id!=="eski") && <label className="flex flex-1 flex-wrap items-center gap-2 text-sm">
           Konu Seçimi
@@ -250,7 +254,7 @@ function DersCalismaKartlari() {
       </div>
     )}
     {hata && <p role="alert" className="rounded-xl border border-rose-400/40 bg-rose-500/10 p-4 text-sm text-rose-400">{hata}</p>}
-    {yukleniyor ? <div role="status" className="py-14 text-center">Kartlar yükleniyor...</div> : !kartlar.length ?
+    {yukleniyor ? <div role="status" className="py-14 text-center">Kartlar yükleniyor...</div> : !gosterilenKartlar.length ?
       <div className={`flex min-h-[380px] flex-col items-center justify-center rounded-2xl border p-8 text-center ${panel}`}>
         <RectangleStackIcon className="h-14 w-14 text-violet-400" />
         <h3 className="mt-5 text-xl font-bold">Bilgilerini kartlarla kalıcı hâle getir</h3>

@@ -201,3 +201,25 @@ test("Sunucu yeniden açıldığında MongoDB'deki bekleyen işi otomatik kurtar
     assert.equal(x.ders.kartDersOtomatikAktif, false);
     assert.equal(x.ders.kartDersTamamlandi, true);
 });
+
+test("Konu bağlantılı kartlar bütün gruplar bitmeden listelenmez", async () => {
+    const x = kur();
+    x.ders.kartDersSurumImzasi = "konu-v2:surum";
+    x.ders.kartDersIslenenGrupImzalari = ["1"];
+    x.ders.kartDersOtomatikAktif = true;
+    const deps = {DersModel: x.DersModel, KartModel: x.KartModel};
+    const kismi = await calismaKartlariDurumunuGetir(x.args, deps);
+    assert.deepEqual(kismi.kartlar, []);
+    assert.equal(kismi.islenenGrupSayisi, 1);
+    assert.equal(x.getKartOkuma(), 0);
+    x.ders.kartDersOtomatikAktif = false;
+    x.ders.kartDersOtomatikHataKodu = "KART_URETIM_DOGRULANAMADI";
+    assert.deepEqual((await calismaKartlariDurumunuGetir(x.args, deps)).kartlar, []);
+    x.ders.kartDersOtomatikHataKodu = "";
+    x.ders.kartDersTamamlandi = true;
+    x.ders.kartDersIslenenGrupImzalari = ["1", "2", "3"];
+    const tam = await calismaKartlariDurumunuGetir(x.args, deps);
+    assert.equal(tam.dersKartTamamlandi, true);
+    assert.equal(tam.kartlar.length, 2);
+    assert.equal(x.getKartOkuma(), 1);
+});

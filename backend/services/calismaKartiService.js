@@ -35,7 +35,7 @@ export const calismaKartlariDurumunuGetir = async ({ kullaniciId, dersId }, d = 
         !uretimSuruyor && !yeniKonuKartlariGerekli;
     // Yarım üretilmiş kartlar ve eski kartlar öğrencinin önüne düşmez.
     // Tamamlanma anında bütün ders kartları tek defada açılır.
-    const kartlarGosterilsin = konuSistemi || yeniKonuKartlariGerekli || (!uretimSuruyor && (!yeniSistem || tamamlandi));
+    const kartlarGosterilsin = !uretimSuruyor && !yeniKonuKartlariGerekli && (!yeniSistem || tamamlandi);
     const kartlar = kartlarGosterilsin
         ? await x.KartModel.find({ kullaniciId, dersId })
             .sort({ createdAt: 1, _id: 1 }).lean()

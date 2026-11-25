@@ -112,3 +112,10 @@ test("sonuç ekranı backend sonucunu ve bütün soruları salt okunur gösterir
     assert.match(sonucKaynagi, /soru\.aciklama/);
     assert.doesNotMatch(sonucKaynagi, /cevabiKaydet|soruIsaretiniGuncelle|testOlustur/);
 });
+
+test("Test formu yalnız önceden tanımlı soru sayıları ve başlatma eylemi gösterir", () => {
+    assert.doesNotMatch(sayfaKaynagi, /type="number"|Soru sayısı \(1–20\)|konu için en az|test-json-denetim|JSON Kopyala|jsonAcik/);
+    assert.match(sayfaKaynagi, /const anaKonuSoruSayilari = \[10, 15, 20\]/);
+    assert.match(sayfaKaynagi, /const altKonuSoruSayilari = \[5, 10\]/);
+    assert.match(sayfaKaynagi, /Testi Başlat/);
+});
