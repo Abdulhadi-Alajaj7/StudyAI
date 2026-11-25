@@ -360,6 +360,7 @@ export const yapilandirilmisGeminiCagrisi = async (ayar) => {
     const tokenEkle = (k) => { for (const alan of Object.keys(toplam)) toplam[alan] += Number(k?.[alan]) || 0; };
     let sonModel = ayar.modelAdi;
     let gercekDeneme = 0;
+    const modelDenemeleri = new Map();
     try {
         const r = await yonetim.calistir({
             adaylar, tahminiGirdi: Math.ceil((ayar.prompt.length + ayar.systemInstruction.length)/3),
@@ -369,6 +370,7 @@ export const yapilandirilmisGeminiCagrisi = async (ayar) => {
             maxDeneme: Math.min(2, ayar.maxDeneme || 2), oncelik: ayar.oncelik || "normal",
             istek: async (aday, sure, signal) => {
                 sonModel = aday.saglayici === "groq" ? "groq/"+aday.model : aday.model;
+                modelDenemeleri.set(sonModel,(modelDenemeleri.get(sonModel)||0)+1);
                 const istemci = aday.saglayici === "groq" ? groqIstemcisiOlustur() : ayar.istemci;
                 try {
                     const sonuc = await tekGeminiCagrisi({
@@ -394,7 +396,9 @@ export const yapilandirilmisGeminiCagrisi = async (ayar) => {
     } catch(hata) {
         const sinif = geminiHatasiniSiniflandir(hata);
         sinif.tanilama = { ...sinif.tanilama, model: sonModel, gercekDenemeSayisi: butce.kullanilan,
-            apiCagriSayisi: butce.kullanilan, toplamIslemSureMs: Math.round(performance.now()-baslangic) };
+            apiCagriSayisi: butce.kullanilan, maksimumDenemeSayisi: Math.min(2,ayar.maxDeneme||2),
+            retryEdildiMi: (modelDenemeleri.get(sonModel)||0)>1,
+            toplamIslemSureMs: Math.round(performance.now()-baslangic) };
         throw sinif;
     }
 };
