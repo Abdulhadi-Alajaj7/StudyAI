@@ -8,12 +8,33 @@ import {
     soruSonucDurumunuGetir,
     testCozumOzetiniGetir,
     testCozmeYolu,
+    testSoruSayilariGetir,
+    testAltKonuUyarisiGetir,
+    testEksikSoruMesaji,
     testHedefBilgisi,
     testIlerlemeBilgisi,
     testOlusturmaButonuDevreDisiMi,
     testOlusturmaGirdisiOlustur,
     testSonucYolu,
 } from "../src/utils/testlerYardimcilari.mjs";
+
+test("yalnız mevcut ana ve alt konu soru sayıları kabul edilir", () => {
+    for (const [konuId, izinli] of [["sub-ornek", [5, 10]], ["top-ornek", [10, 15, 20]]]) {
+        assert.deepEqual(testSoruSayilariGetir("konu", konuId), izinli);
+        for (const soruSayisi of [0, 1, 5, 7, 10, 12, 15, 20, 21, 1.5, "", true]) {
+            const sonuc = testOlusturmaGirdisiOlustur({ kapsamTuru: "konu", konuId, soruSayisi, zorluk: "orta" });
+            assert.equal(sonuc?.soruSayisi ?? null, izinli.includes(soruSayisi) ? soruSayisi : null);
+        }
+    }
+});
+
+test("alt konu uyarısı yalnız seçilen sayı yetersizse görünür", () => {
+    assert.match(testAltKonuUyarisiGetir(11, 10), /11 alt konu/);
+    assert.equal(testAltKonuUyarisiGetir(11, 15), "");
+    assert.equal(testAltKonuUyarisiGetir(4, 10), "");
+    assert.equal(testAltKonuUyarisiGetir(10, 10), "");
+    assert.match(testAltKonuUyarisiGetir(21, 20), /test edilemez/);
+});
 
 test("test oluşturma girdisi yalnızca seçilen kapsama ait kimliği taşır", () => {
     const tumDersGirdisi = testOlusturmaGirdisiOlustur({
@@ -40,11 +61,17 @@ test("test oluşturma girdisi yalnızca seçilen kapsama ait kimliği taşır", 
     }), true);
     assert.deepEqual(testOlusturmaGirdisiOlustur({
         kapsamTuru: "materyal",
-        soruSayisi: 5,
+        soruSayisi: 10,
         zorluk: "kolay",
         materyalId: "m1",
         konuId: "k1",
-    }), { kapsamTuru: "materyal", soruSayisi: 5, zorluk: "kolay", materyalId: "m1" });
+    }), { kapsamTuru: "materyal", soruSayisi: 10, zorluk: "kolay", materyalId: "m1" });
+    assert.equal(testOlusturmaGirdisiOlustur({
+        kapsamTuru: "materyal",
+        soruSayisi: 0,
+        zorluk: "kolay",
+        materyalId: "m1",
+    }), null);
     assert.equal(testOlusturmaGirdisiOlustur({
         kapsamTuru: "konu",
         soruSayisi: 10,
@@ -128,4 +155,22 @@ test("sonuç durumu backend doğru cevabına göre belirlenir ve kaynak adları 
             { dosyaAdi: " " },
         ],
     }), ["Hafta 1.pdf", "Ders Notu.docx"]);
+});
+
+
+test("kısmi soru sayısında gerçek sonuç ve anlaşılır Türkçe neden gösterilir", () => {
+    const kismi = {
+        soruSayisi: 17, istenenSoruSayisi: 20,
+        eksikSoruNedeni: "KALITE_KONTROLU", sorular: [],
+    };
+    assert.match(testEksikSoruMesaji(kismi), /20 sorudan 17 soru/);
+    assert.match(testEksikSoruMesaji(kismi), /3 eksik/);
+    assert.match(testEksikSoruMesaji(kismi), /dört seçenek veya cevap eksikti/);
+    assert.equal(testEksikSoruMesaji({ soruSayisi: 10, istenenSoruSayisi: 10 }), "");
+    const kaynak = { ...kismi, eksikSoruNedeni: "KAYNAK_KAPASITESI" };
+    assert.match(testEksikSoruMesaji(kaynak), /Gemini, kaynak metinlere dayanarak/);
+    const json = testDenetimVerisiniOlustur(kismi);
+    assert.equal(json.soruSayisi, 17);
+    assert.equal(json.istenenSoruSayisi, 20);
+    assert.equal(json.eksikSoruNedeni, "KALITE_KONTROLU");
 });

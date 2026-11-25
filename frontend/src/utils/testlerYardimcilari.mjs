@@ -1,5 +1,4 @@
 export const TEST_KAPSAMLARI = ["tum_ders", "materyal", "konu"];
-export const TEST_SORU_SAYILARI = [5, 10, 15, 20];
 export const TEST_ZORLUKLARI = ["kolay", "orta", "zor", "karisik"];
 
 const kapsamEtiketleri = {
@@ -17,6 +16,15 @@ const zorlukEtiketleri = {
 
 const sinirla = (deger, alt, ust) => Math.min(Math.max(deger, alt), ust);
 
+export const testSoruSayilariGetir = (kapsamTuru, konuId = "") => (
+    kapsamTuru === "konu" && String(konuId).startsWith("sub-") ? [5, 10] : [10, 15, 20]
+);
+
+export const testAltKonuUyarisiGetir = (altKonuSayisi, soruSayisi) => {
+    if (altKonuSayisi <= soruSayisi) return "";
+    return `Seçilen konuda ${altKonuSayisi} alt konu var. En az ${altKonuSayisi} soru gerekir. ${altKonuSayisi > 20 ? "Mevcut seçeneklerle bu konu test edilemez." : "Daha yüksek soru sayısı seçin."}`;
+};
+
 export const testOlusturmaGirdisiOlustur = ({
     kapsamTuru,
     soruSayisi,
@@ -27,7 +35,7 @@ export const testOlusturmaGirdisiOlustur = ({
     const sayi = Number(soruSayisi);
     if (
         !TEST_KAPSAMLARI.includes(kapsamTuru) ||
-        !TEST_SORU_SAYILARI.includes(sayi) ||
+        !testSoruSayilariGetir(kapsamTuru, konuId).includes(sayi) || typeof soruSayisi === "boolean" ||
         !TEST_ZORLUKLARI.includes(zorluk)
     ) {
         return null;
@@ -44,6 +52,18 @@ export const testOlusturmaGirdisiOlustur = ({
             : null;
     }
     return { kapsamTuru, soruSayisi: sayi, zorluk };
+};
+
+export const testEksikSoruMesaji = (test) => {
+    const istenen = Number(test?.istenenSoruSayisi);
+    const hazirlanan = Number(test?.soruSayisi);
+    if (!Number.isInteger(istenen) || !Number.isInteger(hazirlanan) ||
+        istenen <= hazirlanan || hazirlanan < 1) return "";
+    const eksik = istenen - hazirlanan;
+    const neden = test?.eksikSoruNedeni === "KAYNAK_KAPASITESI"
+        ? "Gemini, kaynak metinlere dayanarak daha fazla farklı soru oluşturamadı."
+        : "Gemini'nin yanıtındaki bazı sorularda soru metni, dört seçenek veya cevap eksikti.";
+    return `İstenen ${istenen} sorudan ${hazirlanan} soru hazırlandı (${eksik} eksik). ${neden} Hazırlanan sorularla teste devam edebilirsiniz.`;
 };
 
 export const testOlusturmaButonuDevreDisiMi = ({

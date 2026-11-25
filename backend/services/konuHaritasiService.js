@@ -5,9 +5,12 @@ import Materyal from "../models/Materyal.js";
 import MetinParcasi from "../models/MetinParcasi.js";
 import KonuHaritasi from "../models/KonuHaritasi.js";
 import Ders from "../models/Ders.js";
+import { geminiIleParcalariKonularaAta, eksikParcaAtamalariniTamamla } from "./parcaKonuAtamaService.js";
 
 import {
     geminiIleKonuHaritasiUret,
+    geminiIleKaynakliKonuHaritasiUret,
+    geminiIleKaynakliKonulariBirlestir,
     geminiIleKonulariBirlestir,
     VARSAYILAN_GEMINI_MODELI
 } from "./geminiService.js";
@@ -95,6 +98,8 @@ const geminiTekrarlariniTemizle = (konular = []) => {
             }
 
             const mevcutAlt = gorulenAltlar.get(anahtar);
+            mevcutAlt.parcaKodlari = [...new Set([...(mevcutAlt.parcaKodlari || []), ...(alt.parcaKodlari || [])])];
+            mevcutAlt.parcaKodlari = [...new Set([...(mevcutAlt.parcaKodlari || []), ...(alt.parcaKodlari || [])])];
 
             if (
                 (alt.aciklama || "").length >
@@ -191,12 +196,15 @@ export const aktifMateryalMetinleriniTopla = async (
 
     const BATCH_MAX_KARAKTER = 80000;
     const metinGruplari = [];
+    const parcaKodlari = new Map();
 
     let mevcutGrup = [];
     let mevcutGrupKarakter = 0;
     let sonMateryalId = null;
 
-    for (const parca of metinParcalari) {
+    for (const [index, parca] of metinParcalari.entries()) {
+        const kod = "P" + (index + 1);
+        parcaKodlari.set(kod, { materyalId: parca.materyalId, islemeId: parca.islemeId, parcaIndex: parca.parcaIndex });
         const matIdStr = parca.materyalId.toString();
 
         const matBilgi = hazirMateryaller.find(
@@ -207,7 +215,7 @@ export const aktifMateryalMetinleriniTopla = async (
             ? (matBilgi.orijinalDosyaAdi || matBilgi.dosyaAdi)
             : "Materyal";
 
-        let parcaMetni = parca.icerik || "";
+        let parcaMetni = `[PARCA ${kod}]\n${parca.icerik || ""}`;
 
         if (sonMateryalId !== matIdStr) {
             parcaMetni =
@@ -239,7 +247,8 @@ export const aktifMateryalMetinleriniTopla = async (
     return {
         hazirMateryaller,
         metinGruplari,
-        toplamParcaSayisi: metinParcalari.length
+        toplamParcaSayisi: metinParcalari.length,
+        parcaKodlari
     };
 };
 
@@ -278,7 +287,8 @@ export const konuHaritasiUretVeKaydet = async (
         const {
             hazirMateryaller,
             metinGruplari,
-            toplamParcaSayisi
+            toplamParcaSayisi,
+            parcaKodlari
         } = await aktifMateryalMetinleriniTopla(
             ders._id,
             kullaniciId
@@ -306,6 +316,7 @@ export const konuHaritasiUretVeKaydet = async (
         }));
 
         let hamKonular = [];
+        const kaynakliHarita = parcaKodlari instanceof Map && parcaKodlari.size === toplamParcaSayisi;
         const kullanilanModeller = new Set();
 
         const dersBilgisi = {
@@ -315,7 +326,7 @@ export const konuHaritasiUretVeKaydet = async (
         };
 
         if (metinGruplari.length === 1) {
-            hamKonular = await heartbeat.bekle(geminiIleKonuHaritasiUret(
+            hamKonular = await heartbeat.bekle((kaynakliHarita ? geminiIleKaynakliKonuHaritasiUret : geminiIleKonuHaritasiUret)(
                 metinGruplari[0],
                 dersBilgisi,
                 modelAdi
@@ -326,7 +337,7 @@ export const konuHaritasiUretVeKaydet = async (
 
             for (const grupMetin of metinGruplari) {
                 const araListe =
-                    await heartbeat.bekle(geminiIleKonuHaritasiUret(
+                    await heartbeat.bekle((kaynakliHarita ? geminiIleKaynakliKonuHaritasiUret : geminiIleKonuHaritasiUret)(
                         grupMetin,
                         dersBilgisi,
                         modelAdi
@@ -338,7 +349,7 @@ export const konuHaritasiUretVeKaydet = async (
                 }
             }
 
-            hamKonular = await heartbeat.bekle(geminiIleKonulariBirlestir(
+            hamKonular = await heartbeat.bekle((kaynakliHarita ? geminiIleKaynakliKonulariBirlestir : geminiIleKonulariBirlestir)(
                 araKonuListeleri,
                 dersBilgisi,
                 modelAdi
@@ -628,6 +639,70 @@ export const konuHaritasiUretVeKaydet = async (
         );
         const kaliciAnaKonular = konuSiralariniDuzenle(kaliciAnaKonularHam);
 
+        // Nihai (ID'leri sabitlenmiş) haritayı Gemini öğretmen olarak kullanır.
+        // Her aktif chunk bir veya birden çok konuya atanır; eksik atamada
+        // harita "hazır" olarak yayımlanmaz.
+        const aktifSurumFiltreleri = hazirMateryaller.map((m) => ({
+            materyalId: m._id, islemeId: m.aktifIslemeId,
+        }));
+        const siniflandirmaSorgusu = MetinParcasi.find({
+            dersId: ders._id, kullaniciId, $or: aktifSurumFiltreleri,
+        });
+        // Eski test çiftleri yalın dizi döndürür; gerçek Mongoose sorgusu
+        // select/sort/lean zincirini destekler.
+        const seciliSiniflandirmaSorgusu = typeof siniflandirmaSorgusu.select === "function"
+            ? siniflandirmaSorgusu.select("materyalId islemeId parcaIndex icerik") : null;
+        const siniflandirmaDestekli = typeof seciliSiniflandirmaSorgusu?.sort === "function" &&
+            typeof seciliSiniflandirmaSorgusu?.lean === "function";
+        const siniflandirilacakParcalar = siniflandirmaDestekli
+            ? await seciliSiniflandirmaSorgusu.sort({ materyalId: 1, parcaIndex: 1 }).lean()
+            : [];
+        if (siniflandirmaDestekli && siniflandirilacakParcalar.length !== toplamParcaSayisi) {
+            throw new Error("Analiz sırasında aktif metin parçaları değişti.");
+        }
+        let parcaKonuAtamalari = [];
+        if (siniflandirmaDestekli && kaynakliHarita) {
+            // Başlıklar kalıcı konu kimliklerine eşleştirildikten sonra
+            // Gemini'nin ilk analizde döndürdüğü kaynak kodlarını bağla.
+            const atamaMap = new Map();
+            for (const [anaIndex, ana] of hamKonular.entries()) {
+                const kalici = kaliciAnaKonular[anaIndex];
+                if (!kalici) continue;
+                const ekle = (kodlar, konuId) => {
+                    for (const kod of kodlar || []) {
+                        if (!parcaKodlari.has(kod)) continue;
+                        if (!atamaMap.has(kod)) atamaMap.set(kod, new Set());
+                        atamaMap.get(kod).add(konuId);
+                    }
+                };
+                ekle(ana.parcaKodlari, kalici.konuId);
+                for (const [altIndex, alt] of (ana.altKonular || []).entries()) {
+                    const konuId = kalici.altKonular?.[altIndex]?.konuId;
+                    if (konuId) ekle(alt.parcaKodlari, konuId);
+                }
+            }
+            const eksik = [...parcaKodlari.keys()].filter(kod => !atamaMap.has(kod));
+            console.info("[KonuHaritasiKaynak] İlk analizden atama", {
+                toplamParca: parcaKodlari.size, eslesenParca: atamaMap.size,
+                eksikParca: eksik.length, ayriSiniflandirmaGerekli: eksik.length > 0,
+            });
+            const atamalar = [...atamaMap].map(([kod, ids]) => ({
+                ...parcaKodlari.get(kod), konuIds: [...ids],
+            }));
+            parcaKonuAtamalari = await heartbeat.bekle(eksikParcaAtamalariniTamamla({
+                parcalar: siniflandirilacakParcalar, anaKonular: kaliciAnaKonular,
+                mevcutAtamalar: atamalar,
+                siniflandir: (eksikParcalar) => geminiIleParcalariKonularaAta({
+                    parcalar: eksikParcalar, anaKonular: kaliciAnaKonular, modelAdi,
+                }),
+            }));
+        } else if (siniflandirmaDestekli) {
+            parcaKonuAtamalari = await heartbeat.bekle(geminiIleParcalariKonularaAta({
+                parcalar: siniflandirilacakParcalar, anaKonular: kaliciAnaKonular, modelAdi,
+            }));
+        }
+        await heartbeat.kilidiDogrula();
+
         // =========================================
         // KONU ID EŞLEŞTİRME SONU
         // =========================================
@@ -706,6 +781,8 @@ export const konuHaritasiUretVeKaydet = async (
                         durum: "hazir",
                         olusturmaHatasi: "",
                         anaKonular: kaliciAnaKonular,
+                        parcaKonuAtamalari,
+                        parcaAtamaSurumu: siniflandirmaDestekli ? 1 : 0,
                         gecmisKonular: nihaiGecmisKonular,
                         toplamAnaKonuSayisi:
                             kaliciAnaKonular.length,
@@ -1462,6 +1539,29 @@ const materyalEklendigindeIncrementalGuncelleIslemi = async (
     }
 
     const nihaiAnaKonular = konuSiralariniDuzenle(Array.from(nihaiAnaKonuMap.values()));
+    // Incremental güncelleme de eksiksiz sınıflandırma olmadan yayınlanmaz.
+    const aktifMateryaller = await Materyal.find({
+        dersId, kullaniciId, durum: "hazir", aktifIslemeId: { $ne: null },
+    }).select("_id aktifIslemeId");
+    const aktifParcaSorgusu = MetinParcasi.find({
+        dersId, kullaniciId,
+        $or: aktifMateryaller.map((m) => ({
+            materyalId: m._id, islemeId: m.aktifIslemeId,
+        })),
+    });
+    const seciliParcaSorgusu = typeof aktifParcaSorgusu.select === "function"
+        ? aktifParcaSorgusu.select("materyalId islemeId parcaIndex icerik") : null;
+    const siniflandirmaDestekli = typeof seciliParcaSorgusu?.lean === "function";
+    const aktifParcalar = siniflandirmaDestekli ? await seciliParcaSorgusu.lean() : [];
+    const parcaKonuAtamalari = siniflandirmaDestekli
+        ? await eksikParcaAtamalariniTamamla({
+            parcalar: aktifParcalar, anaKonular: nihaiAnaKonular,
+            mevcutAtamalar: mevcutHarita?.parcaKonuAtamalari || [],
+            siniflandir: (eksikParcalar) => geminiIleParcalariKonularaAta({
+                parcalar: eksikParcalar, anaKonular: nihaiAnaKonular, modelAdi,
+            }),
+        }) : [];
+
 
     let toplamAlt = 0;
     for (const ana of nihaiAnaKonular) {
@@ -1515,6 +1615,8 @@ const materyalEklendigindeIncrementalGuncelleIslemi = async (
                 durum: "hazir",
                 olusturmaHatasi: "",
                 anaKonular: nihaiAnaKonular,
+                parcaKonuAtamalari,
+                parcaAtamaSurumu: siniflandirmaDestekli ? 1 : 0,
                 gecmisKonular: nihaiGecmis,
                 toplamAnaKonuSayisi: nihaiAnaKonular.length,
                 toplamAltKonuSayisi: toplamAlt,
@@ -1553,6 +1655,8 @@ const materyalEklendigindeIncrementalGuncelleIslemi = async (
                 durum: "hazir",
                 olusturmaHatasi: "",
                 anaKonular: nihaiAnaKonular,
+                parcaKonuAtamalari,
+                parcaAtamaSurumu: siniflandirmaDestekli ? 1 : 0,
                 gecmisKonular: nihaiGecmis,
                 toplamAnaKonuSayisi: nihaiAnaKonular.length,
                 toplamAltKonuSayisi: toplamAlt,
@@ -1797,6 +1901,8 @@ const materyalSilindigindeGuncelleIslemi = async (materyalId, dersId, kullaniciI
                 durum: yeniDurum,
                 olusturmaHatasi: "",
                 anaKonular: siraliGuncelAnaKonular,
+                parcaKonuAtamalari: [],
+                parcaAtamaSurumu: 0,
                 gecmisKonular: nihaiGecmis,
                 toplamAnaKonuSayisi: siraliGuncelAnaKonular.length,
                 toplamAltKonuSayisi: toplamAlt,

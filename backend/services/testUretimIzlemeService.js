@@ -2,9 +2,14 @@ import { testTanilamaEtkinMi } from "./testTanilamaService.js";
 
 export const TEST_URETIM_IZLEME_ETIKETI = "[TEST_URETIM_IZLEME]";
 
-const CAGRI_TURLERI = new Set(["uretim", "onarim", "kurtarma"]);
+const CAGRI_TURLERI = new Set(["uretim", "onarim"]);
 const KAPSAM_TURLERI = new Set(["tum_ders", "materyal", "konu"]);
 const ZORLUKLAR = new Set(["kolay", "orta", "zor", "karisik"]);
+const RED_KODLARI = [
+    "EKSIK_ALAN", "DOGRU_CEVAP", "SECENEK_FORMATI", "ZORLUK_DAGILIMI",
+    "BILINMEYEN_KONU_KIMLIGI", "KAYNAK_REFERANSI", "KAYNAK_KONU_UYUSMAZLIGI",
+    "KAYNAK_KANITI", "CEVAP_ACIKLAMA_UYUSMAZLIGI", "TEKRARLAYAN_SORU",
+];
 
 const guvenliTanimlayici = (deger, azamiUzunluk = 100) => (
     typeof deger === "string" &&
@@ -37,7 +42,6 @@ export const testUretimIzleyicisiOlustur = (meta = {}, {
         toplamSdkCagriSayisi: 0,
         ilkUretimCagriSayisi: 0,
         onarimCagriSayisi: 0,
-        kurtarmaCagriSayisi: 0,
         sdkRetryCagriSayisi: 0,
         toplamOnarimDenemesi: 0,
         tokenKullanimi: { girdi: 0, cikti: 0, toplam: 0 },
@@ -67,9 +71,7 @@ export const testUretimIzleyicisiOlustur = (meta = {}, {
         sdkCagrisiBasladi({
             anaCagriTuru,
             sdkDenemesi,
-            partiIndeksi,
-            partiBoyutu,
-            kurtarmaDerinligi,
+            model,
         } = {}) {
             const guvenliAnaTur = CAGRI_TURLERI.has(anaCagriTuru)
                 ? anaCagriTuru
@@ -80,8 +82,6 @@ export const testUretimIzleyicisiOlustur = (meta = {}, {
                 sayaclar.sdkRetryCagriSayisi += 1;
             } else if (guvenliAnaTur === "onarim") {
                 sayaclar.onarimCagriSayisi += 1;
-            } else if (guvenliAnaTur === "kurtarma") {
-                sayaclar.kurtarmaCagriSayisi += 1;
             } else {
                 sayaclar.ilkUretimCagriSayisi += 1;
             }
@@ -90,9 +90,7 @@ export const testUretimIzleyicisiOlustur = (meta = {}, {
                 cagriTuru: retryMi ? "sdk_retry" : guvenliAnaTur,
                 anaCagriTuru: guvenliAnaTur,
                 sdkDenemesi: guvenliPozitifTamSayi(sdkDenemesi),
-                partiIndeksi: guvenliPozitifTamSayi(partiIndeksi),
-                partiBoyutu: guvenliPozitifTamSayi(partiBoyutu),
-                kurtarmaDerinligi: guvenliPozitifTamSayi(kurtarmaDerinligi),
+                model: guvenliTanimlayici(model),
             });
         },
         sdkCagrisiTamamlandi({ tokenKullanimi } = {}) {
@@ -101,6 +99,23 @@ export const testUretimIzleyicisiOlustur = (meta = {}, {
                 if (deger != null) sayaclar.tokenKullanimi[alan] += deger;
             }
         },
+        soruDogrulamasiTamamlandi(veri = {}) {
+            const alanlar = {};
+            for (const alan of [
+                "istenenYeniSoru", "gelenYeniSoru", "oncekiGecerliSoru",
+                "reddedilenSoru", "kotaDisiSoru", "gecerliSoru", "eksikSoru", "eksikKonu",
+            ]) alanlar[alan] = guvenliPozitifTamSayi(veri[alan]);
+            const redNedenleri = Object.fromEntries(RED_KODLARI
+                .filter((kod) => guvenliPozitifTamSayi(veri.redNedenleri?.[kod]) > 0)
+                .map((kod) => [kod, veri.redNedenleri[kod]]));
+            const eksikZorluk = Object.fromEntries(["kolay", "orta", "zor"]
+                .filter((kod) => guvenliPozitifTamSayi(veri.eksikZorluk?.[kod]) !== null)
+                .map((kod) => [kod, veri.eksikZorluk[kod]]));
+            yaz("soru_dogrulama_sonucu", {
+                asama: CAGRI_TURLERI.has(veri.asama) ? veri.asama : null,
+                ...alanlar, redNedenleri, eksikZorluk,
+            });
+        },
         onarimBasladi({ hataNedeni, soruIndeksi, onarimDenemesi } = {}) {
             sayaclar.toplamOnarimDenemesi += 1;
             yaz("soru_onarimi", {
@@ -108,15 +123,6 @@ export const testUretimIzleyicisiOlustur = (meta = {}, {
                 soruIndeksi: guvenliPozitifTamSayi(soruIndeksi),
                 onarimDenemesi: guvenliPozitifTamSayi(onarimDenemesi),
                 toplamOnarimDenemesi: sayaclar.toplamOnarimDenemesi,
-            });
-        },
-        partiKucultuldu({ neden, oncekiPartiBoyutu, yeniPartiBoyutlari } = {}) {
-            yaz("parti_kucultme", {
-                neden: guvenliTanimlayici(neden),
-                oncekiPartiBoyutu: guvenliPozitifTamSayi(oncekiPartiBoyutu),
-                yeniPartiBoyutlari: Array.isArray(yeniPartiBoyutlari)
-                    ? yeniPartiBoyutlari.map(guvenliPozitifTamSayi).filter((deger) => deger != null)
-                    : [],
             });
         },
         tamamla({ sonuc, hataKodu = null, altNeden = null } = {}) {

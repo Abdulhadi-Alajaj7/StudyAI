@@ -1,15 +1,11 @@
 import { randomUUID } from "node:crypto";
+import { testSorulariniDogrula } from "./testDogrulamaService.js";
 import Ders from "../models/Ders.js";
 import Materyal from "../models/Materyal.js";
 import MetinParcasi from "../models/MetinParcasi.js";
 import KonuHaritasi from "../models/KonuHaritasi.js";
 import Test from "../models/Test.js";
 import { dengeliOzetParcalariniSec } from "./dersOzetiService.js";
-import { semanticAramaYap } from "./semanticAramaService.js";
-import {
-    kokKumesiBenzerliginiHesapla,
-    metinKokleriniCikar,
-} from "./konuKimlikEslemeService.js";
 import {
     geminiIleTestSorulariUret,
     VARSAYILAN_GEMINI_MODELI,
@@ -18,10 +14,6 @@ import { testTanilamaKaydiYaz } from "./testTanilamaService.js";
 import { testUretimIzleyicisiOlustur } from "./testUretimIzlemeService.js";
 
 const VARSAYILAN_KAYNAK_BUTCESI = 160_000;
-const MINIMUM_SORU_BASI_KARAKTER = 80;
-const KONU_ESLESME_GENEL_KOKLERI = new Set([
-    "ana", "alt", "bolum", "ders", "giris", "konu", "modul",
-]);
 const TEST_LISTE_ALANLARI = [
     "_id",
     "dersId",
@@ -30,6 +22,8 @@ const TEST_LISTE_ALANLARI = [
     "konuId",
     "konuBasligi",
     "soruSayisi",
+    "istenenSoruSayisi",
+    "eksikSoruNedeni",
     "zorluk",
     "durum",
     "sonGoruntulenenSoru",
@@ -64,7 +58,6 @@ const bagimliliklariGetir = (bagimliliklar = {}) => ({
     MetinParcasiModel: bagimliliklar.MetinParcasiModel || MetinParcasi,
     KonuHaritasiModel: bagimliliklar.KonuHaritasiModel || KonuHaritasi,
     TestModel: bagimliliklar.TestModel || Test,
-    semanticArama: bagimliliklar.semanticArama || semanticAramaYap,
     geminiTestUret: bagimliliklar.geminiTestUret || geminiIleTestSorulariUret,
     kaynakButcesi: bagimliliklar.kaynakButcesi || kaynakButcesiGetir(),
     simdi: bagimliliklar.simdi || (() => new Date()),
@@ -105,20 +98,15 @@ const konulariDuzlestir = (harita) => (harita?.anaKonular || []).flatMap((anaKon
     const ana = {
         konuId: anaKonu.konuId,
         baslik: anaKonu.baslik,
+        aciklama: anaKonu.aciklama || "",
         konuTuru: "ana",
-        sorgu: [anaKonu.baslik, anaKonu.aciklama].filter(Boolean).join(" "),
         kaynakMateryalIds: anaKaynaklar,
     };
     const altlar = (anaKonu.altKonular || []).map((altKonu) => ({
         konuId: altKonu.konuId,
         baslik: altKonu.baslik,
+        aciklama: altKonu.aciklama || "",
         konuTuru: "alt",
-        sorgu: [
-            anaKonu.baslik,
-            anaKonu.aciklama,
-            altKonu.baslik,
-            altKonu.aciklama,
-        ].filter(Boolean).join(" "),
         kaynakMateryalIds: (altKonu.kaynakMateryalIds || []).length > 0
             ? altKonu.kaynakMateryalIds
             : anaKaynaklar,
@@ -131,13 +119,8 @@ const dagitimKonulariniGetir = (harita) => (harita?.anaKonular || []).flatMap(
         ? (anaKonu.altKonular || []).map((altKonu) => ({
             konuId: altKonu.konuId,
             baslik: altKonu.baslik,
-            kanitSorgusu: [altKonu.baslik, altKonu.aciklama].filter(Boolean).join(" "),
-            sorgu: [
-                anaKonu.baslik,
-                anaKonu.aciklama,
-                altKonu.baslik,
-                altKonu.aciklama,
-            ].filter(Boolean).join(" "),
+            aciklama: altKonu.aciklama || "",
+            konuTuru: "alt",
             kaynakMateryalIds: (altKonu.kaynakMateryalIds || []).length > 0
                 ? altKonu.kaynakMateryalIds
                 : (anaKonu.kaynakMateryalIds || []),
@@ -145,61 +128,23 @@ const dagitimKonulariniGetir = (harita) => (harita?.anaKonular || []).flatMap(
         : [{
             konuId: anaKonu.konuId,
             baslik: anaKonu.baslik,
-            kanitSorgusu: [anaKonu.baslik, anaKonu.aciklama].filter(Boolean).join(" "),
-            sorgu: [anaKonu.baslik, anaKonu.aciklama].filter(Boolean).join(" "),
+            aciklama: anaKonu.aciklama || "",
+            konuTuru: "ana",
             kaynakMateryalIds: anaKonu.kaynakMateryalIds || [],
         }]
 );
 
-const konuParcaEslesmesiniHesapla = (parca, konu) => {
-    const parcaKokleri = metinKokleriniCikar(parca?.icerik);
-    const ayirtEdiciKokleriGetir = (metin) => new Set(
-        [...metinKokleriniCikar(metin)].filter(
-            (kok) => !KONU_ESLESME_GENEL_KOKLERI.has(kok)
-        )
+// Seçilen ana konunun yalnızca doğrudan alt konularını test kapsamına al.
+const secilenAnaKonununAltKonulari = (hedef) => {
+    const anaKonu = (hedef.harita?.anaKonular || []).find(
+        (konu) => konu.konuId === hedef.konu?.konuId
     );
-    const baslikKokleri = ayirtEdiciKokleriGetir(konu?.baslik);
-    const kanitKokleri = ayirtEdiciKokleriGetir(konu?.kanitSorgusu || konu?.sorgu);
-    const baslikBenzerligi = kokKumesiBenzerliginiHesapla(baslikKokleri, parcaKokleri);
-    const kanitBenzerligi = kokKumesiBenzerliginiHesapla(kanitKokleri, parcaKokleri);
-    const gerekenBaslikKoku = Math.min(2, baslikKokleri.size);
-    const gerekenKanitKoku = Math.min(3, kanitKokleri.size);
-    const baslikKanitiVarMi = gerekenBaslikKoku > 0 &&
-        baslikBenzerligi.eslesenSayisi >= gerekenBaslikKoku;
-    const aciklamaKanitiVarMi = baslikBenzerligi.eslesenSayisi > 0 &&
-        gerekenKanitKoku > 0 &&
-        kanitBenzerligi.eslesenSayisi >= gerekenKanitKoku;
-    return {
-        eslesiyor: baslikKanitiVarMi || aciklamaKanitiVarMi,
-        skor: (baslikBenzerligi.eslesenSayisi * 10) + kanitBenzerligi.eslesenSayisi,
-    };
+    return anaKonu?.altKonular?.length > 0
+        ? dagitimKonulariniGetir({ anaKonular: [anaKonu] })
+        : [];
 };
 
-export const konuIcinParcalariSirala = (parcalar, konu) => {
-    const izinliMateryaller = new Set((konu.kaynakMateryalIds || []).map(kimlikMetni));
-    const adaylar = parcalar.filter((parca) => (
-        izinliMateryaller.size === 0 || izinliMateryaller.has(kimlikMetni(parca.materyalId))
-    ));
-    const puanli = adaylar.map((parca) => {
-        const eslesme = konuParcaEslesmesiniHesapla(parca, konu);
-        return {
-            parca,
-            ...eslesme,
-        };
-    });
-    return puanli
-        .filter(({ eslesiyor }) => eslesiyor)
-        .sort((sol, sag) => (
-            sag.skor - sol.skor ||
-            kimlikMetni(sol.parca.materyalId).localeCompare(kimlikMetni(sag.parca.materyalId)) ||
-            sol.parca.parcaIndex - sag.parca.parcaIndex
-        ))
-        .map(({ parca }) => parca);
-};
-
-const konuIcinParcalariSec = async ({
-    kullaniciId,
-    dersId,
+const konuIcinParcalariSec = ({
     konu,
     materyaller,
     tumParcalar,
@@ -213,75 +158,36 @@ const konuIcinParcalariSec = async ({
     const izinliMateryalKimlikleri = new Set(
         konuMateryalleri.map((materyal) => kimlikMetni(materyal._id))
     );
-    try {
-        const aramaSonucu = await deps.semanticArama({
-            kullaniciId,
-            dersId,
-            sorgu: konu.sorgu.slice(0, 500),
-            limit: 10,
-            materyalIds: konuMateryalleri.map((materyal) => materyal._id),
-        });
-        const eslesmeler = new Set((aramaSonucu?.sonuclar || []).map(
-            (sonuc) => `${sonuc.materyalId}:${sonuc.parcaIndex}`
+    if (konuMateryalleri.length === 0) return [];
+
+    // Yeni haritalarda Gemini'nin önceden kaydettiği konu eşleştirmesi
+    // tek otoritedir. Eski haritalarda ilgili materyallerin aktif parçaları kullanılır.
+    if (deps.aktifHaritaAtamalari?.parcaAtamaSurumu === 1) {
+        const atamalar = deps.aktifHaritaAtamalari.parcaKonuAtamalari || [];
+        const seciliAna = (deps.aktifHaritaAtamalari.anaKonular || []).find(
+            (ana) => ana.konuId === konu.konuId
+        );
+        const ilgiliIds = new Set([
+            konu.konuId,
+            ...(seciliAna?.altKonular || []).map((alt) => alt.konuId),
+        ]);
+        const atamaAnahtarlari = new Set(atamalar.filter((atama) =>
+            (atama.konuIds || []).some((id) => ilgiliIds.has(id))
+        ).map((atama) =>
+            `${kimlikMetni(atama.materyalId)}:${kimlikMetni(atama.islemeId)}:${atama.parcaIndex}`
         ));
-        if (eslesmeler.size > 0) {
-            const secilenler = tumParcalar.filter((parca) => (
-                izinliMateryalKimlikleri.has(kimlikMetni(parca.materyalId)) &&
-                eslesmeler.has(`${kimlikMetni(parca.materyalId)}:${parca.parcaIndex}`)
-            ));
-            if (secilenler.length > 0) return secilenler;
-        }
-    } catch {
-        // Embedding geçici olarak kullanılamazsa konu haritası ve metin
-        // eşleşmesi, test üretimini deterministik biçimde çalışır tutar.
+        return tumParcalar.filter((parca) =>
+            izinliMateryalKimlikleri.has(kimlikMetni(parca.materyalId)) &&
+            atamaAnahtarlari.has(
+                `${kimlikMetni(parca.materyalId)}:${kimlikMetni(parca.islemeId)}:${parca.parcaIndex}`
+            )
+        );
     }
-    return konuIcinParcalariSirala(tumParcalar, konu);
-};
-
-const fizikselParcalariTekillestir = (parcalar) => [...new Map(
-    (parcalar || []).map((parca) => [
-        `${kimlikMetni(parca.materyalId)}:${parca.parcaIndex}`,
-        parca,
-    ])
-).values()];
-
-export const konuKotalariniDagit = (konuGruplari, soruSayisi) => {
-    const gruplar = (konuGruplari || [])
-        .map((grup) => ({
-            ...grup,
-            karakterSayisi: grup.parcalar.reduce(
-                (toplam, parca) => toplam + String(parca.icerik || "").length,
-                0
-            ),
-        }))
-        .filter((grup) => grup.karakterSayisi >= MINIMUM_SORU_BASI_KARAKTER)
-        .sort((sol, sag) => (
-            sag.karakterSayisi - sol.karakterSayisi ||
-            sol.konuId.localeCompare(sag.konuId)
-        ));
-    if (gruplar.length === 0) return [];
-
-    const secilenler = gruplar.slice(0, soruSayisi).map((grup) => ({
-        ...grup,
-        kapasite: Math.max(1, Math.floor(
-            grup.karakterSayisi / MINIMUM_SORU_BASI_KARAKTER
-        )),
-        adet: 1,
-    }));
-    let kalan = soruSayisi - secilenler.length;
-    while (kalan > 0) {
-        const uygunlar = secilenler.filter((grup) => grup.adet < grup.kapasite);
-        if (uygunlar.length === 0) return [];
-        uygunlar.sort((sol, sag) => (
-            (sol.adet / sol.kapasite) - (sag.adet / sag.kapasite) ||
-            sol.adet - sag.adet ||
-            sag.karakterSayisi - sol.karakterSayisi ||
-            sol.konuId.localeCompare(sag.konuId)
-        ));
-        uygunlar[0].adet += 1;
-        kalan -= 1;
-    }
-    return secilenler;
+    // Eski haritalarda da embedding çağırma: konuya bağlı materyallerin
+    // aktif parçalarını Gemini'ye gönder; konu uygunluğunu model belirler.
+    return tumParcalar.filter((parca) =>
+        izinliMateryalKimlikleri.has(kimlikMetni(parca.materyalId))
+    );
 };
 
 const dersiGetir = async ({ kullaniciId, dersId }, DersModel) => {
@@ -298,7 +204,7 @@ const dersiGetir = async ({ kullaniciId, dersId }, DersModel) => {
 
 const konuHaritasiniGetir = async ({ kullaniciId, dersId }, deps) => (
     deps.KonuHaritasiModel.findOne({ kullaniciId, dersId, durum: "hazir" })
-        .select("anaKonular")
+        .select("anaKonular parcaAtamaSurumu parcaKonuAtamalari")
         .lean()
 );
 
@@ -387,27 +293,17 @@ const aktifParcalariGetir = async ({
 
 const kapsamMateryalIds = (kapsamTuru, hedef) => {
     if (kapsamTuru === "materyal") return [hedef.materyal._id];
-    if (kapsamTuru === "konu" && hedef.konu.kaynakMateryalIds.length > 0) {
-        return hedef.konu.kaynakMateryalIds;
+    if (kapsamTuru === "konu") {
+        const altKonular = secilenAnaKonununAltKonulari(hedef);
+        // Ana konuyla ilişkili tüm alt konu materyallerini de kapsa.
+        const kaynaklar = [hedef.konu, ...altKonular].flatMap(
+            (konu) => konu.kaynakMateryalIds || []
+        );
+        return kaynaklar.length > 0
+            ? [...new Map(kaynaklar.map((id) => [kimlikMetni(id), id])).values()]
+            : null;
     }
     return null;
-};
-
-const enUygunKonuyuBul = (parca, konular) => {
-    let enIyi = null;
-    let enIyiSkor = 0;
-    for (const konu of konular) {
-        const izinli = konu.kaynakMateryalIds.length === 0 || konu.kaynakMateryalIds.some(
-            (id) => kimlikMetni(id) === kimlikMetni(parca.materyalId)
-        );
-        if (!izinli) continue;
-        const eslesme = konuParcaEslesmesiniHesapla(parca, konu);
-        if (eslesme.eslesiyor && eslesme.skor > enIyiSkor) {
-            enIyiSkor = eslesme.skor;
-            enIyi = konu;
-        }
-    }
-    return enIyi;
 };
 
 const kaynakKayitlariniOlustur = (parcaGruplari, materyaller) => {
@@ -438,6 +334,15 @@ const kaynaklariHazirla = async ({
     hedef,
     soruSayisi,
 }, deps) => {
+    const altKonular = kapsamTuru === "konu"
+        ? secilenAnaKonununAltKonulari(hedef)
+        : [];
+    if (altKonular.length > soruSayisi) {
+        throw new TestSistemiHatasi(
+            `Seçilen ana konuda ${altKonular.length} alt konu var. Her alt konu için en az bir soru gerektiğinden en az ${altKonular.length} soruluk test seçin.`,
+            { status: 422, kod: "ALT_KONU_SORU_SAYISI_YETERSIZ" }
+        );
+    }
     const materyaller = await hazirMateryalleriGetir({
         kullaniciId,
         dersId,
@@ -453,132 +358,86 @@ const kaynaklariHazirla = async ({
     if (tumParcalar.length === 0) throw uygunIcerikBulunamadiHatasi();
 
     const tumKonular = konulariDuzlestir(hedef.harita);
-    let konuDagilimi = [];
-    let parcaKonulari = [];
+    deps.aktifHaritaAtamalari = hedef.harita || null;
+    const yeniAtamalar = hedef.harita?.parcaAtamaSurumu === 1 &&
+        Array.isArray(hedef.harita.parcaKonuAtamalari);
+    const konular = kapsamTuru === "konu"
+        ? (altKonular.length ? altKonular : [hedef.konu])
+        : (kapsamTuru === "tum_ders" && hedef.harita
+            ? dagitimKonulariniGetir(hedef.harita) : []);
 
-    if (kapsamTuru === "tum_ders" && hedef.harita) {
-        // Başlık/açıklama kökleri güçlü kanıt sağlıyorsa ek sorgu embedding'i
-        // üretmeyiz. Metinsel kanıt bulunmayan konularda ise MongoDB'deki hazır
-        // parça embedding'lerini kullanan mevcut semantik aramaya kontrollü düşeriz.
-        const gruplar = [];
-        for (const konu of dagitimKonulariniGetir(hedef.harita)) {
-            let parcalar = konuIcinParcalariSirala(tumParcalar, konu);
-            let semantikArandi = false;
-            const metinselKarakterSayisi = parcalar.reduce(
-                (toplam, parca) => toplam + String(parca.icerik || "").length,
-                0
-            );
-            if (metinselKarakterSayisi < MINIMUM_SORU_BASI_KARAKTER) {
-                semantikArandi = true;
-                const semantikParcalar = await konuIcinParcalariSec({
-                    kullaniciId,
-                    dersId,
-                    konu,
-                    materyaller,
-                    tumParcalar,
-                }, deps);
-                parcalar = fizikselParcalariTekillestir([
-                    ...parcalar,
-                    ...semantikParcalar,
-                ]);
-            }
-            gruplar.push({ ...konu, parcalar, semantikArandi });
+    // Her konuya bir soru isteniyorsa, soru sayısı konu sayısından az olamaz.
+    if (konular.length > soruSayisi) {
+        throw new TestSistemiHatasi(
+            `Bu kapsamda ${konular.length} konu var. Her konuya en az bir soru için daha yüksek soru sayısı seçin.`,
+            { status: 422, kod: "ALT_KONU_SORU_SAYISI_YETERSIZ" }
+        );
+    }
+    // Eşit bölünebildiğinde eşit dağıtım iste, diğer durumlarda Gemini
+    // kalan soruları içeriğe göre dağıtsın. Bu kural kayıt öncesinde de doğrulanır.
+    const esitAdet = konular.length && soruSayisi % konular.length === 0
+        ? soruSayisi / konular.length : null;
+    const konuDagilimi = konular.map((konu) => ({
+        konuId: konu.konuId,
+        baslik: konu.baslik,
+        adet: esitAdet ?? 1,
+    }));
+
+    let parcaKonulari = [];
+    if (yeniAtamalar && konular.length) {
+        // Yalnızca haritada konuya bağlanmış metin parçaları gönderilir.
+        const grupButcesi = Math.max(2_000, Math.floor(deps.kaynakButcesi / konular.length));
+        for (const konu of konular) {
+            const parcalar = konuIcinParcalariSec({
+                konu, materyaller, tumParcalar,
+            }, deps);
+            parcaKonulari.push(...dengeliOzetParcalariniSec(parcalar, grupButcesi)
+                .map((parca) => ({ parca, konu })));
         }
-        let kotalar = konuKotalariniDagit(gruplar, soruSayisi);
-        if (kotalar.length === 0) {
-            // Metinsel eşleşmeler konu başına en az bir soru için yeterli olsa
-        // bile toplam soru kotasını karşılamayabilir. Bu durumda yalnızca
-        // henüz semantik olarak zenginleştirilmemiş grupları sırayla tamamla.
-            const semantikArananKonuIds = new Set(
-                gruplar
-                    .filter((grup) => grup.semantikArandi === true)
-                    .map((grup) => grup.konuId)
-            );
-            for (const grup of gruplar) {
-                if (semantikArananKonuIds.has(grup.konuId)) continue;
-                const semantikParcalar = await konuIcinParcalariSec({
-                    kullaniciId,
-                    dersId,
-                    konu: grup,
-                    materyaller,
-                    tumParcalar,
-                }, deps);
-                grup.parcalar = fizikselParcalariTekillestir([
-                    ...grup.parcalar,
-                    ...semantikParcalar,
-                ]);
-            }
-            kotalar = konuKotalariniDagit(gruplar, soruSayisi);
-        }
-        if (kotalar.length === 0) throw uygunIcerikBulunamadiHatasi();
-        const grupButcesi = Math.max(2_000, Math.floor(deps.kaynakButcesi / kotalar.length));
-        parcaKonulari = kotalar.flatMap((grup) => (
-            dengeliOzetParcalariniSec(grup.parcalar, grupButcesi)
-                .map((parca) => ({ parca, konu: grup }))
-        ));
-        konuDagilimi = kotalar.map((grup) => ({
-            konuId: grup.konuId,
-            baslik: grup.baslik,
-            adet: grup.adet,
-        }));
     } else {
+        // Eski haritalarda parça-konu eşleştirmesi kayıtlı değil.
+        // Embedding çağırmak veya tüm parçaları yanlış konuya etiketlemek
+        // yerine kapsamın hazır materyal parçalarını doğrudan Gemini'ye ver.
         const ilgiliParcalar = kapsamTuru === "konu"
-            ? await konuIcinParcalariSec({
-                kullaniciId,
-                dersId,
-                konu: hedef.konu,
-                materyaller,
-                tumParcalar,
+            ? konuIcinParcalariSec({
+                konu: hedef.konu, materyaller, tumParcalar,
             }, deps)
             : tumParcalar;
-        const secilenler = dengeliOzetParcalariniSec(
-            ilgiliParcalar,
-            deps.kaynakButcesi
-        );
-        parcaKonulari = secilenler.map((parca) => ({
-            parca,
-            konu: kapsamTuru === "konu"
-                ? hedef.konu
-                : enUygunKonuyuBul(parca, tumKonular),
-        }));
-        if (kapsamTuru === "konu") {
-            konuDagilimi = [{
-                konuId: hedef.konu.konuId,
-                baslik: hedef.konu.baslik,
-                adet: soruSayisi,
-            }];
-        }
+        parcaKonulari = dengeliOzetParcalariniSec(ilgiliParcalar, deps.kaynakButcesi)
+            .map((parca) => ({ parca, konu: null }));
     }
-
     const fizikselParcaGruplari = new Map();
     for (const { parca, konu } of parcaKonulari) {
-        const fizikselAnahtar = `${kimlikMetni(parca.materyalId)}:${parca.parcaIndex}`;
-        if (!fizikselParcaGruplari.has(fizikselAnahtar)) {
-            fizikselParcaGruplari.set(fizikselAnahtar, { parca, konular: [] });
+        const anahtar = `${kimlikMetni(parca.materyalId)}:${kimlikMetni(parca.islemeId)}:${parca.parcaIndex}`;
+        if (!fizikselParcaGruplari.has(anahtar)) {
+            fizikselParcaGruplari.set(anahtar, { parca, konular: [] });
         }
-        if (konu?.konuId) fizikselParcaGruplari.get(fizikselAnahtar).konular.push(konu);
+        const kayit = fizikselParcaGruplari.get(anahtar);
+        if (String(parca.icerik || "").length > String(kayit.parca.icerik || "").length) {
+            kayit.parca = parca;
+        }
+        if (konu?.konuId && !kayit.konular.some((item) => item.konuId === konu.konuId)) {
+            kayit.konular.push(konu);
+        }
     }
-    const benzersizFizikselParcalar = [...fizikselParcaGruplari.values()];
-    const toplamKarakter = benzersizFizikselParcalar.reduce(
-        (toplam, { parca }) => toplam + String(parca.icerik || "").length,
-        0
-    );
-    if (toplamKarakter < soruSayisi * MINIMUM_SORU_BASI_KARAKTER) {
-        throw uygunIcerikBulunamadiHatasi();
+    const benzersizParcalar = [...fizikselParcaGruplari.values()];
+    if (!benzersizParcalar.length ||
+        !benzersizParcalar.some(({ parca }) => String(parca.icerik || "").trim())) {
+        throw uygunIcerikBulunamadiHatasi(
+            "Seçilen kapsamda işlenmiş kaynak metni bulunamadı."
+        );
     }
-
     return {
         materyaller,
-        kaynaklar: kaynakKayitlariniOlustur(benzersizFizikselParcalar, materyaller),
+        konuEslesmeleriZorunlu: yeniAtamalar,
+        kaynaklar: kaynakKayitlariniOlustur(benzersizParcalar, materyaller),
         konuDagilimi,
-        izinliKonuIds: tumKonular.map(({ konuId, baslik, konuTuru }) => ({
-            konuId,
-            baslik,
-            konuTuru,
-        })),
+        izinliKonuIds: (konular.length ? konular : tumKonular)
+            .map(({ konuId, baslik, aciklama, konuTuru }) => ({
+                konuId, baslik, aciklama, konuTuru,
+            })),
         kaynakSurumleri: materyaller.map((materyal) => ({
-            materyalId: materyal._id,
-            aktifIslemeId: materyal.aktifIslemeId,
+            materyalId: materyal._id, aktifIslemeId: materyal.aktifIslemeId,
         })),
     };
 };
@@ -674,6 +533,7 @@ const testOlusturTekIslem = async ({
         });
         const zorlukDagilimi = zorlukDagiliminiOlustur(zorluk, soruSayisi);
         asama = "GEMINI_URETIMI";
+        // Tek üretim; kalite kuralları prompt içinde, ek onarım isteği yok.
         const geminiSonucu = await deps.geminiTestUret({
             dersBilgisi: { dersAdi: ders.dersAdi, aciklama: ders.aciklama },
             kapsamTuru,
@@ -685,10 +545,20 @@ const testOlusturTekIslem = async ({
             konuDagilimi: kaynakVerisi.konuDagilimi,
             kaynaklar: kaynakVerisi.kaynaklar,
             izinliKonuIds: kaynakVerisi.izinliKonuIds,
+            konuEslesmeleriZorunlu: kaynakVerisi.konuEslesmeleriZorunlu,
         }, {
             uretimIzleyicisi,
         });
 
+        tanilama.apiCagriSayisi = Number.isInteger(geminiSonucu?.apiCagriSayisi)
+            ? geminiSonucu.apiCagriSayisi : null;
+        asama = "TEST_DOGRULAMA";
+        const denetimliSorular = testSorulariniDogrula(geminiSonucu, {
+            soruSayisi, zorlukDagilimi,
+            konuDagilimi: kaynakVerisi.konuDagilimi,
+            kaynaklar: kaynakVerisi.kaynaklar,
+            izinliKonuIds: kaynakVerisi.izinliKonuIds,
+        });
         asama = "KAYNAK_SURUM_DOGRULAMA";
         await kaynakSurumleriniDogrula({
             kullaniciId,
@@ -707,8 +577,10 @@ const testOlusturTekIslem = async ({
             konuId: kapsamTuru === "konu" ? konuId : "",
             konuBasligi: hedef.konu?.baslik || "",
             soruSayisi,
+            istenenSoruSayisi: soruSayisi,
+            eksikSoruNedeni: "",
             zorluk,
-            sorular: geminiSonucu.sorular,
+            sorular: denetimliSorular,
             kaynakSurumleri: kaynakVerisi.kaynakSurumleri,
             kullanilanModel: geminiSonucu.model ||
                 process.env.GEMINI_TEST_MODELI ||
@@ -744,8 +616,7 @@ const testOlusturTekIslem = async ({
                 hataKodu: typeof hata?.kod === "string"
                     ? hata.kod
                     : (dogrulamaHatasi ? "GECERSIZ_TEST_VERISI" : "TEST_SISTEMI_SUNUCU_HATASI"),
-                altNeden: hata?.tanilama?.kaynakKanitiAltNedeni ||
-                    hata?.tanilama?.dogrulamaAltKodu || null,
+                altNeden: hata?.tanilama?.dogrulamaAltKodu || null,
             });
         } catch {
             // Terminal izleme, asıl HTTP hata davranışını değiştirmemelidir.

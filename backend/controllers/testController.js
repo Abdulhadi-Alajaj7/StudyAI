@@ -13,7 +13,6 @@ import {
 } from "../services/testService.js";
 
 const KAPSAM_TURLERI = new Set(["tum_ders", "materyal", "konu"]);
-const SORU_SAYILARI = new Set([5, 10, 15, 20]);
 const ZORLUKLAR = new Set(["kolay", "orta", "zor", "karisik"]);
 const CEVAPLAR = new Set(["A", "B", "C", "D"]);
 
@@ -36,9 +35,12 @@ export const testOlusturmaGirdisiniDogrula = (dersId, girdi = {}) => {
     }
 
     const soruSayisi = veri.soruSayisi === undefined ? 10 : Number(veri.soruSayisi);
-    if (!SORU_SAYILARI.has(soruSayisi)) {
+    const altKonuMu = kapsamTuru === "konu" && typeof veri.konuId === "string" && veri.konuId.trim().startsWith("sub-");
+    const soruSayilari = altKonuMu ? [5, 10] : [10, 15, 20];
+    if (!soruSayilari.includes(soruSayisi) ||
+        (veri.soruSayisi !== undefined && !["number", "string"].includes(typeof veri.soruSayisi))) {
         return {
-            hata: "Soru sayısı 5, 10, 15 veya 20 olmalıdır.",
+            hata: `Soru sayısı ${soruSayilari.join(", ")} seçeneklerinden biri olmalıdır.`,
             kod: "GECERSIZ_SORU_SAYISI",
         };
     }
@@ -155,6 +157,16 @@ export const testiSunumaHazirla = (testBelgesi, { inceleme = false } = {}) => {
     delete nesne.kullanilanModel;
     nesne.sorular = (nesne.sorular || []).map((soru) => {
         const guvenliSoru = soru?.toObject ? soru.toObject() : { ...soru };
+        // Öğrenme hedefi ve kanıt alıntıları doğru cevabı açığa çıkarabilir.
+        delete guvenliSoru.ogrenmeHedefi;
+        delete guvenliSoru.kaynakReferanslari;
+        delete guvenliSoru.kaynakKanitlari;
+        // Geçici JSON denetim alanları artık istemciye gönderilmez.
+        delete guvenliSoru.konuDogrulama;
+        delete guvenliSoru.kaliteDogrulama;
+        if (Array.isArray(guvenliSoru.kaynaklar)) {
+            guvenliSoru.kaynaklar = guvenliSoru.kaynaklar.map(({ parcaSkorlari, ...kaynak }) => kaynak);
+        }
         if (!inceleme) {
             delete guvenliSoru.dogruCevap;
             delete guvenliSoru.aciklama;

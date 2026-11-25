@@ -26,6 +26,9 @@ import {
     basariOraniniGetir,
     tarihiBicimlendir,
     testCozmeYolu,
+    testSoruSayilariGetir,
+    testAltKonuUyarisiGetir,
+    testEksikSoruMesaji,
     testHedefBilgisi,
     testIlerlemeBilgisi,
     testKapsamEtiketi,
@@ -46,7 +49,6 @@ const kapsamlar = [
     { deger: "konu", etiket: "Konu" },
 ];
 const gizliKapsamArayuzuGorunur = false;
-const soruSayilari = [5, 10, 15, 20];
 const zorluklar = [
     { deger: "kolay", etiket: "Kolay" },
     { deger: "orta", etiket: "Orta" },
@@ -323,6 +325,18 @@ function DersTestler() {
         [konuSecenekleri]
     );
 
+    const anaKonu = (konuHaritasi?.anaKonular || []).find(
+        (konu) => konu.konuId === konuId
+    );
+    const altKonuSayisi = kapsamTuru === "konu" ? (anaKonu?.altKonular?.length || 0)
+        : kapsamTuru === "tum_ders" ? (konuHaritasi?.anaKonular || []).reduce(
+            (toplam, konu) => toplam + (konu.altKonular?.length || 1), 0
+        ) : 0;
+    const secilenAltKonuMu = kapsamTuru === "konu" && konuId.startsWith("sub-");
+    const soruSayilari = testSoruSayilariGetir(kapsamTuru, konuId);
+    const altKonuUyarisi = testAltKonuUyarisiGetir(altKonuSayisi, soruSayisi);
+    const yetersizSoruSayisi = Boolean(altKonuUyarisi) || !soruSayilari.includes(soruSayisi);
+
     const olusturmaGirdisi = useMemo(() => testOlusturmaGirdisiOlustur({
         kapsamTuru,
         soruSayisi,
@@ -330,7 +344,7 @@ function DersTestler() {
         materyalId,
         konuId,
     }), [kapsamTuru, soruSayisi, zorluk, materyalId, konuId]);
-    const olusturmaDevreDisi = testOlusturmaButonuDevreDisiMi({
+    const olusturmaDevreDisi = yetersizSoruSayisi || testOlusturmaButonuDevreDisiMi({
         sayfaYukleniyor,
         olusturuluyor,
         olusturmaGirdisi,
@@ -351,8 +365,13 @@ function DersTestler() {
         setOlusturmaHatasi("");
     };
 
+    const konuSeciminiDegistir = (deger) => {
+        secimiDegistir(setKonuId, deger);
+        if (!testSoruSayilariGetir("konu", deger).includes(soruSayisi)) setSoruSayisi(10);
+    };
+
     const testiOlustur = async () => {
-        if (!olusturmaGirdisi || olusturuluyorRef.current) return;
+        if (!olusturmaGirdisi || yetersizSoruSayisi || olusturuluyorRef.current) return;
         const istekDersId = dersId;
         const controller = new AbortController();
         olusturmaControllerRef.current?.abort();
@@ -495,12 +514,19 @@ function DersTestler() {
                 </div>
 
                 <div className="grid gap-5 px-4 py-5 sm:px-5 xl:grid-cols-12 xl:items-end">
-                    <fieldset className="min-w-0 xl:col-span-4">
+                    <div className="min-w-0 xl:col-span-4">
+                        {altKonuUyarisi && (
+                            <div role="alert" className={`mb-3 flex items-start gap-2 rounded-xl border px-3 py-2 text-[12px] font-medium ${isDark ? "border-rose-400/30 bg-rose-400/10 text-rose-300" : "border-rose-200 bg-rose-50 text-rose-700"}`}>
+                                <ExclamationTriangleIcon className="mt-0.5 h-4 w-4 shrink-0" />
+                                <span>{altKonuUyarisi}</span>
+                            </div>
+                        )}
+                        <fieldset className="min-w-0">
                         <legend className={`mb-2 text-[12px] font-bold ${metinAna}`}>Konu Seçimi</legend>
                         <OzetSecimDropdown
                             id="test-konu"
                             value={konuId}
-                            onChange={(deger) => secimiDegistir(setKonuId, deger)}
+                            onChange={konuSeciminiDegistir}
                             options={konuDropdownSecenekleri}
                             disabled={olusturuluyor || sayfaYukleniyor || konuDropdownSecenekleri.length === 0}
                             emptyLabel={sayfaYukleniyor ? "Konular yükleniyor..." : "Hazır konu yok"}
@@ -520,7 +546,8 @@ function DersTestler() {
                                 {hedefUyarisi}
                             </p>
                         )}
-                    </fieldset>
+                        </fieldset>
+                    </div>
 
                     {/* Kapsam seçenekleri yeniden açıldığında kullanılmak üzere görünüm dışında korunuyor. */}
                     {gizliKapsamArayuzuGorunur && (
@@ -556,7 +583,7 @@ function DersTestler() {
 
                     <fieldset className="xl:col-span-3">
                         <legend className={`mb-2 text-[12px] font-bold ${metinAna}`}>Soru Sayısı</legend>
-                        <div className="grid h-[46px] grid-cols-4 gap-1.5">
+                        <div className={`grid h-[46px] gap-1.5 ${secilenAltKonuMu ? "grid-cols-2" : "grid-cols-3"}`}>
                             {soruSayilari.map((sayi) => {
                                 const secili = soruSayisi === sayi;
                                 return (
@@ -646,7 +673,7 @@ function DersTestler() {
                                 <OzetSecimDropdown
                                     id="test-konu"
                                     value={konuId}
-                                    onChange={(deger) => secimiDegistir(setKonuId, deger)}
+                                    onChange={konuSeciminiDegistir}
                                     options={konuDropdownSecenekleri}
                                     disabled={olusturuluyor || sayfaYukleniyor || konuDropdownSecenekleri.length === 0}
                                     emptyLabel={sayfaYukleniyor ? "Konular yükleniyor..." : "Hazır konu yok"}
@@ -696,7 +723,15 @@ function DersTestler() {
                                     {" · "}{testKapsamEtiketi(olusturulanTest.kapsamTuru)}
                                     {" · "}{testZorlukEtiketi(olusturulanTest.zorluk)}
                                 </p>
+                                {testEksikSoruMesaji(olusturulanTest) && (
+                                    <p role="status" className={`mt-2 text-[12px] font-medium ${
+                                        isDark ? "text-amber-200" : "text-amber-800"
+                                    }`}>
+                                        {testEksikSoruMesaji(olusturulanTest)}
+                                    </p>
+                                )}
                             </div>
+                            <div className="flex shrink-0 flex-wrap items-center gap-2">
                             <button
                                 type="button"
                                 onClick={() => testeGit(olusturulanTest)}
@@ -710,6 +745,7 @@ function DersTestler() {
                                 )}
                                 Testi Başlat
                             </button>
+                            </div>
                         </div>
                     </div>
                 )}
@@ -782,6 +818,11 @@ function DersTestler() {
                                             <span aria-hidden="true">•</span>
                                             <span>{testZorlukEtiketi(test.zorluk)}</span>
                                         </p>
+                                        {testEksikSoruMesaji(test) && (
+                                            <p className={`mt-1 text-[11px] ${isDark ? "text-amber-300" : "text-amber-700"}`}>
+                                                {testEksikSoruMesaji(test)}
+                                            </p>
+                                        )}
                                         <p className={`mt-1.5 flex items-center gap-1 text-[10px] ${metinIkincil}`}>
                                             <CalendarDaysIcon className="h-3.5 w-3.5" />
                                             {test.baslamaTarihi

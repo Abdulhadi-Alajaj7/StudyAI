@@ -34,6 +34,14 @@ const soruKaynagiSchema = new mongoose.Schema(
             type: [Number],
             default: [],
         },
+        // Geçici inceleme için kaynak parçasının ilgili alt konuya yakınlığı.
+        parcaSkorlari: {
+            type: [new mongoose.Schema({
+                parcaIndex: { type: Number, required: true },
+                skor: { type: Number, min: -1, max: 1, required: true },
+            }, { _id: false })],
+            default: undefined,
+        },
     },
     { _id: false }
 );
@@ -68,6 +76,16 @@ const soruSchema = new mongoose.Schema({
         trim: true,
         maxlength: 6_000,
     },
+    // Eski testlerde bulunmayabilir; yeni üretimde servis zorunlu doğrular.
+    ogrenmeHedefi: { type: String, maxlength: 500 },
+    kaynakReferanslari: { type: [String], default: undefined },
+    kaynakKanitlari: {
+        type: [new mongoose.Schema({
+            kaynakReferansi: { type: String, required: true },
+            alinti: { type: String, required: true, maxlength: 600 },
+        }, { _id: false })],
+        default: undefined,
+    },
     zorluk: {
         type: String,
         enum: ["kolay", "orta", "zor"],
@@ -85,13 +103,26 @@ const soruSchema = new mongoose.Schema({
         maxlength: 500,
         default: "",
     },
+    // Bağımsız semantik kontrol yalnızca tanılama puanları saklar.
+    konuDogrulama: {
+        type: new mongoose.Schema({
+            hedefSkor: { type: Number, min: -1, max: 1 },
+            rakipSkor: { type: Number, min: -1, max: 1 },
+            rakipKonuBasligi: { type: String, maxlength: 250 },
+        }, { _id: false }),
+        default: undefined,
+    },
+    kaliteDogrulama: {
+        type: new mongoose.Schema({
+            durum: { type: String, maxlength: 45 },
+            guven: { type: Number, min: 0, max: 1 },
+        }, { _id: false }),
+        default: undefined,
+    },
     kaynaklar: {
         type: [soruKaynagiSchema],
         default: [],
-        validate: {
-            validator: (kaynaklar) => Array.isArray(kaynaklar) && kaynaklar.length > 0,
-            message: "Her soru en az bir doğrulanmış kaynağa bağlı olmalıdır.",
-        },
+        // Eski kayıtlar okunabilir; yeni soruların kaynaklarını servis doğrular.
     },
     ogrenciCevabi: {
         type: String,
@@ -169,10 +200,29 @@ const testSchema = new mongoose.Schema(
             default: "",
             immutable: true,
         },
+        // Yeni testlerde istenen ve doğrulanan sayı aynı olmak zorundadır.
         soruSayisi: {
             type: Number,
-            enum: [5, 10, 15, 20],
+            min: 1,
+            max: 20,
             required: true,
+            immutable: true,
+            validate: {
+                validator: Number.isInteger,
+                message: "Test soru sayısı tam sayı olmalıdır.",
+            },
+        },
+        istenenSoruSayisi: {
+            type: Number,
+            min: 1,
+            max: 20,
+            default: null,
+            immutable: true,
+        },
+        eksikSoruNedeni: {
+            type: String,
+            enum: ["", "KAYNAK_KAPASITESI", "KALITE_KONTROLU"],
+            default: "",
             immutable: true,
         },
         zorluk: {
@@ -232,7 +282,8 @@ const testSchema = new mongoose.Schema(
 
 testSchema.path("sorular").validate(
     function soruSayisiEslesiyor(sorular) {
-        return Array.isArray(sorular) && sorular.length === this.soruSayisi;
+        return Array.isArray(sorular) && sorular.length === this.soruSayisi &&
+            (!this.isNew || this.istenenSoruSayisi == null || this.istenenSoruSayisi === this.soruSayisi);
     },
     "Üretilen soru sayısı test ayarıyla eşleşmelidir."
 );
