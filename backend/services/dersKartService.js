@@ -1,5 +1,5 @@
-import { createHash } from "node:crypto";
 import mongoose from "mongoose";
+import { createHash } from "node:crypto";
 import Ders from "../models/Ders.js";
 import Materyal from "../models/Materyal.js";
 import MetinParcasi from "../models/MetinParcasi.js";
@@ -8,8 +8,7 @@ import KonuHaritasi from "../models/KonuHaritasi.js";
 import { kartKilidiniAl, kartKilidiniBirak } from "./calismaKartiLock.js";
 import { geminiIleDersKartlariUret } from "./geminiService.js";
 import {
-    dersKartGruplariniOlustur, dersKartlariniDogrula,
-    kartDersKaynakImzasi, konuBaglantiliKartGruplariniOlustur,
+    dersKartlariniDogrula, kartDersKaynakImzasi, konuBaglantiliKartGruplariniOlustur,
 } from "./dersKartPlanlama.mjs";
 
 export class DersKartiHatasi extends Error {
@@ -24,9 +23,8 @@ const bagimliliklar = (d = {}) => ({
     MateryalModel: d.MateryalModel || Materyal,
     ParcaModel: d.ParcaModel || MetinParcasi,
     KartModel: d.KartModel || CalismaKarti,
-    KonuHaritasiModel: d.KonuHaritasiModel || (d.DersModel ? null : KonuHaritasi),
+    KonuHaritasiModel: d.KonuHaritasiModel || KonuHaritasi,
     uret: d.uret || geminiIleDersKartlariUret,
-    gruplama: d.gruplama || dersKartGruplariniOlustur,
 });
 
 const dersGetir = (x, kullaniciId, dersId) =>
@@ -52,19 +50,17 @@ export const dersKartKaynaklariniGetir = async (x, kullaniciId, dersId) => {
     if (!parcalar.length) throw new DersKartiHatasi(
         "Ders materyallerinde işlenmiş metin bulunamadı.", 422, "KART_METIN_YOK"
     );
-    const harita=await x.KonuHaritasiModel?.findOne({kullaniciId,dersId,durum:"hazir"})
+    const harita = await x.KonuHaritasiModel.findOne({ kullaniciId, dersId, durum: "hazir" })
         .select("anaKonular parcaAtamaSurumu parcaKonuAtamalari").lean();
-    const konuBaglantili=harita?.parcaAtamaSurumu===1;
-    const gruplar = konuBaglantili
-        ? konuBaglantiliKartGruplariniOlustur(parcalar,materyaller,harita)
-        : x.gruplama(parcalar, materyaller);
-    if (!gruplar.length) throw new DersKartiHatasi(
-        "Ders materyallerinde çalışma kartına uygun metin bulunamadı.",
-        422, "KART_METIN_BOS"
+    if (harita?.parcaAtamaSurumu !== 1) throw new DersKartiHatasi(
+        "Dersin konu haritası ve metin bağlantıları hazır değil.", 422, "KART_KONU_KAYNAGI_EKSIK"
     );
-    return { materyaller, parcalar, gruplar,
-        surum: konuBaglantili ? "konu-v2:"+sha(kartDersKaynakImzasi(materyaller,parcalar)+gruplar.map(g=>g.imza).join(":"))
-            : kartDersKaynakImzasi(materyaller, parcalar), konuBaglantili };
+    const gruplar = konuBaglantiliKartGruplariniOlustur(parcalar, materyaller, harita);
+    if (!gruplar.length) throw new DersKartiHatasi(
+        "Ders materyallerinde çalışma kartına uygun metin bulunamadı.", 422, "KART_METIN_BOS"
+    );
+    return { gruplar,
+        surum: "konu-v2:" + sha(kartDersKaynakImzasi(materyaller, parcalar) + gruplar.map((g) => g.imza).join(":")) };
 };
 
 const yeniKartlariKaydet = async (x, { kullaniciId, dersId, token, kartlar }) => {
@@ -75,35 +71,29 @@ const yeniKartlariKaydet = async (x, { kullaniciId, dersId, token, kartlar }) =>
     if (!sahip) throw new DersKartiHatasi(
         "Kart üretim kilidi kaybedildi.", 409, "KART_KILIDI_KAYBEDILDI"
     );
-    if (!kartlar.length) return;
-    await x.KartModel.bulkWrite(kartlar.map((kart) => {
+    if (!kartlar.length) return 0;
+    const sonuc = await x.KartModel.bulkWrite(kartlar.map((kart) => {
         const soruKimligi = sha(kart.soru.trim().toLocaleLowerCase("tr-TR"));
         return { updateOne: {
-            // Eski konu bağlı kartlarda da bu soru varsa kayıt korunur.
-            filter: { kullaniciId, dersId, soruKimligi, ...(kart.konuId?{konuId:kart.konuId}:{}) },
-            update: { $setOnInsert: { kullaniciId, dersId,
-                ...kart, soruKimligi } },
+            filter: { kullaniciId, dersId, soruKimligi, konuId: kart.konuId },
+            // Tekrar kayıt güvenlidir; eski kart ve öğrenci işaretleri değişmez.
+            update: { $setOnInsert: { kullaniciId, dersId, ...kart, soruKimligi } },
             upsert: true,
         } };
     }), { ordered: false });
+    return sonuc.upsertedCount;
 };
 
-export const dersGeneliKartlariOlustur = async ({
-    kullaniciId, dersId,
-}, d = {}) => {
+export const dersGeneliKartlariOlustur = async ({ kullaniciId, dersId }, d = {}) => {
     const bas = Date.now(), x = bagimliliklar(d);
     const ders = await dersGetir(x, kullaniciId, dersId);
     if (!ders) throw new DersKartiHatasi("Ders bulunamadı.", 404, "DERS_BULUNAMADI");
-    if (!ders.materyallerOnaylandi) throw new DersKartiHatasi(
-        "Önce ders materyallerini onaylayın.");
+    if (!ders.materyallerOnaylandi) throw new DersKartiHatasi("Önce ders materyallerini onaylayın.");
     const token = new mongoose.Types.ObjectId();
     const kilit = await kartKilidiniAl(x.DersModel, kullaniciId, dersId, token);
     if (!kilit) throw new DersKartiHatasi(
         "Bu ders için kart üretimi devam ediyor.", 409, "KART_URETIM_DEVAM_EDIYOR"
     );
-
-    // Sunucu birden çok bölüm işlerken iki dakikalık kilidin yanlışlıkla
-    // bayatlamasını önle; her 30 saniyede token eşleşirse lease yenilenir.
     const kalpAtisi = setInterval(() => {
         void x.DersModel.updateOne({
             _id: dersId, kullaniciId, kartUretimToken: token,
@@ -111,132 +101,50 @@ export const dersGeneliKartlariOlustur = async ({
         }, { $currentDate: { kartUretimSonYenileme: true } }).catch(() => {});
     }, 30_000);
     kalpAtisi.unref?.();
-
+    const durumuKaydet = async (guncelleme) => {
+        const r = await x.DersModel.updateOne({
+            _id: dersId, kullaniciId, kartUretimToken: token, temizleniyor: { $ne: true },
+        }, guncelleme);
+        if ((r.matchedCount ?? r.n) !== 1) throw new DersKartiHatasi(
+            "Kart üretim kilidi kaybedildi.", 409, "KART_KILIDI_KAYBEDILDI"
+        );
+    };
     try {
         const kaynak = await dersKartKaynaklariniGetir(x, kullaniciId, dersId);
         const guncel = await dersGetir(x, kullaniciId, dersId);
         if (!guncel) throw new DersKartiHatasi("Ders bulunamadı.", 404);
-        if (guncel.kartDersSurumImzasi !== kaynak.surum) {
-            const korunanImzalar= kaynak.konuBaglantili ? (guncel.kartDersIslenenGrupImzalari||[]).filter(imza=>kaynak.gruplar.some(g=>g.imza===imza)) : [];
-            // Önceki kartlar ve çalışma durumları tutulur; yeni materyalin
-            // bütün grupları yeniden taranır. Eski konu eşleştirmesi kullanılmaz.
-            const r = await x.DersModel.updateOne({
-                _id: dersId, kullaniciId, kartUretimToken: token,
-                temizleniyor: { $ne: true },
-            }, { $set: {
-                kartDersSurumImzasi: kaynak.surum,
-                kartDersIslenenGrupImzalari: korunanImzalar,
-                kartDersToplamGrupSayisi: kaynak.gruplar.length,
-                kartDersTamamlandi: false,
-            } });
-            if ((r.matchedCount ?? r.n) !== 1)
-                throw new DersKartiHatasi("Ders kart üretimi başlatılamadı.", 409);
-            guncel.kartDersIslenenGrupImzalari = korunanImzalar;
-            guncel.kartDersTamamlandi = false;
+        const islenen = new Set((guncel.kartDersIslenenGrupImzalari || [])
+            .filter((imza) => kaynak.gruplar.some((g) => g.imza === imza)));
+        await durumuKaydet({ $set: {
+            kartDersSurumImzasi: kaynak.surum,
+            kartDersIslenenGrupImzalari: [...islenen],
+            kartDersToplamGrupSayisi: kaynak.gruplar.length,
+            kartDersTamamlandi: false,
+        } });
+        let yeniKart = 0;
+        for (const grup of kaynak.gruplar) {
+            if (islenen.has(grup.imza)) continue;
+            const cevap = await x.uret({
+                dersBilgisi: { dersAdi: ders.dersAdi, aciklama: ders.aciklama }, grup,
+            });
+            const kartlar = dersKartlariniDogrula({
+                hamKartlar: cevap?.kartlar, kaynaklar: grup.kaynaklar, konular: grup.konular,
+            });
+            yeniKart += await yeniKartlariKaydet(x, { kullaniciId, dersId, token, kartlar });
+            await durumuKaydet({
+                $addToSet: { kartDersIslenenGrupImzalari: grup.imza },
+                $currentDate: { kartUretimSonYenileme: true },
+            });
+            islenen.add(grup.imza);
         }
-        const islenen = new Set(guncel.kartDersIslenenGrupImzalari || []);
-        const kalan = kaynak.gruplar.filter((g) => !islenen.has(g.imza));
-        const mevcut = await kartGetir(x, kullaniciId, dersId);
-        let yeniKart = 0, gecersiz = 0, tekrar = 0, basarisiz = 0, kota = false;
-        let sira = 0;
-        // İki Gemini isteği aynı anda olabilir; kayıtlar sıralı yazılır.
-        // Bu şekilde farklı gruplardaki soru tekrarları da ayıklanır.
-        let kayitSirasi = Promise.resolve();
-        const siraliKaydet = (fn) => {
-            const islem = kayitSirasi.then(fn);
-            kayitSirasi = islem.catch(() => {});
-            return islem;
-        };
-        const isci = async () => {
-            while (sira < kalan.length && !kota) {
-                const grup = kalan[sira++];
-                const t0 = Date.now();
-                try {
-                    const cevap = await x.uret({
-                        dersAdi: ders.dersAdi, grup,
-                        oncekiSorular: kaynak.konuBaglantili
-                            ? mevcut.filter(k=>grup.konular.some(konu=>konu.konuId===k.konuId)).slice(-30)
-                            : mevcut,
-                    });
-                    if (!Array.isArray(cevap?.kartlar))
-                        throw new DersKartiHatasi(
-                            "Kart üretimi geçerli yanıt dönmedi.", 502, "KART_GECERSIZ_YANIT"
-                        );
-                    await siraliKaydet(async () => {
-                        const kontrol = dersKartlariniDogrula({
-                            hamKartlar: cevap.kartlar,
-                            kaynaklar: grup.kaynaklar,
-                            mevcutKartlar: mevcut,
-                            konular: grup.konular || null,
-                        });
-                        if (cevap.kartlar.length && !kontrol.kartlar.length &&
-                            kontrol.gecersiz > 0 && !kontrol.tekrar)
-                            throw new DersKartiHatasi(
-                                "Kart kaynakları doğrulanamadı.", 502, "KART_KAYNAK_GECERSIZ"
-                            );
-                        await yeniKartlariKaydet(x, {
-                            kullaniciId, dersId, token,
-                            kartlar: kontrol.kartlar,
-                        });
-                        const r = await x.DersModel.updateOne({
-                            _id: dersId, kullaniciId, kartUretimToken: token,
-                            temizleniyor: { $ne: true },
-                        }, {
-                            $addToSet: { kartDersIslenenGrupImzalari: grup.imza },
-                            $currentDate: { kartUretimSonYenileme: true },
-                        });
-                        if ((r.matchedCount ?? r.n) !== 1)
-                            throw new DersKartiHatasi("Kart üretimi kaydedilemedi.", 409);
-                        islenen.add(grup.imza);
-                        mevcut.push(...kontrol.kartlar);
-                        yeniKart += kontrol.kartlar.length;
-                        gecersiz += kontrol.gecersiz;
-                        tekrar += kontrol.tekrar;
-                        console.info("[CalismaKartlari][ders] Metin bölümü incelendi", {
-                            grup: grup.sira, toplamGrup: kaynak.gruplar.length,
-                            adayKart: cevap.kartlar.length,
-                            yeniKart: kontrol.kartlar.length,
-                            gecersiz: kontrol.gecersiz, tekrar: kontrol.tekrar,
-                            sureMs: Date.now() - t0,
-                        });
-                    });
-                } catch (hata) {
-                    if ([429, 503].includes(Number(hata?.status))) kota = true;
-                    basarisiz++;
-                    console.warn("[CalismaKartlari][ders] Metin bölümü işlenemedi", {
-                        grup: grup.sira, toplamGrup: kaynak.gruplar.length,
-                        status: Number(hata?.status) || 0,
-                        kod: String(hata?.kod || "BILINMIYOR").slice(0, 64),
-                        sureMs: Date.now() - t0,
-                    });
-                }
-            }
-        };
-        await Promise.all(Array.from({ length: Math.min(2, kalan.length) },
-            () => isci()));
-        const tamamlandi = kaynak.gruplar.every((g) => islenen.has(g.imza));
-        const r = await x.DersModel.updateOne({
-            _id: dersId, kullaniciId, kartUretimToken: token,
-            temizleniyor: { $ne: true },
-        }, {
-            $set: {
-                kartDersTamamlandi: tamamlandi,
-                kartDersToplamGrupSayisi: kaynak.gruplar.length,
-            },
-        });
-        if ((r.matchedCount ?? r.n) !== 1)
-            throw new DersKartiHatasi("Kart üretim sonucu kaydedilemedi.", 409);
+        // Ara kayıtlar yalnız kurtarma içindir; tüm gruplar bitince görünür olur.
         const kartlar = await kartGetir(x, kullaniciId, dersId);
+        await durumuKaydet({ $set: { kartDersTamamlandi: true } });
         return {
-            kartlar, tamamlandi,
-            dersKartTamamlandi: tamamlandi,
-            kotaEngeli: kota,
+            kartlar,
+            tamamlandi: true, dersKartTamamlandi: true,
             toplamGrupSayisi: kaynak.gruplar.length,
-            islenenGrupSayisi: islenen.size,
-            yeniKartSayisi: yeniKart,
-            gecersizKartSayisi: gecersiz,
-            tekrarSayisi: tekrar,
-            basarisizGrupSayisi: basarisiz,
+            islenenGrupSayisi: islenen.size, yeniKartSayisi: yeniKart,
             sureMs: Date.now() - bas,
         };
     } finally {

@@ -26,7 +26,7 @@ export const calismaKartlariDurumunuGetir = async ({ kullaniciId, dersId }, d = 
     const x = bagimliliklar(d);
     const ders = await dersGetir(x, kullaniciId, dersId);
     const yeniSistem = Boolean(ders.kartDersSurumImzasi);
-    const uretimSuruyor = Boolean(ders.kartDersOtomatikAktif);
+    const uretimSuruyor = Boolean(ders.kartDersOtomatikAktif || ders.kartUretimToken);
     const konuSistemi=String(ders.kartDersSurumImzasi||"").startsWith("konu-v2:");
     const harita=ders.kartDersTamamlandi&&!konuSistemi
         ? await x.KonuHaritasiModel?.findOne({kullaniciId,dersId,durum:"hazir"}).select("parcaAtamaSurumu").lean() : null;
@@ -35,7 +35,8 @@ export const calismaKartlariDurumunuGetir = async ({ kullaniciId, dersId }, d = 
         !uretimSuruyor && !yeniKonuKartlariGerekli;
     // Yarım üretilmiş kartlar ve eski kartlar öğrencinin önüne düşmez.
     // Tamamlanma anında bütün ders kartları tek defada açılır.
-    const kartlarGosterilsin = !uretimSuruyor && !yeniKonuKartlariGerekli && (!yeniSistem || tamamlandi);
+    const kartlarGosterilsin = !uretimSuruyor && !ders.kartDersOtomatikHataKodu &&
+        !yeniKonuKartlariGerekli && (!yeniSistem || tamamlandi);
     const kartlar = kartlarGosterilsin
         ? await x.KartModel.find({ kullaniciId, dersId })
             .sort({ createdAt: 1, _id: 1 }).lean()
