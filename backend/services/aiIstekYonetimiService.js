@@ -86,7 +86,11 @@ export const aiIstekYonetimiOlustur = ({
                     const sonuc=await Promise.race([
                         Promise.resolve().then(()=>istek({...aday,maxOutputTokens:cikti(aday)},sure,controller.signal)),
                         new Promise((_,reject)=>{timer=setTimeout(()=>{
-                            controller.abort();reject(hata("GEMINI_ZAMAN_ASIMI",504,"Yapay zekâ isteği zaman aşımına uğradı."));
+                            const e=hata("GEMINI_ZAMAN_ASIMI",504,"Yapay zekâ isteği zaman aşımına uğradı.");
+                            e.tanilama={hataKaynagi:"uygulama_timeout",orijinalHttpDurumu:null,
+                                retryUygunMu:true,retryEdildiMi:n>1,model:aday.model,
+                                istekMaxOutputTokens:cikti(aday),istekTimeoutMs:sure};
+                            controller.abort();reject(e);
                         },sure);}),
                     ]);
                     d.ardArda=0;d.engel=0;d.sonHata=null;
@@ -99,6 +103,7 @@ export const aiIstekYonetimiOlustur = ({
                         ["GEMINI_GECERSIZ_YANIT","GEMINI_GECERSIZ_JSON","GEMINI_GECERSIZ_SEMA","GEMINI_BOS_YANIT","GEMINI_AG_HATASI","GEMINI_ZAMAN_ASIMI"].includes(kod);
                     logger.info?.("[AI] deneme başarısız",{saglayici:aday.saglayici,model:aday.model,deneme:n,status,kod});
                     if(sinif.kod==="GEMINI_GUNLUK_KOTA"||kod==="GEMINI_GUNLUK_KOTA"){d.gunlukDolu=true;break;}
+                    if(kod==="GEMINI_ISTEK_YOGUNLUGU")throw ham;
                     if(status===429){d.engel=simdi()+Math.max(1000,sinif.retryAfterMs??60000);break;}
                     if(status===404||status===402){d.engel=simdi()+300000;break;}
                     if([400,401,403].includes(status)||kod==="GEMINI_YAPILANDIRMA"||kod==="AI_GUVENLIK_ENGELI")throw ham;
