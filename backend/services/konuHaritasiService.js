@@ -5,7 +5,7 @@ import Materyal from "../models/Materyal.js";
 import MetinParcasi from "../models/MetinParcasi.js";
 import KonuHaritasi from "../models/KonuHaritasi.js";
 import Ders from "../models/Ders.js";
-import { geminiIleParcalariKonularaAta, parcaAtamalariniDogrula } from "./parcaKonuAtamaService.js";
+import { geminiIleParcalariKonularaAta, eksikParcaAtamalariniTamamla } from "./parcaKonuAtamaService.js";
 
 import {
     geminiIleKonuHaritasiUret,
@@ -197,7 +197,6 @@ export const aktifMateryalMetinleriniTopla = async (
     const metinGruplari = [];
     const parcaKodlari = new Map();
     let mevcutGrup = [], mevcutGrupKarakter = 0;
-    let sonMateryalId = null;
     for (const [index, parca] of metinParcalari.entries()) {
         const kod = "P" + (index + 1);
         parcaKodlari.set(kod, {
@@ -208,17 +207,15 @@ export const aktifMateryalMetinleriniTopla = async (
         const matIdStr = parca.materyalId.toString();
         const matBilgi = hazirMateryaller.find(m => m._id.toString() === matIdStr);
         const baslik = matBilgi ? (matBilgi.orijinalDosyaAdi || matBilgi.dosyaAdi) : "Materyal";
-        const parcaMetni = (sonMateryalId !== matIdStr ? "\\n=== MATERYAL: " + baslik + " ===\\n" : "")
-            + "[PARCA " + kod + "]\\n" + (parca.icerik || "");
-        sonMateryalId = matIdStr;
+        const parcaMetni = `\n=== MATERYAL: ${baslik} ===\n[PARCA ${kod}]\n${parca.icerik || ""}`;
         if (mevcutGrup.length && mevcutGrupKarakter + parcaMetni.length > BATCH_MAX_KARAKTER) {
-            metinGruplari.push(mevcutGrup.join("\\n\\n"));
+            metinGruplari.push(mevcutGrup.join("\n\n"));
             mevcutGrup = []; mevcutGrupKarakter = 0;
         }
         mevcutGrup.push(parcaMetni);
         mevcutGrupKarakter += parcaMetni.length;
     }
-    if (mevcutGrup.length) metinGruplari.push(mevcutGrup.join("\\n\\n"));
+    if (mevcutGrup.length) metinGruplari.push(mevcutGrup.join("\n\n"));
     return { hazirMateryaller, metinGruplari, toplamParcaSayisi: metinParcalari.length, parcaKodlari };
 };
 
@@ -658,21 +655,16 @@ export const konuHaritasiUretVeKaydet = async (
                 toplamParca: parcaKodlari.size, eslesenParca: atamaMap.size,
                 eksikParca: eksik.length, ayriSiniflandirmaGerekli: eksik.length > 0,
             });
-            if (!eksik.length) {
-                const atamalar = [...atamaMap].map(([kod, ids]) => ({
-                    ...parcaKodlari.get(kod), konuIds: [...ids],
-                }));
-                parcaKonuAtamalari = parcaAtamalariniDogrula(siniflandirilacakParcalar, atamalar, kaliciAnaKonular);
-            } else {
-                // Kısmi kaynak ilişkisini sessizce yayınlama; eksik/uyumsuz
-                // haritalarda eski güvenli sınıflandırmaya geri dön.
-                console.warn("[KonuHaritasiKaynak] Kaynak eşleştirme eksik; güvenli fallback", {
-                    eksikParca: eksik.length, toplamParca: parcaKodlari.size,
-                });
-                parcaKonuAtamalari = await heartbeat.bekle(geminiIleParcalariKonularaAta({
-                    parcalar: siniflandirilacakParcalar, anaKonular: kaliciAnaKonular, modelAdi,
-                }));
-            }
+            const atamalar = [...atamaMap].map(([kod, ids]) => ({
+                ...parcaKodlari.get(kod), konuIds: [...ids],
+            }));
+            parcaKonuAtamalari = await heartbeat.bekle(eksikParcaAtamalariniTamamla({
+                parcalar: siniflandirilacakParcalar, anaKonular: kaliciAnaKonular,
+                mevcutAtamalar: atamalar,
+                siniflandir: (eksikParcalar) => geminiIleParcalariKonularaAta({
+                    parcalar: eksikParcalar, anaKonular: kaliciAnaKonular, modelAdi,
+                }),
+            }));
         } else if (siniflandirmaDestekli) {
             parcaKonuAtamalari = await heartbeat.bekle(geminiIleParcalariKonularaAta({
                 parcalar: siniflandirilacakParcalar, anaKonular: kaliciAnaKonular, modelAdi,
@@ -1531,8 +1523,12 @@ const materyalEklendigindeIncrementalGuncelleIslemi = async (
     const siniflandirmaDestekli = typeof seciliParcaSorgusu?.lean === "function";
     const aktifParcalar = siniflandirmaDestekli ? await seciliParcaSorgusu.lean() : [];
     const parcaKonuAtamalari = siniflandirmaDestekli
-        ? await geminiIleParcalariKonularaAta({
-            parcalar: aktifParcalar, anaKonular: nihaiAnaKonular, modelAdi,
+        ? await eksikParcaAtamalariniTamamla({
+            parcalar: aktifParcalar, anaKonular: nihaiAnaKonular,
+            mevcutAtamalar: mevcutHarita?.parcaKonuAtamalari || [],
+            siniflandir: (eksikParcalar) => geminiIleParcalariKonularaAta({
+                parcalar: eksikParcalar, anaKonular: nihaiAnaKonular, modelAdi,
+            }),
         }) : [];
 
 

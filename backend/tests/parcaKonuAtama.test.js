@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
     geminiIleParcalariKonularaAta,
     parcaAtamalariniDogrula,
+    eksikParcaAtamalariniTamamla,
     atamaYanitiniIncele,
 } from "../services/parcaKonuAtamaService.js";
 
@@ -126,4 +127,35 @@ test("503 sonrası eksik index dönerse sadece başarısız batch yeniden isteni
     assert.equal(sonuc.length, 2);
     assert.equal(cagrilar, 3);
     assert.ok(loglar.some(([etiket, veri]) => etiket === "[ParcaAtama] Şema ayrıntısı" && veri.neden === "MISSING_INDEX"));
+});
+
+test("yalnız eksik parçalar sınıflandırılır, geçerli bağlantı korunur", async () => {
+    const sonuc = await eksikParcaAtamalariniTamamla({
+        parcalar, anaKonular, mevcutAtamalar: [{ ...parcalar[0], konuIds: ["sub-1"] }],
+        siniflandir: async eksikler => {
+            assert.deepEqual(eksikler, [parcalar[1]]);
+            return [{ ...eksikler[0], konuIds: ["sub-2"] }];
+        },
+    });
+    assert.deepEqual(sonuc.map(x => x.konuIds), [["sub-1"], ["sub-2"]]);
+});
+test("eski sürüm ve silinen konu bağlantıları kullanılmaz", async () => {
+    const sonuc = await eksikParcaAtamalariniTamamla({
+        parcalar, anaKonular, mevcutAtamalar: [
+            { ...parcalar[0], islemeId: "eski", konuIds: ["sub-1"] },
+            { ...parcalar[1], konuIds: ["silinmis"] },
+        ],
+        siniflandir: async eksikler => {
+            assert.deepEqual(eksikler, parcalar);
+            return eksikler.map(p => ({ ...p, konuIds: ["sub-2"] }));
+        },
+    });
+    assert.equal(sonuc.length, 2);
+});
+test("bütün bağlantılar geçerliyse Gemini çağrılmaz", async () => {
+    const sonuc = await eksikParcaAtamalariniTamamla({
+        parcalar, anaKonular, mevcutAtamalar: parcalar.map(p => ({ ...p, konuIds: ["sub-1"] })),
+        siniflandir: async () => { throw Error("Gemini çağrılmamalı"); },
+    });
+    assert.equal(sonuc.length, 2);
 });

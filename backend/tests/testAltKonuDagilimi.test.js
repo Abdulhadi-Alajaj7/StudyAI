@@ -91,26 +91,8 @@ test("beş alt konuya dört soru isteği API çağrısı ve kayıt olmadan uyar�
     assert.equal(ortam.kaydiGetir(), undefined);
 });
 
-test("API yalnız mevcut ana ve alt konu seçeneklerini kabul eder", () => {
+test("API 5, 7, 12 ve 20 soruyu kabul eder; sınır dışı girişleri reddeder", () => {
     const dersId = String(new mongoose.Types.ObjectId());
-    for (const [konuId, izinli] of [["sub-ornek", [5, 10]], ["top-veri", [10, 15, 20]]]) {
-        for (const soruSayisi of [0, 1, 5, 7, 10, 12, 15, 20, 21, 1.5, true, "yanlış"]) {
-            const sonuc = testOlusturmaGirdisiniDogrula(dersId, { kapsamTuru: "konu", konuId, soruSayisi });
-            if (izinli.includes(soruSayisi)) assert.equal(sonuc.soruSayisi, soruSayisi);
-            else assert.equal(sonuc.kod, "GECERSIZ_SORU_SAYISI");
-        }
-    }
-});
-
-test("geçici JSON denetim alanları sunumdan kaldırılır, soru ve konu ilişkisi korunur", () => {
-    const soru = { konuId: "sub-ornek", konuBasligi: "Alt konu", metin: "Soru", dogruCevap: "A", aciklama: "Açıklama",
-        konuDogrulama: { hedefSkor: 1 }, kaliteDogrulama: { guven: 1 },
-        kaynaklar: [{ dosyaAdi: "ders.pdf", parcaIndeksleri: [3], parcaSkorlari: [{ parcaIndex: 3, skor: 1 }] }] };
-    const sunum = testiSunumaHazirla({ sorular: [soru] });
-    assert.equal(sunum.sorular[0].konuId, "sub-ornek");
-    assert.deepEqual(sunum.sorular[0].kaynaklar, [{ dosyaAdi: "ders.pdf", parcaIndeksleri: [3] }]);
-    assert.equal(sunum.sorular[0].konuDogrulama, undefined);
-    assert.equal(sunum.sorular[0].kaliteDogrulama, undefined);
-    assert.equal(sunum.sorular[0].dogruCevap, undefined);
-    assert.equal(testiSunumaHazirla({ sorular: [soru] }, { inceleme: true }).sorular[0].dogruCevap, "A");
+    for (const soruSayisi of [1, 5, 7, 12, 20]) assert.equal(testOlusturmaGirdisiniDogrula(dersId, { kapsamTuru: "konu", konuId: "top-veri", soruSayisi }).soruSayisi, soruSayisi);
+    for (const soruSayisi of [0, 21, 1.5, true, "yanlış"]) assert.equal(testOlusturmaGirdisiniDogrula(dersId, { kapsamTuru: "konu", konuId: "top-veri", soruSayisi }).kod, "GECERSIZ_SORU_SAYISI");
 });

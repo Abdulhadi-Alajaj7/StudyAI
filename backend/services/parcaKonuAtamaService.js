@@ -36,6 +36,30 @@ export const parcaAtamalariniDogrula = (parcalar, atamalar, anaKonular) => {
     return [...gorulen.values()];
 };
 
+// Geçerli, aynı kaynak sürümüne ait bağlantıları koru; yalnız eksikleri sınıflandır.
+export const eksikParcaAtamalariniTamamla = async ({
+    parcalar, anaKonular, mevcutAtamalar = [], siniflandir,
+}) => {
+    const izinli = new Set(anaKonular.flatMap(ana => [
+        ana.konuId, ...(ana.altKonular || []).map(alt => alt.konuId),
+    ]));
+    const beklenen = new Map(parcalar.map(parca => [anahtar(parca), parca]));
+    const korunan = new Map();
+    for (const atama of mevcutAtamalar) {
+        const key = anahtar(atama);
+        if (!beklenen.has(key) || !Array.isArray(atama.konuIds)) continue;
+        const konuIds = [...new Set(atama.konuIds.filter(konuId => izinli.has(konuId)))];
+        if (!konuIds.length) continue;
+        const onceki = korunan.get(key);
+        const { materyalId, islemeId, parcaIndex } = beklenen.get(key);
+        korunan.set(key, { materyalId, islemeId, parcaIndex,
+            konuIds: [...new Set([...(onceki?.konuIds || []), ...konuIds])] });
+    }
+    const eksikler = parcalar.filter(parca => !korunan.has(anahtar(parca)));
+    const yeni = eksikler.length ? await siniflandir(eksikler) : [];
+    return parcaAtamalariniDogrula(parcalar, [...korunan.values(), ...yeni], anaKonular);
+};
+
 // Gemini yanıtının yalnızca yapısal özeti loglanır; kaynak metni/yanıt içeriği loglanmaz.
 export const atamaYanitiniIncele = (rows, batchBoyutu, izinliIds) => {
     if (!Array.isArray(rows)) return { neden: "INVALID_ARRAY", beklenen: batchBoyutu, gelen: null };

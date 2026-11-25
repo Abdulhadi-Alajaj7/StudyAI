@@ -35,12 +35,10 @@ export const testOlusturmaGirdisiniDogrula = (dersId, girdi = {}) => {
     }
 
     const soruSayisi = veri.soruSayisi === undefined ? 10 : Number(veri.soruSayisi);
-    const altKonuMu = kapsamTuru === "konu" && typeof veri.konuId === "string" && veri.konuId.trim().startsWith("sub-");
-    const soruSayilari = altKonuMu ? [5, 10] : [10, 15, 20];
-    if (!soruSayilari.includes(soruSayisi) ||
+    if (!Number.isInteger(soruSayisi) || soruSayisi < 1 || soruSayisi > 20 ||
         (veri.soruSayisi !== undefined && !["number", "string"].includes(typeof veri.soruSayisi))) {
         return {
-            hata: `Soru sayısı ${soruSayilari.join(", ")} seçeneklerinden biri olmalıdır.`,
+            hata: "Soru sayısı 1 ile 20 arasında bir tam sayı olmalıdır.",
             kod: "GECERSIZ_SORU_SAYISI",
         };
     }
@@ -161,12 +159,6 @@ export const testiSunumaHazirla = (testBelgesi, { inceleme = false } = {}) => {
         delete guvenliSoru.ogrenmeHedefi;
         delete guvenliSoru.kaynakReferanslari;
         delete guvenliSoru.kaynakKanitlari;
-        // Geçici JSON denetim alanları artık istemciye gönderilmez.
-        delete guvenliSoru.konuDogrulama;
-        delete guvenliSoru.kaliteDogrulama;
-        if (Array.isArray(guvenliSoru.kaynaklar)) {
-            guvenliSoru.kaynaklar = guvenliSoru.kaynaklar.map(({ parcaSkorlari, ...kaynak }) => kaynak);
-        }
         if (!inceleme) {
             delete guvenliSoru.dogruCevap;
             delete guvenliSoru.aciklama;
