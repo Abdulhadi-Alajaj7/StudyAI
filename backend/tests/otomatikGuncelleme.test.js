@@ -195,8 +195,7 @@ mock.module("../models/Ders.js", {
     }
 });
 
-mock.module("../services/geminiService.js", {
-    namedExports: {
+const geminiMock = {
         VARSAYILAN_GEMINI_MODELI: "test-model",
         yapilandirilmisGeminiCagrisi: async () => { throw new Error("Bu eski harita senaryosunda parça ataması çağrılmamalı"); },
         geminiIleKonuHaritasiUret: async () => {
@@ -220,6 +219,13 @@ mock.module("../services/geminiService.js", {
         geminiIleKonulariBirlestir: async () => {
             throw new Error("Tek grup testinde birleştirme çağrılmamalı.");
         }
+};
+mock.module("../services/geminiService.js", {
+    namedExports: {
+        ...geminiMock,
+        // Kaynaklı tam harita ve eski incremental akış aynı test senaryosunu kullanır.
+        geminiIleKaynakliKonuHaritasiUret: (...args) => geminiMock.geminiIleKonuHaritasiUret(...args),
+        geminiIleKaynakliKonulariBirlestir: (...args) => geminiMock.geminiIleKonulariBirlestir(...args),
     }
 });
 
