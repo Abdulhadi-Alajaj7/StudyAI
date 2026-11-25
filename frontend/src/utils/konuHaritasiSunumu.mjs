@@ -18,3 +18,15 @@ export const dosyaBoyutuMetni = bayt => {
     const sira = bayt >= 1024 ** 3 ? 3 : bayt >= 1024 ** 2 ? 2 : bayt >= 1024 ? 1 : 0;
     return `${new Intl.NumberFormat("tr-TR", { maximumFractionDigits: sira ? 1 : 0 }).format(bayt / 1024 ** sira)} ${["B", "KB", "MB", "GB"][sira]}`;
 };
+
+// Yalnız tamamlanan ve öğrenciye sunulan kartlar, gerçek konuId ile sayılır.
+export const konuKartSayilariniHesapla = (durum) => {
+    if (!durum || durum.uretimSuruyor || durum.uretimHatasi || durum.yeniKonuKartlariGerekli ||
+        !Array.isArray(durum.kartlar)) return null;
+    const sayilar = Object.create(null);
+    for (const kart of durum.kartlar) {
+        if (typeof kart?.konuId !== "string" || !kart.konuId.trim()) continue;
+        sayilar[kart.konuId] = (sayilar[kart.konuId] || 0) + 1;
+    }
+    return sayilar;
+};

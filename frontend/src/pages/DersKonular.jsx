@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { useOutletContext, useParams } from "react-router-dom";
 import api from "../api";
+import kartApi from "../services/calismaKartlariApi.mjs";
+import { konuKartSayilariniHesapla } from "../utils/konuHaritasiSunumu.mjs";
 import DersKonuHaritasi from "../components/DersKonuHaritasi.jsx";
 import { kullaniciHataMesaji } from "../utils/kullaniciHatasi.mjs";
 
@@ -8,6 +10,7 @@ function DersKonular() {
     const { isDark, ders } = useOutletContext();
     const { dersId } = useParams();
     const [veri, setVeri] = useState({ dersId: null, harita: null, materyaller: [], haritaHatasi: "", materyalHatasi: "" });
+    const [kartVerisi, setKartVerisi] = useState({ dersId: null, sayilar: null });
     useEffect(() => {
         const c = new AbortController();
         Promise.allSettled([
@@ -22,8 +25,27 @@ function DersKonular() {
         });
         return () => c.abort();
     }, [dersId]);
+    // Yalnız mevcut kayıtları oku; kart üretimini başlatma.
+    useEffect(() => {
+        const c = new AbortController();
+        let zamanlayici;
+        const oku = async () => {
+            try {
+                const { data } = await kartApi.listele(dersId, c.signal);
+                if (c.signal.aborted) return;
+                setKartVerisi({ dersId, sayilar: konuKartSayilariniHesapla(data) });
+                if (data.uretimSuruyor) zamanlayici = setTimeout(oku, 3000);
+            } catch {
+                if (!c.signal.aborted) setKartVerisi({ dersId, sayilar: null });
+            }
+        };
+        setKartVerisi({ dersId, sayilar: null });
+        void oku();
+        return () => { c.abort(); clearTimeout(zamanlayici); };
+    }, [dersId]);
     const yukleniyor = veri.dersId !== dersId;
     return <DersKonuHaritasi key={dersId} ders={ders} isDark={isDark} harita={yukleniyor ? null : veri.harita}
+        kartSayilari={kartVerisi.dersId === dersId ? kartVerisi.sayilar : null}
         materyaller={yukleniyor ? [] : veri.materyaller} haritaHatasi={veri.haritaHatasi} materyalHatasi={veri.materyalHatasi} yukleniyor={yukleniyor} />;
 }
 

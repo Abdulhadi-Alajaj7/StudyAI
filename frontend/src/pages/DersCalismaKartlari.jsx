@@ -27,7 +27,6 @@ function DersCalismaKartlari() {
   const uretimControllerRef = useRef(null);
   const [hata, setHata] = useState("");
   const [filtre, setFiltre] = useState("tum");
-  const [konuFiltre,setKonuFiltre]=useState("tum");
   const [index, setIndex] = useState(0);
   const [cevapAcik, setCevapAcik] = useState(false);
   const [kaydediliyor, setKaydediliyor] = useState(false);
@@ -47,7 +46,6 @@ function DersCalismaKartlari() {
     setIndex(0);
     setCevapAcik(false);
     setFiltre("tum");
-    setKonuFiltre("tum");
     api.listele(dersId, controller.signal)
       .then(r => { setKartlar(r.data.kartlar || []); setUretim(r.data); })
       .catch(e => { if (!controller.signal.aborted) setHata(kullaniciHataMesaji(e, "Kartlar yüklenemedi.")); })
@@ -97,20 +95,18 @@ function DersCalismaKartlari() {
       : "Dersin önemli bilgileri çalışma kartlarına dönüştürülecek.";
 
   const gosterilenKartlar = uretimAktif || uretimHatasi || uretim.yeniKonuKartlariGerekli ? [] : kartlar;
-  const konuSecenekleri=useMemo(()=>[...new Map(gosterilenKartlar.map(k=>[k.konuId||"eski",k.konuBasligi||"Konu bağlantısı olmayan kartlar"])).entries()],[gosterilenKartlar]);
-  const konuKartlari=useMemo(()=>gosterilenKartlar.filter(k=>konuFiltre==="tum"||(k.konuId||"eski")===konuFiltre),[gosterilenKartlar,konuFiltre]);
   const sayilar = useMemo(() => ({
-    tum: konuKartlari.length,
-    gorulmeyen: konuKartlari.filter(k => !k.goruldu).length,
-    gorulen: konuKartlari.filter(k => k.goruldu).length,
-    yildizli: konuKartlari.filter(k => k.yildizli).length,
-  }), [konuKartlari]);
-  const filtrelenmis = useMemo(() => konuKartlari.filter(k =>
+    tum: gosterilenKartlar.length,
+    gorulmeyen: gosterilenKartlar.filter(k => !k.goruldu).length,
+    gorulen: gosterilenKartlar.filter(k => k.goruldu).length,
+    yildizli: gosterilenKartlar.filter(k => k.yildizli).length,
+  }), [gosterilenKartlar]);
+  const filtrelenmis = useMemo(() => gosterilenKartlar.filter(k =>
     filtre === "tum" ||
     (filtre === "gorulmeyen" && !k.goruldu) ||
     (filtre === "gorulen" && k.goruldu) ||
     (filtre === "yildizli" && k.yildizli)
-  ), [konuKartlari, filtre]);
+  ), [gosterilenKartlar, filtre]);
   const aktifIndex = Math.min(index, Math.max(0, filtrelenmis.length - 1));
   const aktif = filtrelenmis[aktifIndex];
 
@@ -221,16 +217,8 @@ function DersCalismaKartlari() {
         <p className="mt-2 text-3xl font-bold">{sayilar[id]}</p>
       </button>)}
     </div>
-    {!yukleniyor && gosterilenKartlar.length>0 && (
+    {!yukleniyor && gosterilenKartlar.length > 0 && !uretimAktif && !uretim.dersKartTamamlandi && !uretimHatasi && (
       <div className="flex flex-wrap items-center gap-3">
-        {konuSecenekleri.some(([id])=>id!=="eski") && <label className="flex flex-1 flex-wrap items-center gap-2 text-sm">
-          Konu Seçimi
-          <select value={konuFiltre} onChange={e=>{setKonuFiltre(e.target.value);setIndex(0);setCevapAcik(false);setFiltre("tum");}}
-            className={`min-w-0 max-w-full rounded-xl border px-3 py-2 ${panel} ${metin}`}>
-            <option value="tum">Tüm Konular</option>
-            {konuSecenekleri.map(([id,baslik])=><option key={id} value={id}>{baslik}</option>)}
-          </select>
-        </label>}
         {!uretimAktif && !uretim.dersKartTamamlandi && !uretimHatasi &&
           <button type="button" onClick={olustur} className="rounded-xl bg-[#705CF5] px-4 py-2 text-sm font-semibold text-white">
             Kartları Oluştur
@@ -271,7 +259,7 @@ function DersCalismaKartlari() {
       <div className={`rounded-2xl border p-14 text-center ${panel}`}>
         <StarIcon className="mx-auto h-10 w-10 text-violet-400" />
         <p className="mt-4 font-semibold">Bu grupta henüz kart bulunmuyor.</p>
-        <button type="button" onClick={() => {setKonuFiltre("tum");filtreDegistir("tum");}} className="mt-4 text-sm font-semibold text-violet-400 hover:underline">Tüm kartlara dön</button>
+        <button type="button" onClick={() => filtreDegistir("tum")} className="mt-4 text-sm font-semibold text-violet-400 hover:underline">Tüm kartlara dön</button>
       </div> :
       <div className="mx-auto max-w-5xl space-y-4">
         <div className={`flex flex-wrap items-center justify-between gap-3 text-sm ${ikincil}`}>

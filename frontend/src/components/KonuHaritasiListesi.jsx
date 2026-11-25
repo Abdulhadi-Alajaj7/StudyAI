@@ -1,8 +1,8 @@
 import { useId, useState } from "react";
-import { ChevronDownIcon, CheckIcon } from "@heroicons/react/24/outline";
+import { ChevronDownIcon, CheckIcon, RectangleStackIcon } from "@heroicons/react/24/outline";
 import "./DersKonuHaritasi.css";
 
-function KonuDali({ ana, index, secili, onSec }) {
+function KonuDali({ ana, index, secili, onSec, kartSayilari }) {
     const [acik, setAcik] = useState(true);
     const id = useId();
     const altKonular = ana.altKonular || [];
@@ -26,6 +26,10 @@ function KonuDali({ ana, index, secili, onSec }) {
                     <span className="konu-nokta" aria-hidden="true" /><span className="konu-yazi"><span className="konu-alt-baslik">{alt.baslik}</span>
                         {alt.aciklama && <span className="konu-aciklama">{alt.aciklama}</span>}</span>
 
+                    {kartSayilari !== null && <span className="konu-kart-sayisi" aria-label={`${kartSayilari[alt.konuId] || 0} çalışma kartı`}>
+                        <RectangleStackIcon aria-hidden="true" />
+                        <span>{kartSayilari[alt.konuId] || 0} kart</span>
+                    </span>}
                     {secili === alt.konuId && <CheckIcon className="konu-secim-simgesi" aria-hidden="true" />}
                 </button>
             </li>)}
@@ -33,8 +37,8 @@ function KonuDali({ ana, index, secili, onSec }) {
     </li>;
 }
 
-export default function KonuHaritasiListesi({ anaKonular }) {
+export default function KonuHaritasiListesi({ anaKonular, kartSayilari = null }) {
     const [secili, setSecili] = useState(null);
     return <ol className="konu-dallar" aria-label="Ders konuları">{anaKonular.map((ana, i) =>
-        <KonuDali key={ana.konuId || ana._id || i} ana={ana} index={i} secili={secili} onSec={setSecili} />)}</ol>;
+        <KonuDali key={ana.konuId || ana._id || i} ana={ana} index={i} secili={secili} onSec={setSecili} kartSayilari={kartSayilari} />)}</ol>;
 }
