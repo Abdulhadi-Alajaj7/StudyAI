@@ -1,35 +1,41 @@
-# StudyAI Test Üretimi: Gemini Öğretmen, Tek İstek ve Güvenilir Kısmi Sonuç
+# StudyAI Test Üretimi: Kesin Sayı ve Alt Konu Dağılımı
 
-## Güncel üretim akışı
+## Güncel akış
 
-1. **Yeni konu haritaları:** PDF'lerin aktif metin parçalarını Gemini, harita tamamlanırken ilgili ana/alt konu ID'lerine bağlar. Aynı chunk birden çok konuyla ilişkili olabilir. Atamalar `KonuHaritasi.parcaKonuAtamalari` içinde materyal, işlem sürümü ve parça indeksiyle tutulur. Eski haritalar için semantik kaynak araması korunur.
-2. Kullanıcı ana konu seçerse her alt konu için **en az bir** soru hedeflenir; istek sayısı alt konu sayısından küçükse işlem reddedilir. Alt konu testleri 5/10, ana konu testleri 10/15/20 soru destekler.
-3. Backend önceden etiketlenmiş kaynaklardan fiziksel olarak tekilleştirilmiş, konu başına kaynak içeren bir paket hazırlar. Tek istekte gönderilen kaynak hacmi `TEST_TEK_ISTEK_KAYNAK_KARAKTER_BUTCESI` ile sınırlandırılır (varsayılan 70.000, izinli 30.000–110.000 karakter).
-4. **Tek Gemini API isteği:** Hedef sayı, konu/zorluk kotaları, kaynak anahtarları ve tekrar etmeme kuralları ile mümkün olan sorular istenir. Kaynak yetersizse tekrar veya tahmin yerine daha az soru döndürmesine izin verilir. Eski 5 soruluk parti akışı, tekil onarımlar ve ek Gemini kalite kontrolü bu varsayılan yolda çalışmaz.
-5. **Yerel kontrol (yeni API çağrısı yok):** Her soru sırayla JSON yapısı, A/B/C/D seçenekleri, tek cevap anahtarı, konu/kota kimliği, kaynak referansları, kaynaktaki birebir kanıt alıntısı, cevap-kaynak örtüşmesi ve benzer/tekrar soru açısından kontrol edilir. Geçersiz sorular atılır, geçerli sorular saklanır.
-6. Tüm alt konulardan en az bir geçerli soru yoksa ana konu testi **kaydedilmez** (kapsam kuralı korunur). Yeterli kapsam varsa eksik sayıyla test kaydedilebilir ve kullanıcıya Türkçe uyarı gösterilir.
-7. Mevcut kullanıcı testleri ve cevapları değiştirilmez; `main` için otomatik birleştirme yapılmaz.
+1. Ders/kullanıcı sahipliği, seçilen kapsam ve aktif materyal sürümleri kontrol edilir. Konu haritasının MongoDB'deki `parcaKonuAtamalari` kayıtları korunur; üretim sırasında embedding veya yeniden sınıflandırma yapılmaz. Eski haritalarda ilgili materyallerin aktif parçaları kullanılır.
+2. Ana konu seçilirse doğrudan alt konular, alt konu seçilirse yalnızca o konu kullanılır. Tüm ders kapsamı haritanın yaprak konularını kapsar. Soru sayısı 1–20 arasında tam sayıdır; konu sayısından küçük istek açıklayıcı 422 hatasıyla reddedilir.
+3. Kaynaklar fiziksel parça başına tekilleştirilir; ortak parçaların konu etiketleri birleştirilir. Her gerekli konunun kaynağı korunur. Kaynaksız konu veya kaynak paketine sığmayan zorunlu içerik varsa API çağrısı yapılmaz.
+4. Tek Gemini isteğinde tam sayı, konu ve zorluk kotaları, kaynak metinleri ve JSON şeması gönderilir. Her soruda somut `ogrenmeHedefi`, A/B/C/D seçenekleri, tek cevap anahtarı, açıklama, konu kimliği, kaynak referansları ve kısa kanıt alıntıları istenir.
+5. Yerel doğrulama yapıyı, dört farklı seçeneği, cevap/açıklama tutarlılığını, izinli konuları, kaynak-konu bağlarını, alıntıların kaynakta bulunmasını, tekrarları ve dağılımı kontrol eder. Geçerli adaylar konu ve zorluk kotalarına birlikte uydurulur. Aynı bilgi/cevap/öğrenme hedefini yeniden ölçen yakın ifadeler de kontrol edilir.
+6. Eksik varsa yalnızca kalan sayı ve kotalar için **en fazla bir tamamlama isteği** yapılır. Kabul edilen soruların metni, cevabı ve hedefi tekrar edilmemesi için gönderilir. Kaynak yetersizliği açıkça bildirildiyse ek çağrı yapılmaz.
+7. Üretici ve kayıt servisi aynı doğrulayıcıyla son koşulları denetler. `soruSayisi === istenenSoruSayisi === sorular.length` ve konu kotaları sağlanmadan kayıt yoktur. Kaynak sürümü değişmişse 409 döner. MongoDB şeması da yeni kısmi testleri reddeder.
 
-## Kısmi test ve görünür uyarı
+## Dağılım kuralları
 
-- `soruSayisi`: kaydedilen gerçek soru sayısı.
-- `istenenSoruSayisi`: kullanıcının istediği soru sayısı.
-- `eksikSoruNedeni`: `KAYNAK_KAPASITESI` (kaynak hazırlama kısalttı) veya `KALITE_KONTROLU` (Gemini eksik üretti veya yerel kontrol soru reddetti).
-- Kullanıcı örneğin 10 soru istediğinde 7 geçerli ve kapsayıcı soru kalırsa 7 soru kaydedilir ve eksik 3 soru açıkça gösterilir.
-- Kaynak bulunamadığında, tüm alt konular kapsanamadığında, geçerli hiç soru olmadığında veya Gemini 429/503/timeout hatası verdiğinde kısmi başarı uydurulmaz.
+| Konu | Soru | Geçerli dağılım |
+| --- | --- | --- |
+| 5 | 10 | 2, 2, 2, 2, 2 |
+| 5 | 20 | 4, 4, 4, 4, 4 |
+| 4 | 12 | 3, 3, 3, 3 |
+| 5 | 7 | Her konu en az 1; örneğin 2, 2, 1, 1, 1 veya 3, 1, 1, 1, 1 |
+| 5 | 4 | Uyarı/422; üretim ve kayıt yok |
 
-## API hızı, kota ve denetlenebilirlik
+Tam bölünmede eşitlik kesin koşuldur. Bölünemeyen sayıda kalanların yerini backend karakter sayısına göre belirlemez; Gemini kaynak içeriğine ve farklı öğrenme hedeflerine göre seçer. Karışık zorluk için mevcut dengeli kolay/orta/zor kotaları korunur.
 
-- Varsayılan test üretimi için **en fazla bir Gemini çağrı denemesi** yapılır; 429'a tekrar istek atılmaz. Kota yenilenme süresi sağlayıcının sınırına bağlıdır.
-- Terminalde `[TestTekIstek] Gemini üretimi` özeti: model, istek adedi, istenen/üretilen/kabul edilen soru sayıları, reddedilen soru sayısı, süre ve token kullanımı.
-- Gemini'den daha az çağrı yapmak gecikmeyi ve kota kullanımını **azaltabilir**, fakat gerçek süre/kalite değişimini üretim ortamında ölçmek gerekir.
-- İkinci Gemini denetimi ve embedding tabanlı soru kontrolü varsayılan tek-istek yolunda devre dışıdır; bu nedenle modelin yanıtı akademik doğruluk garantisi değildir. Yerel kontroller de açıkça yanlış bilgiyi her zaman yakalayamaz.
-- `JSON` inceleme düğmesinde kaynak indeksleri ve mevcutsa önceki semantic skorları görünür. Yeni haritada skor bulunmaması normaldir; skor bir doğruluk yüzdesi değildir.
+## Sınırlar ve hata davranışı
 
-## Eski yol ve regresyon
+- Normal üretim 1; yalnızca tamamlama gerektiğinde toplam en fazla 2 SDK çağrısı. Her çağrı tek denemedir; 429/503, bozuk JSON veya kesilmiş çıktı yeni bir üretim zinciri başlatmaz.
+- Toplam Gemini zaman bütçesi 120 saniye, tek çağrı en fazla 90 saniyedir. Çıktı token bütçesi istenen sayıyla artar. Gerçek süre/tokenlar mevcut üretim izleyicisinden takip edilir; canlı performans iddiası değildir.
+- Kaynak hazırlama üst sınırı `TEST_MAKS_KAYNAK_KARAKTERI` (varsayılan 160.000); tek istek paketi `TEST_TEK_ISTEK_KAYNAK_KARAKTER_BUTCESI` (varsayılan 90.000; 30.000–110.000).
+- Hedef karşılanmazsa `TEST_HEDEFI_KARSILANAMADI` ve anlaşılır Türkçe hata döner. Hiçbir eksik test başarı olarak sunulmaz.
+- Eski kısmi testlerin okuma/çözme desteği ve eski alanları korunur. Yeni kanıt/öğrenme hedefi alanları doğru cevabı sızdırmamak için istemci sunumundan çıkarılır.
+- Yerel kontroller akademik doğruluğu, tüm anlamsal tekrarları veya birbirine yakın seçeneklerin tek doğruluğunu kesin ispatlamaz. Bunlar kaynakla sınırlandırılmış üretim talimatı ve hafif yerel kontrollerle azaltılan model riskleridir; ikinci bir Gemini denetçisi veya embedding kullanılmaz.
 
-- `geminiIleTestSorulariUret` fonksiyonu doğrudan `tekIstekModu` olmadan çağrılırsa eski parti/onarma yolunu korur (test/geri uyumluluk). StudyAI test servisi `tekIstekModu: true` geçirir.
-- Çalışan birim/entegrasyon testleri kalite ve hızın gerçek Gemini ile doğrulandığı anlamına gelmez.
+## Temizlik ve otomatik testler
+
+Eski beş soruluk parti üretimi, parti küçültme, tek tek onarım zinciri, kısmi başarı modu, ikinci Gemini kalite denetçisi, testlere özel embedding denetçisi ve karakter sayısına göre kota yardımcıları kaldırıldı. `GEMINI_TEST_MAKS_DENEME` kullanılmaz. Diğer özelliklerin ortak Gemini, embedding ve semantik arama servisleri korunur.
+
+`testTekIstekGemini`, `testUretimGuvenilirligi`, `testAltKonuDagilimi`, `testSistemi`, `testGeminiBasitAkis`, `testTanilama` ve `testUretimIzleme` testleri güncel sözleşmeyi sınar. Gerçek üretici, sahte SDK yanıtları ve MongoDB şema doğrulaması birlikte çalıştırılır. Bu testler canlı Gemini/MongoDB testi yerine geçmez.
 
 ## Konu haritası / chunk sınıflandırma terminal tanılaması
 

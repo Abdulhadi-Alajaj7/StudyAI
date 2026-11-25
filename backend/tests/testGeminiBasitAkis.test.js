@@ -10,7 +10,7 @@ const zincir = (veri) => ({
     async lean() { return veri; },
 });
 
-test("hazır harita atamaları embedding olmadan Gemini'ye iletilir; eksik konu kapsamı testi iptal etmez", async () => {
+test("hazır harita atamaları embedding olmadan iletilir; eksik konu kapsamı kaydedilmez", async () => {
     const kullaniciId = new mongoose.Types.ObjectId();
     const dersId = new mongoose.Types.ObjectId();
     const materyalId = new mongoose.Types.ObjectId();
@@ -78,13 +78,13 @@ test("hazır harita atamaları embedding olmadan Gemini'ye iletilir; eksik konu 
         testTanilamaYaz: () => {},
         kaynakButcesi: 40_000,
     };
-    const belge = await testOlustur({
+    await assert.rejects(testOlustur({
         kullaniciId, dersId, kapsamTuru: "konu",
         konuId: "top-temel", soruSayisi: 10, zorluk: "orta",
-    }, bagimliliklar);
+    }, bagimliliklar), { kod: "TEST_HEDEFI_KARSILANAMADI" });
     assert.equal(embeddingCagrildi, false);
     assert.match(secilenHaritaAlanlari, /parcaKonuAtamalari/);
-    assert.equal(geminiGirdisi.tekIstekModu, true);
+    assert.equal(geminiGirdisi.konuEslesmeleriZorunlu, true);
     assert.equal(geminiGirdisi.kaynaklar.length, 2);
     assert.deepEqual(
         new Set(geminiGirdisi.kaynaklar.map((kaynak) => kaynak.konuIds[0])),
@@ -92,7 +92,4 @@ test("hazır harita atamaları embedding olmadan Gemini'ye iletilir; eksik konu 
     );
     assert.equal(geminiGirdisi.konuDagilimi[0].adet, 5);
     assert.equal(geminiGirdisi.konuDagilimi[1].adet, 5);
-    assert.equal(belge.soruSayisi, 1);
-    assert.equal(belge.eksikSoruNedeni, "KAYNAK_KAPASITESI");
-    assert.equal(belge.sorular[0].kaynaklar.length, 0);
 });

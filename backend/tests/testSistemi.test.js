@@ -10,11 +10,9 @@ import {
     testOlusturmaGirdisiniDogrula,
     testiSunumaHazirla,
 } from "../controllers/testController.js";
-import { testPartisiPromptunuOlustur, testSorulariniDogrula } from "../services/geminiService.js";
+import { testSorulariniDogrula } from "../services/testDogrulamaService.js";
 import {
     cevabiKaydet,
-    altKonuKotalariniDagit,
-    konuKotalariniDagit,
     sonGoruntulenenSoruyuGuncelle,
     soruIsaretiniGuncelle,
     testOlustur,
@@ -123,6 +121,23 @@ const ornekSorular = (adet, zorluk = "orta") => Array.from(
     })
 );
 
+// Servis sözleşmesi için kaynak/konu/zorluk bilgileri taşıyan sentetik çıktı.
+const uretimSorulari = (girdi) => {
+    const zorluklar = Object.entries(girdi.zorlukDagilimi).flatMap(([z, n]) => Array(n).fill(z));
+    return ornekSorular(girdi.soruSayisi).map((soru, index) => {
+        const konu = girdi.konuDagilimi[index % girdi.konuDagilimi.length] || girdi.izinliKonuIds[0];
+        const kaynak = girdi.kaynaklar.find((k) => k.konuIds.includes(konu?.konuId)) || girdi.kaynaklar[0];
+        const kanit = kaynak.icerik.slice(0, 150);
+        return { ...soru, zorluk: zorluklar[index], konuId: konu?.konuId || "",
+            metin: `${kanit} Örnek soru ${index + 1}?`,
+            ogrenmeHedefi: `Öğrenme ${index + 1}: ${kanit}`,
+            aciklama: `${soru.secenekler[0].metin}. ${kanit}`,
+            kaynakReferanslari: [kaynak.anahtar],
+            kaynakKanitlari: [{ kaynakReferansi: kaynak.anahtar, alinti: kanit }],
+        };
+    });
+};
+
 const uretimBagimliliklari = ({
     parcalar = metinParcalari,
     harita = konuHaritasi,
@@ -177,26 +192,11 @@ const uretimBagimliliklari = ({
                 return kaydedilen;
             },
         },
-        geminiTestUret: geminiTestUret || (async ({ soruSayisi }) => ({
-            sorular: ornekSorular(soruSayisi),
+        geminiTestUret: geminiTestUret || (async (girdi) => ({
+            sorular: uretimSorulari(girdi),
             model: "test-model",
         })),
-        // Embedding motorunu taklit eden deterministik sonuçlar:
-        // Üretim kodu metinsel eşleştirme yapmaz; yalnızca skor ve parça
-        // kimlikleriyle dönen semantik sonuçları tüketir.
-        semanticArama: async ({ sorgu, materyalIds }) => {
-            const izinli = new Set((materyalIds || []).map(String));
-            const tip = /Yığın/u.test(sorgu) ? String(materyalId)
-                : /Kuyruk/u.test(sorgu) ? String(ikinciMateryalId) : "";
-            return { sonuclar: parcalar
-                .filter((parca) => String(parca.materyalId) === tip &&
-                    izinli.has(String(parca.materyalId)))
-                .map((parca) => ({
-                    materyalId: String(parca.materyalId),
-                    parcaIndex: parca.parcaIndex,
-                    skor: 0.91,
-                })) };
-        },
+        semanticArama: async () => { throw new Error("Unexpected embedding call"); },
         kaynakButcesi: 40_000,
         ...(testTanilamaYaz ? { testTanilamaYaz } : {}),
         ...(korelasyonIdOlustur ? { korelasyonIdOlustur } : {}),
@@ -254,7 +254,7 @@ test("üç test kapsamı ile varsayılan ve geçersiz ayarlar doğrulanır", () 
     assert.equal(testOlusturmaGirdisiniDogrula(String(dersId), {
         kapsamTuru: "yanlis",
     }).kod, "GECERSIZ_TEST_KAPSAMI");
-    for (const soruSayisi of [5, 7]) {
+    for (const soruSayisi of [0, 21, 1.5, true]) {
         assert.equal(testOlusturmaGirdisiniDogrula(String(dersId), {
             kapsamTuru: "tum_ders",
             soruSayisi,
@@ -308,7 +308,7 @@ test("eski haritada yalnızca ilgili hazır materyallerin parçaları gönderili
     const { bagimliliklar } = uretimBagimliliklari({
         geminiTestUret: async (deger) => {
             girdi = deger;
-            return { sorular: ornekSorular(10), model: "mock" };
+            return { sorular: uretimSorulari(deger), model: "mock" };
         },
     });
     await testOlustur({ kullaniciId, dersId, kapsamTuru: "konu",
@@ -330,7 +330,7 @@ test("yeni haritanın parça-konu atamaları eşleşmeyen metni dışarıda bır
         parcalar: [...metinParcalari, ekParca], harita,
         geminiTestUret: async (deger) => {
             girdi = deger;
-            return { sorular: ornekSorular(10), model: "mock" };
+            return { sorular: uretimSorulari(deger), model: "mock" };
         },
     });
     await testOlustur({ kullaniciId, dersId, kapsamTuru: "konu",
@@ -350,7 +350,7 @@ test("tüm ders, materyal ve konu kapsamlarında ilgili metinler gönderilir", a
         const { bagimliliklar, kaydiGetir } = uretimBagimliliklari({
             geminiTestUret: async (veri) => {
                 girdi = veri;
-                return { sorular: ornekSorular(10), model: "mock" };
+                return { sorular: uretimSorulari(veri), model: "mock" };
             },
         });
         await testOlustur({
@@ -384,7 +384,7 @@ test("aynı parça iki alt konuya bağlanmışsa tek kaynak ve iki konu etiketi 
         harita: ortakHarita,
         geminiTestUret: async (deger) => {
             girdi = deger;
-            return { sorular: ornekSorular(10), model: "mock" };
+            return { sorular: uretimSorulari(deger), model: "mock" };
         },
     });
     await testOlustur({ kullaniciId, dersId, kapsamTuru: "konu",
@@ -539,9 +539,9 @@ test("test üretimi korelasyonlu terminal izleyicisini Gemini akışına bağlar
             });
             return izleyici;
         },
-        geminiTestUret: async ({ soruSayisi }, ikinciBagimliliklar) => {
+        geminiTestUret: async (girdi, ikinciBagimliliklar) => {
             geminiIzleyicisi = ikinciBagimliliklar.uretimIzleyicisi;
-            return { sorular: ornekSorular(soruSayisi), model: "test-model" };
+            return { sorular: uretimSorulari(girdi), model: "test-model" };
         },
     });
 
@@ -563,7 +563,7 @@ test("konu kapsamı materyal sınırını embedding olmadan korur", async () => 
     const { bagimliliklar } = uretimBagimliliklari({
         geminiTestUret: async (deger) => {
             girdi = deger;
-            return { sorular: ornekSorular(10), model: "mock" };
+            return { sorular: uretimSorulari(deger), model: "mock" };
         },
     });
     bagimliliklar.semanticArama = async () => {
@@ -585,10 +585,10 @@ test("kısa kaynak bile Gemini'ye gönderilir, içerik kapasitesi önceden redde
                 kismiUretimNedeni: "KAYNAK_KAPASITESI" };
         },
     });
-    await testOlustur({ kullaniciId, dersId, kapsamTuru: "materyal",
-        materyalId, soruSayisi: 10, zorluk: "orta" }, bagimliliklar);
+    await assert.rejects(testOlustur({ kullaniciId, dersId, kapsamTuru: "materyal",
+        materyalId, soruSayisi: 10, zorluk: "orta" }, bagimliliklar), { kod: "TEST_HEDEFI_KARSILANAMADI" });
     assert.equal(geminiCagrildi, true);
-    assert.equal(kaydiGetir().soruSayisi, 1);
+    assert.equal(kaydiGetir(), undefined);
 });
 
 const dogrulamaKaynaklari = [
@@ -618,6 +618,7 @@ const hamSoru = ({ metin, dogru, aciklama, kaynak, kanit }) => ({
     ],
     dogruCevap: "A",
     aciklama,
+    ogrenmeHedefi: metin,
     zorluk: "kolay",
     konuId: "",
     kaynakReferanslari: [kaynak],
@@ -658,7 +659,7 @@ test("Gemini test çıktısı yapı, kaynak ve tekrar bakımından doğrulanır"
             zorlukDagilimi: { kolay: 2 },
             kaynaklar: dogrulamaKaynaklari,
         }),
-        (hata) => hata.kod === "GEMINI_GECERSIZ_TEST_YANITI"
+        (hata) => hata.kod === "TEST_HEDEFI_KARSILANAMADI"
     );
 
     const uydurmaKaynak = {
@@ -670,7 +671,7 @@ test("Gemini test çıktısı yapı, kaynak ve tekrar bakımından doğrulanır"
             zorlukDagilimi: { kolay: 1 },
             kaynaklar: dogrulamaKaynaklari,
         }),
-        (hata) => hata.kod === "GEMINI_GECERSIZ_TEST_YANITI"
+        (hata) => hata.kod === "TEST_HEDEFI_KARSILANAMADI"
     );
 });
 
@@ -895,9 +896,9 @@ test("denetim: eşzamanlı aynı test oluşturma tek üretim ve kayıt yapar", a
     let cagrilar = 0, baslat, bitir;
     const basladi = new Promise(r => { baslat = r; });
     const bekleme = new Promise(r => { bitir = r; });
-    const { bagimliliklar } = uretimBagimliliklari({ geminiTestUret: async () => {
+    const { bagimliliklar } = uretimBagimliliklari({ geminiTestUret: async (girdi) => {
         cagrilar++; baslat(); await bekleme;
-        return { sorular: ornekSorular(5), model: "test-model" };
+        return { sorular: uretimSorulari(girdi), model: "test-model" };
     } });
     const girdi = { kullaniciId, dersId, kapsamTuru: "tum_ders", soruSayisi: 5, zorluk: "orta" };
     const ilk = testOlustur(girdi, bagimliliklar);
@@ -913,9 +914,9 @@ test("denetim: eşzamanlı aynı test oluşturma tek üretim ve kayıt yapar", a
 
 test("denetim: test üretimi hatasında single-flight kaydı temizlenir ve sonraki istek çalışır", async () => {
     let sayi = 0;
-    const { bagimliliklar, kaydiGetir } = uretimBagimliliklari({ geminiTestUret: async () => {
+    const { bagimliliklar, kaydiGetir } = uretimBagimliliklari({ geminiTestUret: async (girdi) => {
         if (++sayi === 1) throw Object.assign(new Error("Geçici servis hatası"), { status: 503, kod: "GEMINI_GECICI_HATA" });
-        return { sorular: ornekSorular(5, "orta") };
+        return { sorular: uretimSorulari(girdi) };
     } });
     const girdi = { kullaniciId, dersId, kapsamTuru: "tum_ders", soruSayisi: 5, zorluk: "orta" };
     await assert.rejects(testOlustur(girdi, bagimliliklar), h => h.status === 503);
@@ -925,41 +926,6 @@ test("denetim: test üretimi hatasında single-flight kaydı temizlenir ve sonra
     assert.equal(kaydiGetir().sorular.length, 5);
 });
 
-
-test("ana konu: 10 soru 5 alt konuya eşit dağıtılır", () => {
-    const gruplar = Array.from({ length: 5 }, (_, index) => ({
-        konuId: `alt-${index + 1}`,
-        baslik: `Alt konu ${index + 1}`,
-        parcalar: [{ materyalId, parcaIndex: index, icerik: "a".repeat(1000) }],
-    }));
-    const dagilim = altKonuKotalariniDagit(gruplar, 10);
-    assert.equal(dagilim.length, 5);
-    assert.deepEqual(dagilim.map((konu) => konu.adet), [2, 2, 2, 2, 2]);
-});
-
-test("ana konu: bölünemeyen sayıdaki ek sorular içerik kapsamı yüksek konulara gider", () => {
-    const uzunluklar = [1600, 1300, 1000, 800, 700, 600, 500];
-    const gruplar = uzunluklar.map((uzunluk, index) => ({
-        konuId: `alt-${index + 1}`,
-        baslik: `Alt konu ${index + 1}`,
-        parcalar: [{ materyalId, parcaIndex: index, icerik: "a".repeat(uzunluk) }],
-    }));
-    const dagilim = altKonuKotalariniDagit(gruplar, 10);
-    assert.equal(dagilim.reduce((toplam, grup) => toplam + grup.adet, 0), 10);
-    assert.ok(dagilim.every((grup) => grup.adet >= 1));
-    assert.equal(dagilim[0].adet, 2);
-    assert.equal(dagilim[1].adet, 2);
-    assert.equal(dagilim[2].adet, 2);
-    assert.deepEqual(altKonuKotalariniDagit(gruplar, 6), []);
-});
-
-test("ana konu: her alt konu için yeterli kaynak yoksa kota verilmez", () => {
-    const dagilim = altKonuKotalariniDagit([
-        { konuId: "a", baslik: "A", parcalar: [{ materyalId, parcaIndex: 0, icerik: "a".repeat(900) }] },
-        { konuId: "b", baslik: "B", parcalar: [{ materyalId, parcaIndex: 1, icerik: "b".repeat(20) }] },
-    ], 10);
-    assert.deepEqual(dagilim, []);
-});
 
 test("ana konu seçimi yalnızca doğrudan alt konular için Gemini kotası hazırlar", async () => {
     let geminiGirdisi;
@@ -974,7 +940,7 @@ test("ana konu seçimi yalnızca doğrudan alt konular için Gemini kotası haz�
         harita: yeniHarita,
         geminiTestUret: async (girdi) => {
             geminiGirdisi = girdi;
-            return { sorular: ornekSorular(girdi.soruSayisi), model: "test-model" };
+            return { sorular: uretimSorulari(girdi), model: "test-model" };
         },
     });
     await testOlustur({
@@ -1049,7 +1015,7 @@ test("ana konu: iki alt konunun ortak fiziksel metni tek kez iletilir, iki bağ 
         parcalar,
         geminiTestUret: async (girdi) => {
             geminiGirdisi = girdi;
-            return { sorular: ornekSorular(girdi.soruSayisi), model: "test-model" };
+            return { sorular: uretimSorulari(girdi), model: "test-model" };
         },
     });
 
@@ -1064,32 +1030,15 @@ test("ana konu: iki alt konunun ortak fiziksel metni tek kez iletilir, iki bağ 
     );
 });
 
-test("Gemini soru istemi her alt konunun adını ve açıklamasını içerir", () => {
-    const istem = testPartisiPromptunuOlustur({
-        dersBilgisi: { dersAdi: "Uygulamalı Veri Bilimi", aciklama: "Veri bilimi dersi" },
-        kapsamTuru: "konu", hedefBasligi: "Veri Bilimine Giriş",
-        soruPlani: [{ sira: 1, zorluk: "orta", konuId: "sub-yasam-dongusu" }],
-        kaynaklar: [{ anahtar: "K1", konuIds: ["sub-yasam-dongusu"],
-            icerik: "CRISP-DM veri hazırlama aşaması modellemeden önce gelir." }],
-        izinliKonuIds: [{ konuId: "sub-yasam-dongusu",
-            baslik: "Veri Bilimi Proje Yaşam Döngüsü ve Süreçler",
-            aciklama: "CRISP-DM ve KDD aşamaları", konuTuru: "alt" }],
-    });
-    assert.match(istem, /"konuBasligi":"Veri Bilimi Proje Yaşam Döngüsü ve Süreçler"/);
-    assert.match(istem, /"konuAciklamasi":"CRISP-DM ve KDD aşamaları"/);
-    assert.match(istem, /KONU_KIMLIKLERI_VE_KAPSAMLARI/);
-    assert.match(istem, /öğrenme hedefini ölçmeyen soruları üretme/);
-});
-
 test("konu testi tek istek kullanır, ek embedding veya kalite denetimi çağırmaz", async () => {
     let denetlemeCagrildi = false;
     const { bagimliliklar, kaydiGetir } = uretimBagimliliklari({
         geminiTestUret: async (girdi) => {
-            assert.equal(girdi.tekIstekModu, true);
+            assert.equal(girdi.tekIstekModu, undefined);
             assert.equal(girdi.soruKonuDogrula, undefined);
             assert.equal(girdi.soruKalitesiDogrula, undefined);
             return {
-                sorular: ornekSorular(girdi.soruSayisi).map((soru) => ({
+                sorular: uretimSorulari(girdi).map((soru) => ({
                     ...soru, konuId: "sub-yigin",
                 })),
                 model: "test-model", apiCagriSayisi: 1,
@@ -1115,9 +1064,9 @@ test("ek Gemini kalite isteği artık yapılmaz; tek üretim çağrısı yeterli
     const { bagimliliklar, kaydiGetir } = uretimBagimliliklari({
         geminiTestUret: async (girdi) => {
             uretimCagrilari += 1;
-            assert.equal(girdi.tekIstekModu, true);
+            assert.equal(girdi.tekIstekModu, undefined);
             return {
-                sorular: ornekSorular(girdi.soruSayisi).map((soru) => ({
+                sorular: uretimSorulari(girdi).map((soru) => ({
                     ...soru, konuId: "sub-yigin",
                 })),
                 model: "test-model",
@@ -1146,7 +1095,7 @@ test("20 soru istendiğinde kısa kaynaklar önceden soru sayısını azaltmaz",
         parcalar,
         geminiTestUret: async (girdi) => {
             geminiGirdisi = girdi;
-            return { sorular: ornekSorular(20), model: "test-model" };
+            return { sorular: uretimSorulari(girdi), model: "test-model" };
         },
     });
     await testOlustur({
@@ -1159,11 +1108,11 @@ test("20 soru istendiğinde kısa kaynaklar önceden soru sayısını azaltmaz",
     assert.equal(kaydiGetir().eksikSoruNedeni, "");
 });
 
-test("20 sorudan 17 tanesi tüm kontrolleri geçerse 17 soruluk test kaydedilir", async () => {
+test("20 sorudan 17 geçerli soru kalırsa test kaydedilmez", async () => {
     const { bagimliliklar, kaydiGetir } = uretimBagimliliklari({
         geminiTestUret: async ({ soruSayisi, kismiSonucKabul }) => {
             assert.equal(soruSayisi, 20);
-            assert.equal(kismiSonucKabul, true);
+            assert.equal(kismiSonucKabul, undefined);
             return {
                 sorular: ornekSorular(17).map((soru, index) => ({
                     ...soru, konuId: index % 2 ? "sub-kuyruk" : "sub-yigin",
@@ -1173,16 +1122,14 @@ test("20 sorudan 17 tanesi tüm kontrolleri geçerse 17 soruluk test kaydedilir"
             };
         },
     });
-    await testOlustur({
+    await assert.rejects(testOlustur({
         kullaniciId, dersId, kapsamTuru: "konu",
         konuId: "top-veri-yapilari", soruSayisi: 20, zorluk: "orta",
-    }, bagimliliklar);
-    assert.equal(kaydiGetir().soruSayisi, 17);
-    assert.equal(kaydiGetir().istenenSoruSayisi, 20);
-    assert.equal(kaydiGetir().eksikSoruNedeni, "KALITE_KONTROLU");
+    }, bagimliliklar), { kod: "TEST_HEDEFI_KARSILANAMADI" });
+    assert.equal(kaydiGetir(), undefined);
 });
 
-test("Gemini kısmi sonuç verirse konu kapsamı eksik olsa da mevcut sorular kaydedilir", async () => {
+test("Gemini kısmi sonuç verirse eksik kapsam başarı sayılmaz", async () => {
     const { bagimliliklar, kaydiGetir } = uretimBagimliliklari({
         geminiTestUret: async () => ({
             sorular: ornekSorular(17).map((soru) => ({
@@ -1191,15 +1138,14 @@ test("Gemini kısmi sonuç verirse konu kapsamı eksik olsa da mevcut sorular ka
             model: "test-model", kismiUretimNedeni: "KAYNAK_KAPASITESI",
         }),
     });
-    await testOlustur({
+    await assert.rejects(testOlustur({
         kullaniciId, dersId, kapsamTuru: "konu",
         konuId: "top-veri-yapilari", soruSayisi: 20, zorluk: "orta",
-    }, bagimliliklar);
-    assert.equal(kaydiGetir().soruSayisi, 17);
-    assert.equal(kaydiGetir().eksikSoruNedeni, "KAYNAK_KAPASITESI");
+    }, bagimliliklar), { kod: "TEST_HEDEFI_KARSILANAMADI" });
+    assert.equal(kaydiGetir(), undefined);
 });
 
-test("MongoDB Test modeli 17/20 geçerli soru kaydını kabul eder, tutarsız sayıyı reddeder", () => {
+test("MongoDB Test modeli yeni 17/20 kaydını reddeder, eski kısmi testleri okunabilir tutar", () => {
     const veri = {
         kullaniciId, dersId, kapsamTuru: "konu",
         konuId: "top-veri-yapilari",
@@ -1211,6 +1157,8 @@ test("MongoDB Test modeli 17/20 geçerli soru kaydını kabul eder, tutarsız sa
         kaynakSurumleri: [{ materyalId, aktifIslemeId: islemeId }],
     };
     const belge = new TestModel(veri);
+    assert.ok(belge.validateSync()?.errors?.sorular);
+    belge.isNew = false;
     assert.equal(belge.validateSync(), undefined);
     assert.equal(belge.sorular.length, 17);
     assert.equal(belge.soruSayisi, 17);

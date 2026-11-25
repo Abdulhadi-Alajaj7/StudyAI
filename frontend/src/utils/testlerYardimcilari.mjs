@@ -1,5 +1,4 @@
 export const TEST_KAPSAMLARI = ["tum_ders", "materyal", "konu"];
-export const TEST_SORU_SAYILARI = [10, 15, 20];
 export const TEST_ZORLUKLARI = ["kolay", "orta", "zor", "karisik"];
 
 const kapsamEtiketleri = {
@@ -27,7 +26,7 @@ export const testOlusturmaGirdisiOlustur = ({
     const sayi = Number(soruSayisi);
     if (
         !TEST_KAPSAMLARI.includes(kapsamTuru) ||
-        !TEST_SORU_SAYILARI.includes(sayi) ||
+        !Number.isInteger(sayi) || sayi < 1 || sayi > 20 || typeof soruSayisi === "boolean" ||
         !TEST_ZORLUKLARI.includes(zorluk)
     ) {
         return null;

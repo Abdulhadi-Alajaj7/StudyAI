@@ -331,11 +331,14 @@ function DersTestler() {
     const anaKonu = (konuHaritasi?.anaKonular || []).find(
         (konu) => konu.konuId === konuId
     );
-    const altKonuSayisi = anaKonu?.altKonular?.length || 0;
+    const altKonuSayisi = kapsamTuru === "konu" ? (anaKonu?.altKonular?.length || 0)
+        : kapsamTuru === "tum_ders" ? (konuHaritasi?.anaKonular || []).reduce(
+            (toplam, konu) => toplam + (konu.altKonular?.length || 1), 0
+        ) : 0;
     const secilenAltKonuMu = kapsamTuru === "konu" && konuId.startsWith("sub-");
     const soruSayilari = secilenAltKonuMu ? altKonuSoruSayilari : anaKonuSoruSayilari;
-    const yetersizSoruSayisi = (kapsamTuru === "konu" && altKonuSayisi > soruSayisi) ||
-        !soruSayilari.includes(soruSayisi);
+    const yetersizSoruSayisi = altKonuSayisi > Number(soruSayisi) ||
+        !Number.isInteger(Number(soruSayisi)) || Number(soruSayisi) < 1 || Number(soruSayisi) > 20;
     const jsonMetni = useMemo(() => olusturulanTest
         ? JSON.stringify(testDenetimVerisiniOlustur(olusturulanTest, konuSecenekleri), null, 2)
         : "", [olusturulanTest, konuSecenekleri]);
@@ -598,10 +601,18 @@ function DersTestler() {
                                 );
                             })}
                         </div>
+                        <label className={`mt-2 flex items-center gap-2 text-[11px] ${metinIkincil}`}>
+                            Soru sayısı (1–20)
+                            <input type="number" min="1" max="20" step="1" value={soruSayisi}
+                                disabled={olusturuluyor}
+                                onChange={(event) => secimiDegistir(setSoruSayisi,
+                                    event.target.value === "" ? "" : Number(event.target.value))}
+                                className={`w-16 rounded-lg border px-2 py-1 ${ortakButon}`} />
+                        </label>
                         {altKonuSayisi > 0 && (
                             <p role={yetersizSoruSayisi ? "alert" : undefined}
                                 className={`mt-2 text-[11px] ${yetersizSoruSayisi ? "text-amber-500" : metinIkincil}`}>
-                                {altKonuSayisi} alt konu için en az {altKonuSayisi} soru gerekir.
+                                {altKonuSayisi} konu için en az {altKonuSayisi} soru gerekir.
                                 {yetersizSoruSayisi && " Daha yüksek soru sayısı seçin."}
                                 {altKonuSayisi > 20 && " Mevcut seçeneklerle bu konu test edilemez."}
                             </p>

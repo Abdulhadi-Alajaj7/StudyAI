@@ -58,20 +58,6 @@ test("test üretim izleyicisi gerçek SDK çağrılarını ayrık kategoriler ve
     izleyici.sdkCagrisiTamamlandi({
         tokenKullanimi: { girdi: 40, cikti: 20, toplam: 60 },
     });
-    izleyici.partiKucultuldu({
-        neden: "SORU_SAYISI",
-        oncekiPartiBoyutu: 5,
-        yeniPartiBoyutlari: [2, 3],
-    });
-    izleyici.sdkCagrisiBasladi({
-        anaCagriTuru: "kurtarma",
-        sdkDenemesi: 1,
-        partiIndeksi: 0,
-        partiBoyutu: 2,
-    });
-    izleyici.sdkCagrisiTamamlandi({
-        tokenKullanimi: { girdi: 30, cikti: 10, toplam: 40 },
-    });
     izleyici.tamamla({ sonuc: "basarili" });
 
     const kayitlar = satirlar.map(kaydiAyikla);
@@ -84,24 +70,18 @@ test("test üretim izleyicisi gerçek SDK çağrılarını ayrık kategoriler ve
             [1, "uretim", "uretim"],
             [2, "sdk_retry", "uretim"],
             [3, "onarim", "onarim"],
-            [4, "kurtarma", "kurtarma"],
         ]
     );
     assert.equal(kayitlar.find((kayit) => kayit.olay === "soru_onarimi").hataNedeni,
         "TEKRARLAYAN_SORU");
-    assert.deepEqual(
-        kayitlar.find((kayit) => kayit.olay === "parti_kucultme").yeniPartiBoyutlari,
-        [2, 3]
-    );
     const ozet = kayitlar.at(-1);
     assert.equal(ozet.olay, "test_uretimi_tamamlandi");
-    assert.equal(ozet.toplamSdkCagriSayisi, 4);
+    assert.equal(ozet.toplamSdkCagriSayisi, 3);
     assert.equal(ozet.ilkUretimCagriSayisi, 1);
     assert.equal(ozet.onarimCagriSayisi, 1);
-    assert.equal(ozet.kurtarmaCagriSayisi, 1);
     assert.equal(ozet.sdkRetryCagriSayisi, 1);
     assert.equal(ozet.toplamOnarimDenemesi, 1);
-    assert.deepEqual(ozet.tokenKullanimi, { girdi: 170, cikti: 80, toplam: 250 });
+    assert.deepEqual(ozet.tokenKullanimi, { girdi: 140, cikti: 70, toplam: 210 });
     assert.equal(ozet.toplamSureMs, 1250);
     assert.equal(ozet.sonuc, "basarili");
     assert.doesNotMatch(satirlar.join("\n"), /LOGDA_OLMAMALI/);

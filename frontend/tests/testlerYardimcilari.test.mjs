@@ -17,6 +17,15 @@ import {
     testSonucYolu,
 } from "../src/utils/testlerYardimcilari.mjs";
 
+test("alt konuda 5 soru ve özel 7/12 soru sayıları girişte korunur", () => {
+    for (const soruSayisi of [1, 5, 7, 12, 20]) {
+        assert.equal(testOlusturmaGirdisiOlustur({ kapsamTuru: "konu", konuId: "sub-ornek", soruSayisi, zorluk: "orta" }).soruSayisi, soruSayisi);
+    }
+    for (const soruSayisi of [0, 21, 1.5, "", true]) {
+        assert.equal(testOlusturmaGirdisiOlustur({ kapsamTuru: "konu", konuId: "sub-ornek", soruSayisi, zorluk: "orta" }), null);
+    }
+});
+
 test("test oluşturma girdisi yalnızca seçilen kapsama ait kimliği taşır", () => {
     const tumDersGirdisi = testOlusturmaGirdisiOlustur({
         kapsamTuru: "tum_ders",
@@ -49,7 +58,7 @@ test("test oluşturma girdisi yalnızca seçilen kapsama ait kimliği taşır", 
     }), { kapsamTuru: "materyal", soruSayisi: 10, zorluk: "kolay", materyalId: "m1" });
     assert.equal(testOlusturmaGirdisiOlustur({
         kapsamTuru: "materyal",
-        soruSayisi: 5,
+        soruSayisi: 0,
         zorluk: "kolay",
         materyalId: "m1",
     }), null);

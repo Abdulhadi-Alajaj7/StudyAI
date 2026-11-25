@@ -76,6 +76,16 @@ const soruSchema = new mongoose.Schema({
         trim: true,
         maxlength: 6_000,
     },
+    // Eski testlerde bulunmayabilir; yeni üretimde servis zorunlu doğrular.
+    ogrenmeHedefi: { type: String, maxlength: 500 },
+    kaynakReferanslari: { type: [String], default: undefined },
+    kaynakKanitlari: {
+        type: [new mongoose.Schema({
+            kaynakReferansi: { type: String, required: true },
+            alinti: { type: String, required: true, maxlength: 600 },
+        }, { _id: false })],
+        default: undefined,
+    },
     zorluk: {
         type: String,
         enum: ["kolay", "orta", "zor"],
@@ -112,8 +122,7 @@ const soruSchema = new mongoose.Schema({
     kaynaklar: {
         type: [soruKaynagiSchema],
         default: [],
-        // Gemini'nin kaynak referansı eksikse soruyu reddetme. Bilinmeyen
-        // bir dosya/parça uydurmak yerine kaynaklar boş kalabilir.
+        // Eski kayıtlar okunabilir; yeni soruların kaynaklarını servis doğrular.
     },
     ogrenciCevabi: {
         type: String,
@@ -191,8 +200,7 @@ const testSchema = new mongoose.Schema(
             default: "",
             immutable: true,
         },
-        // İstenen sayı denetleyicide 10/15/20; burada yalnızca gerçekten
-        // doğrulanan ve kullanıcıya sunulan soru sayısı saklanır.
+        // Yeni testlerde istenen ve doğrulanan sayı aynı olmak zorundadır.
         soruSayisi: {
             type: Number,
             min: 1,
@@ -274,7 +282,8 @@ const testSchema = new mongoose.Schema(
 
 testSchema.path("sorular").validate(
     function soruSayisiEslesiyor(sorular) {
-        return Array.isArray(sorular) && sorular.length === this.soruSayisi;
+        return Array.isArray(sorular) && sorular.length === this.soruSayisi &&
+            (!this.isNew || this.istenenSoruSayisi == null || this.istenenSoruSayisi === this.soruSayisi);
     },
     "Üretilen soru sayısı test ayarıyla eşleşmelidir."
 );
