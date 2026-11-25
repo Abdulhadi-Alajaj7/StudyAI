@@ -94,6 +94,8 @@ const konuHaritasiSchema = new mongoose.Schema(
             default: "",
         },
         anaKonular: [anaKonuSchema],
+        // Yalnız aktif kaynak imzasına ait geçici analiz; normal API yanıtlarına dahil edilmez.
+        analizKontrolNoktasi: { type: mongoose.Schema.Types.Mixed, default: null, select: false },
         // Son hazır materyal silinse bile gelecekteki Quiz, Flashcard ve Mastery kayıtlarının
         // konu kimliklerini ve öğrenme geçmişini koruyan arşiv
         gecmisKonular: [anaKonuSchema],

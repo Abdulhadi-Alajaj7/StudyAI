@@ -1,5 +1,6 @@
 
 import crypto from "crypto";
+import { haritaGrupPlani, haritaPlanImzasi, haritaParcaliAnaliz, haritaKodlariniDogrula } from "./konuHaritasiBatchService.js";
 import mongoose from "mongoose";
 import Materyal from "../models/Materyal.js";
 import MetinParcasi from "../models/MetinParcasi.js";
@@ -196,6 +197,7 @@ export const aktifMateryalMetinleriniTopla = async (
     const BATCH_MAX_KARAKTER = 80000;
     const metinGruplari = [];
     const parcaKodlari = new Map();
+    const parcaBloklari = [];
     let mevcutGrup = [], mevcutGrupKarakter = 0;
     for (const [index, parca] of metinParcalari.entries()) {
         const kod = "P" + (index + 1);
@@ -208,6 +210,7 @@ export const aktifMateryalMetinleriniTopla = async (
         const matBilgi = hazirMateryaller.find(m => m._id.toString() === matIdStr);
         const baslik = matBilgi ? (matBilgi.orijinalDosyaAdi || matBilgi.dosyaAdi) : "Materyal";
         const parcaMetni = `\n=== MATERYAL: ${baslik} ===\n[PARCA ${kod}]\n${parca.icerik || ""}`;
+        parcaBloklari.push({kod, metin:parcaMetni});
         if (mevcutGrup.length && mevcutGrupKarakter + parcaMetni.length > BATCH_MAX_KARAKTER) {
             metinGruplari.push(mevcutGrup.join("\n\n"));
             mevcutGrup = []; mevcutGrupKarakter = 0;
@@ -216,7 +219,7 @@ export const aktifMateryalMetinleriniTopla = async (
         mevcutGrupKarakter += parcaMetni.length;
     }
     if (mevcutGrup.length) metinGruplari.push(mevcutGrup.join("\n\n"));
-    return { hazirMateryaller, metinGruplari, toplamParcaSayisi: metinParcalari.length, parcaKodlari };
+    return { hazirMateryaller, metinGruplari, toplamParcaSayisi: metinParcalari.length, parcaKodlari, parcaBloklari };
 };
 
 /**
@@ -232,7 +235,7 @@ export const konuHaritasiUretVeKaydet = async (
     let heartbeat = null;
 
     try {
-        const kilitliHarita = await KonuHaritasi.findOne({
+        const kilitliHaritaSorgusu = KonuHaritasi.findOne({
             dersId: ders._id,
             kullaniciId,
             aktifIslemToken: islemToken,
@@ -240,6 +243,8 @@ export const konuHaritasiUretVeKaydet = async (
             degisikliklereKilitli: { $ne: true }
         });
 
+        const kilitliHarita = await (typeof kilitliHaritaSorgusu.select === "function"
+            ? kilitliHaritaSorgusu.select("+analizKontrolNoktasi") : kilitliHaritaSorgusu);
         if (!kilitliHarita) {
             return null;
         }
@@ -255,7 +260,7 @@ export const konuHaritasiUretVeKaydet = async (
             hazirMateryaller,
             metinGruplari,
             toplamParcaSayisi,
-            parcaKodlari
+            parcaKodlari, parcaBloklari
         } = await aktifMateryalMetinleriniTopla(
             ders._id,
             kullaniciId
@@ -292,36 +297,83 @@ export const konuHaritasiUretVeKaydet = async (
             donem: ders.donem
         };
 
-        if (metinGruplari.length === 1) {
-            hamKonular = await heartbeat.bekle((kaynakliHarita ? geminiIleKaynakliKonuHaritasiUret : geminiIleKonuHaritasiUret)(
-                metinGruplari[0],
-                dersBilgisi,
-                modelAdi
-            ));
-            kullanilanModeller.add(hamKonular.kullanilanModel || modelAdi);
-        } else {
-            const araKonuListeleri = [];
-
-            for (const grupMetin of metinGruplari) {
-                const araListe =
-                    await heartbeat.bekle((kaynakliHarita ? geminiIleKaynakliKonuHaritasiUret : geminiIleKonuHaritasiUret)(
-                        grupMetin,
-                        dersBilgisi,
-                        modelAdi
+        // Küçük veya eski akışlarda mevcut davranış. Büyük kaynaklı harita
+        // önce kısa süreli tek çağrı; geçici hatada kalıcı checkpoint'li küçük gruplar.
+        const gruplar = kaynakliHarita ? haritaGrupPlani(parcaBloklari) : [];
+        if (gruplar.length > 1) {
+            const imza = haritaPlanImzasi(gruplar, baslangicKaynaklar, dersBilgisi);
+            const kontrolNoktasi = kilitliHarita.analizKontrolNoktasi;
+            let parcali = metinGruplari.length > 1 || kontrolNoktasi?.imza === imza;
+            if (!parcali) {
+                try {
+                    hamKonular = await heartbeat.bekle(geminiIleKaynakliKonuHaritasiUret(
+                        metinGruplari[0], dersBilgisi, modelAdi,
+                        {sonZaman:Date.now()+30000, maxDeneme:1, timeoutMs:15000}
                     ));
-                kullanilanModeller.add(araListe?.kullanilanModel || modelAdi);
-
-                if (araListe && araListe.length > 0) {
-                    araKonuListeleri.push(...araListe);
+                    if (!haritaKodlariniDogrula(hamKonular,[...parcaKodlari.keys()])) {
+                        throw Object.assign(new Error("Harita kaynak kapsamı eksik."),{status:502,kod:"GEMINI_GECERSIZ_SEMA"});
+                    }
+                    kullanilanModeller.add(hamKonular.kullanilanModel || modelAdi);
+                } catch (hata) {
+                    if (![429,502,503,504].includes(hata.status)) throw hata;
+                    parcali = true;
+                    console.info("[KonuHaritasiBatch] Parçalı analiz başlıyor",{toplam:gruplar.length,kod:hata.kod});
                 }
             }
-
-            hamKonular = await heartbeat.bekle((kaynakliHarita ? geminiIleKaynakliKonulariBirlestir : geminiIleKonulariBirlestir)(
-                araKonuListeleri,
-                dersBilgisi,
-                modelAdi
-            ));
-            kullanilanModeller.add(hamKonular.kullanilanModel || modelAdi);
+            if (parcali) {
+                const sonuc = await haritaParcaliAnaliz({
+                    gruplar, imza, kontrolNoktasi, normalize:konuBasliginiNormalizeEt,
+                    dogrula:()=>heartbeat.kilidiDogrula(),
+                    analiz:grup=>heartbeat.bekle(geminiIleKaynakliKonuHaritasiUret(
+                        grup.metin,dersBilgisi,modelAdi,{
+                            beklenenParcaKodlari:grup.kodlar,groqMaxOutputTokens:2500,
+                            maxDeneme:1,timeoutMs:25000,kotaBekleMs:65000,
+                        }
+                    )),
+                    kaydet:async nokta=>{
+                        const sonuc = await KonuHaritasi.updateOne({
+                            dersId:ders._id,kullaniciId,aktifIslemToken:islemToken,
+                            durum:"olusturuluyor",degisikliklereKilitli:{$ne:true}
+                        },{$set:{analizKontrolNoktasi:nokta}});
+                        if (sonuc.matchedCount!==1) throw Object.assign(new Error("Harita kilidi kaybedildi."),{kod:"KONU_HARITASI_KILIDI_KAYBEDILDI"});
+                    },
+                });
+                hamKonular = sonuc.konular;
+                for (const model of sonuc.modeller) kullanilanModeller.add(model);
+            }
+        } else {
+            if (metinGruplari.length === 1) {
+                hamKonular = await heartbeat.bekle((kaynakliHarita ? geminiIleKaynakliKonuHaritasiUret : geminiIleKonuHaritasiUret)(
+                    metinGruplari[0],
+                    dersBilgisi,
+                    modelAdi
+                ));
+                kullanilanModeller.add(hamKonular.kullanilanModel || modelAdi);
+            } else {
+                const araKonuListeleri = [];
+    
+                for (const grupMetin of metinGruplari) {
+                    const araListe =
+                        await heartbeat.bekle((kaynakliHarita ? geminiIleKaynakliKonuHaritasiUret : geminiIleKonuHaritasiUret)(
+                            grupMetin,
+                            dersBilgisi,
+                            modelAdi
+                        ));
+                    kullanilanModeller.add(araListe?.kullanilanModel || modelAdi);
+    
+                    if (araListe && araListe.length > 0) {
+                        araKonuListeleri.push(...araListe);
+                    }
+                }
+    
+                hamKonular = await heartbeat.bekle((kaynakliHarita ? geminiIleKaynakliKonulariBirlestir : geminiIleKonulariBirlestir)(
+                    araKonuListeleri,
+                    dersBilgisi,
+                    modelAdi
+                ));
+                kullanilanModeller.add(hamKonular.kullanilanModel || modelAdi);
+            }
+    
         }
 
         await heartbeat.kilidiDogrula();
@@ -632,11 +684,9 @@ export const konuHaritasiUretVeKaydet = async (
             // Başlıklar kalıcı konu kimliklerine eşleştirildikten sonra
             // Gemini'nin ilk analizde döndürdüğü kaynak kodlarını bağla.
             const atamaMap = new Map();
-            const nihaiAna = new Map(kaliciAnaKonular.map(a => [konuBasliginiNormalizeEt(a.baslik), a]));
-            for (const ana of hamKonular) {
-                const kalici = nihaiAna.get(konuBasliginiNormalizeEt(ana.baslik));
+            for (const [anaIndex, ana] of hamKonular.entries()) {
+                const kalici = kaliciAnaKonular[anaIndex];
                 if (!kalici) continue;
-                const altMap = new Map((kalici.altKonular || []).map(a => [konuBasliginiNormalizeEt(a.baslik), a.konuId]));
                 const ekle = (kodlar, konuId) => {
                     for (const kod of kodlar || []) {
                         if (!parcaKodlari.has(kod)) continue;
@@ -645,8 +695,8 @@ export const konuHaritasiUretVeKaydet = async (
                     }
                 };
                 ekle(ana.parcaKodlari, kalici.konuId);
-                for (const alt of ana.altKonular || []) {
-                    const konuId = altMap.get(konuBasliginiNormalizeEt(alt.baslik));
+                for (const [altIndex, alt] of (ana.altKonular || []).entries()) {
+                    const konuId = kalici.altKonular?.[altIndex]?.konuId;
                     if (konuId) ekle(alt.parcaKodlari, konuId);
                 }
             }
@@ -748,6 +798,7 @@ export const konuHaritasiUretVeKaydet = async (
                 {
                     $set: {
                         durum: "hazir",
+                        analizKontrolNoktasi: null,
                         olusturmaHatasi: "",
                         anaKonular: kaliciAnaKonular,
                         parcaKonuAtamalari,

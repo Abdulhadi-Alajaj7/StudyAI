@@ -52,7 +52,7 @@ export const aiIstekYonetimiOlustur = ({
             (!aday.tpd||d.gunlukTokenlar.reduce((a,k)=>a+k.token,0)+token<=aday.tpd);
     };
     return {async calistir({adaylar,tahminiGirdi,maxOutputTokens=0,groqMaxOutputTokens=maxOutputTokens,sonZaman,istek,
-        tekDenemeMs=55000,maxDeneme=2,oncelik="normal"}) {
+        tekDenemeMs=55000,maxDeneme=2,oncelik="normal",kotaBekleMs=0}) {
         let sonHata,denemeSayisi=0;
         const bitis=Math.min(sonZaman??simdi()+120000,simdi()+120000);
         // Groq'un ücretsiz kotası için ayrı çıktı bütçesi; Gemini ayarına dokunulmaz.
@@ -62,6 +62,17 @@ export const aiIstekYonetimiOlustur = ({
             (a.saglayici!=="groq"||(cikti(a)>0&&cikti(a)<=a.cikti)));
         for(let i=0;i<uygunlar.length;i++){
             const aday=uygunlar[i];
+            // Yalnız checkpoint'li harita grupları kısa dakika kotası beklemesini ister.
+            if (aday.saglayici==="groq" && kotaBekleMs>0 && !kapasite(aday,token(aday))) {
+                const beklemeSonu=Math.min(bitis-8000,simdi()+Math.min(65000,kotaBekleMs));
+                const gunlukUygun=()=>{
+                    const d=durum(aday);
+                    return !d.gunlukDolu && d.gunluk<aday.rpd &&
+                        (!aday.tpd || d.gunlukTokenlar.reduce((a,k)=>a+k.token,0)+token(aday)<=aday.tpd);
+                };
+                while(gunlukUygun() && !kapasite(aday,token(aday)) && simdi()<beklemeSonu)
+                    await bekle(Math.min(1000,beklemeSonu-simdi()));
+            }
             for(let n=1;n<=Math.min(2,maxDeneme);n++){
                 if(bitis-simdi()<=0)break;
                 if(!kapasite(aday,token(aday))){sonHata??=durum(aday).sonHata;break;}

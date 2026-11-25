@@ -1,5 +1,6 @@
 import { ortakGeminiIstekYonetimi, sinirliGeminiDenemesi } from "../utils/geminiOrtakIstekYonetimi.js";
 import { geminiHazirlamaHatasiniSiniflandir, geminiRetryBeklemesiniGetir, geminiTanilamasiniLogla } from "../utils/geminiHazirlamaHatasi.js";
+import { haritaKodlariniDogrula } from "./konuHaritasiBatchService.js";
 import { haritaIstekAyarlari, haritaSinirlayiciOlustur } from "../utils/geminiHaritaSiniri.js";
 import { sureOlc } from "../utils/islemSuresi.js";
 import { GoogleGenAI } from "@google/genai";
@@ -367,6 +368,7 @@ export const yapilandirilmisGeminiCagrisi = async (ayar) => {
             maxOutputTokens: ayar.maxOutputTokens || 0,
             groqMaxOutputTokens: ayar.groqMaxOutputTokens ?? ayar.maxOutputTokens ?? 0,
             sonZaman, tekDenemeMs: Math.min(55_000, ayar.timeoutMs || 55_000),
+            kotaBekleMs: ayar.kotaBekleMs || 0,
             maxDeneme: Math.min(2, ayar.maxDeneme || 2), oncelik: ayar.oncelik || "normal",
             istek: async (aday, sure, signal) => {
                 sonModel = aday.saglayici === "groq" ? "groq/"+aday.model : aday.model;
@@ -835,16 +837,18 @@ export async function callGeminiStructuredJson(ai, modelAdi, prompt, systemInstr
     try {
         const sonuc = await yapilandirilmisGeminiCagrisi({
             istemci: ai, modelAdi, prompt, systemInstruction,
-            timeoutMs: ayarlar.timeoutMs,
+            timeoutMs: bagimliliklar.timeoutMs ?? ayarlar.timeoutMs,
             maxOutputTokens: ayarlar.maxOutputTokens || 16_000,
-            groqMaxOutputTokens: Math.min(4000, ayarlar.maxOutputTokens || 4000),
+            groqMaxOutputTokens: bagimliliklar.groqMaxOutputTokens ?? Math.min(4000, ayarlar.maxOutputTokens || 4000),
+            kotaBekleMs: bagimliliklar.kotaBekleMs || 0,
             sonZaman: bagimliliklar.sonZaman ?? null,
             bekle: bagimliliklar.beklet || (ms => new Promise(r=>setTimeout(r,ms))),
             yedekModelAdi: bagimliliklar.yedekModel,
             aiYonetimi: bagimliliklar.aiYonetimi,
-            maxDeneme: Math.min(2, ayarlar.maksDeneme || 2),
+            maxDeneme: Math.min(2, bagimliliklar.maxDeneme ?? ayarlar.maksDeneme ?? 2),
             veriDogrula: veri => {
-                if (!semaDogrulaVeNormalizeEt(veri, {kaynakKodlariniKoru:bagimliliklar.kaynakKodlariniKoru===true}).length)
+                const normalize = semaDogrulaVeNormalizeEt(veri, {kaynakKodlariniKoru:bagimliliklar.kaynakKodlariniKoru===true});
+                if (!normalize.length || (bagimliliklar.beklenenParcaKodlari && !haritaKodlariniDogrula(normalize,bagimliliklar.beklenenParcaKodlari)))
                     throw Object.assign(new Error("Geçersiz şema"),{kod:"GEMINI_GECERSIZ_SEMA",status:502});
             },
         });
@@ -913,7 +917,7 @@ Lütfen yukarıdaki materyal metnine dayanarak müfredat Konu Haritasını yukar
  * Birden fazla batch'ten çıkarılan ara konu listelerini tek bir tutarlı, tekrar etmeyen hiyerarşik haritada birleştirir.
  */
 
-export const geminiIleKaynakliKonuHaritasiUret = async (metinIcerik, dersBilgisi, modelAdi = VARSAYILAN_GEMINI_MODELI) => {
+export const geminiIleKaynakliKonuHaritasiUret = async (metinIcerik, dersBilgisi, modelAdi = VARSAYILAN_GEMINI_MODELI, secenekler = {}) => {
 
     const systemInstruction = `Sen üniversite düzeyinde uzman bir müfredat ve konu taksonomisi analizcisisin.
 Görevin: Verilen ders materyali içeriğini hiyerarşik bir Konu Haritasına (Ana Konular ve Alt Konular) dönüştürmektir.
@@ -956,7 +960,7 @@ ${metinIcerik}
 
 Lütfen yukarıdaki materyal metnine dayanarak müfredat Konu Haritasını yukarıda belirtilen JSON şemasına tam uyumlu olarak üret.`;
 
-    return await callGeminiStructuredJson(null, modelAdi, prompt, systemInstruction, { asama: "konu_haritasi_kaynakli", kaynakKodlariniKoru: true });
+    return await callGeminiStructuredJson(null, modelAdi, prompt, systemInstruction, { ...secenekler, asama: "konu_haritasi_kaynakli", kaynakKodlariniKoru: true });
 };
 
 export const geminiIleKaynakliKonulariBirlestir = async (araKonuListeleri, dersBilgisi, modelAdi = VARSAYILAN_GEMINI_MODELI) => {
