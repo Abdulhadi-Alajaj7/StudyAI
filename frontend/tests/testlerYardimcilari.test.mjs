@@ -8,7 +8,8 @@ import {
     soruSonucDurumunuGetir,
     testCozumOzetiniGetir,
     testCozmeYolu,
-    testDenetimVerisiniOlustur,
+    testSoruSayilariGetir,
+    testAltKonuUyarisiGetir,
     testEksikSoruMesaji,
     testHedefBilgisi,
     testIlerlemeBilgisi,
@@ -17,13 +18,22 @@ import {
     testSonucYolu,
 } from "../src/utils/testlerYardimcilari.mjs";
 
-test("alt konuda 5 soru ve özel 7/12 soru sayıları girişte korunur", () => {
-    for (const soruSayisi of [1, 5, 7, 12, 20]) {
-        assert.equal(testOlusturmaGirdisiOlustur({ kapsamTuru: "konu", konuId: "sub-ornek", soruSayisi, zorluk: "orta" }).soruSayisi, soruSayisi);
+test("yalnız mevcut ana ve alt konu soru sayıları kabul edilir", () => {
+    for (const [konuId, izinli] of [["sub-ornek", [5, 10]], ["top-ornek", [10, 15, 20]]]) {
+        assert.deepEqual(testSoruSayilariGetir("konu", konuId), izinli);
+        for (const soruSayisi of [0, 1, 5, 7, 10, 12, 15, 20, 21, 1.5, "", true]) {
+            const sonuc = testOlusturmaGirdisiOlustur({ kapsamTuru: "konu", konuId, soruSayisi, zorluk: "orta" });
+            assert.equal(sonuc?.soruSayisi ?? null, izinli.includes(soruSayisi) ? soruSayisi : null);
+        }
     }
-    for (const soruSayisi of [0, 21, 1.5, "", true]) {
-        assert.equal(testOlusturmaGirdisiOlustur({ kapsamTuru: "konu", konuId: "sub-ornek", soruSayisi, zorluk: "orta" }), null);
-    }
+});
+
+test("alt konu uyarısı yalnız seçilen sayı yetersizse görünür", () => {
+    assert.match(testAltKonuUyarisiGetir(11, 10), /11 alt konu/);
+    assert.equal(testAltKonuUyarisiGetir(11, 15), "");
+    assert.equal(testAltKonuUyarisiGetir(4, 10), "");
+    assert.equal(testAltKonuUyarisiGetir(10, 10), "");
+    assert.match(testAltKonuUyarisiGetir(21, 20), /test edilemez/);
 });
 
 test("test oluşturma girdisi yalnızca seçilen kapsama ait kimliği taşır", () => {
@@ -147,45 +157,6 @@ test("sonuç durumu backend doğru cevabına göre belirlenir ve kaynak adları 
     }), ["Hafta 1.pdf", "Ders Notu.docx"]);
 });
 
-
-test("JSON denetimi soru, şık ve konu içerir; cevap anahtarını sızdırmaz", () => {
-    const veri = testDenetimVerisiniOlustur({
-        _id: "test1", konuBasligi: "Ana Konu", soruSayisi: 1,
-        sorular: [{
-            metin: "Örnek soru?",
-            secenekler: [{ anahtar: "A", metin: "Seçenek A" }],
-            konuId: "alt1",
-            dogruCevap: "A", aciklama: "Gizli açıklama",
-            kaynaklar: [{
-                dosyaAdi: "ders.pdf",
-                parcaIndeksleri: [3],
-                parcaSkorlari: [{ parcaIndex: 3, skor: 0.8132 }],
-            }],
-            kaliteDogrulama: { durum: "UYGUN", guven: 0.97 },
-            konuDogrulama: {
-                hedefSkor: 0.8021,
-                rakipSkor: 0.5932,
-                rakipKonuBasligi: "Başka alt konu",
-            },
-        }],
-    }, [{ konuId: "alt1", baslik: "Alt Konu 1" }]);
-    assert.equal(veri.sorular[0].konuId, "alt1");
-    assert.equal(veri.sorular[0].konuBasligi, "Alt Konu 1");
-    assert.equal(veri.sorular[0].secenekler[0].metin, "Seçenek A");
-    assert.deepEqual(veri.sorular[0].kaynakDosyalari, ["ders.pdf"]);
-    assert.deepEqual(veri.sorular[0].kaynakParcalari, [{
-        dosyaAdi: "ders.pdf", parcaIndex: 3, semantikSkor: 0.8132,
-    }]);
-    assert.deepEqual(veri.sorular[0].konuDogrulama, {
-        hedefSkor: 0.8021, rakipSkor: 0.5932,
-        rakipKonuBasligi: "Başka alt konu",
-    });
-    assert.deepEqual(veri.sorular[0].kaliteDogrulama, {
-        durum: "UYGUN", guven: 0.97,
-    });
-    assert.equal(JSON.stringify(veri).includes("dogruCevap"), false);
-    assert.equal(JSON.stringify(veri).includes("Gizli açıklama"), false);
-});
 
 test("kısmi soru sayısında gerçek sonuç ve anlaşılır Türkçe neden gösterilir", () => {
     const kismi = {

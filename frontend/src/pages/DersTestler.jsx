@@ -26,7 +26,8 @@ import {
     basariOraniniGetir,
     tarihiBicimlendir,
     testCozmeYolu,
-    testDenetimVerisiniOlustur,
+    testSoruSayilariGetir,
+    testAltKonuUyarisiGetir,
     testEksikSoruMesaji,
     testHedefBilgisi,
     testIlerlemeBilgisi,
@@ -48,8 +49,6 @@ const kapsamlar = [
     { deger: "konu", etiket: "Konu" },
 ];
 const gizliKapsamArayuzuGorunur = false;
-const anaKonuSoruSayilari = [10, 15, 20];
-const altKonuSoruSayilari = [5, 10];
 const zorluklar = [
     { deger: "kolay", etiket: "Kolay" },
     { deger: "orta", etiket: "Orta" },
@@ -155,8 +154,6 @@ function DersTestler() {
     const [olusturuluyor, setOlusturuluyor] = useState(false);
     const [olusturmaHatasi, setOlusturmaHatasi] = useState("");
     const [olusturulanTest, setOlusturulanTest] = useState(null);
-    const [jsonAcik, setJsonAcik] = useState(false);
-    const [jsonKopyalandi, setJsonKopyalandi] = useState(false);
     const [eylemdekiTestId, setEylemdekiTestId] = useState("");
     const [eylemHatasi, setEylemHatasi] = useState("");
 
@@ -336,12 +333,9 @@ function DersTestler() {
             (toplam, konu) => toplam + (konu.altKonular?.length || 1), 0
         ) : 0;
     const secilenAltKonuMu = kapsamTuru === "konu" && konuId.startsWith("sub-");
-    const soruSayilari = secilenAltKonuMu ? altKonuSoruSayilari : anaKonuSoruSayilari;
-    const yetersizSoruSayisi = altKonuSayisi > Number(soruSayisi) ||
-        !Number.isInteger(Number(soruSayisi)) || Number(soruSayisi) < 1 || Number(soruSayisi) > 20;
-    const jsonMetni = useMemo(() => olusturulanTest
-        ? JSON.stringify(testDenetimVerisiniOlustur(olusturulanTest, konuSecenekleri), null, 2)
-        : "", [olusturulanTest, konuSecenekleri]);
+    const soruSayilari = testSoruSayilariGetir(kapsamTuru, konuId);
+    const altKonuUyarisi = testAltKonuUyarisiGetir(altKonuSayisi, soruSayisi);
+    const yetersizSoruSayisi = Boolean(altKonuUyarisi) || !soruSayilari.includes(soruSayisi);
 
     const olusturmaGirdisi = useMemo(() => testOlusturmaGirdisiOlustur({
         kapsamTuru,
@@ -358,8 +352,6 @@ function DersTestler() {
 
     const secimiDegistir = (degistirici, deger) => {
         degistirici(deger);
-        setJsonAcik(false);
-        setJsonKopyalandi(false);
         setOlusturulanTest(null);
         setOlusturmaHatasi("");
     };
@@ -371,6 +363,11 @@ function DersTestler() {
         setKonuId("");
         setOlusturulanTest(null);
         setOlusturmaHatasi("");
+    };
+
+    const konuSeciminiDegistir = (deger) => {
+        secimiDegistir(setKonuId, deger);
+        if (!testSoruSayilariGetir("konu", deger).includes(soruSayisi)) setSoruSayisi(10);
     };
 
     const testiOlustur = async () => {
@@ -389,8 +386,6 @@ function DersTestler() {
         setOlusturuluyor(true);
         setOlusturmaHatasi("");
         setOlusturulanTest(null);
-        setJsonAcik(false);
-        setJsonKopyalandi(false);
 
         try {
             const yanit = await testlerApi.testOlustur(
@@ -519,12 +514,19 @@ function DersTestler() {
                 </div>
 
                 <div className="grid gap-5 px-4 py-5 sm:px-5 xl:grid-cols-12 xl:items-end">
-                    <fieldset className="min-w-0 xl:col-span-4">
+                    <div className="min-w-0 xl:col-span-4">
+                        {altKonuUyarisi && (
+                            <div role="alert" className={`mb-3 flex items-start gap-2 rounded-xl border px-3 py-2 text-[12px] font-medium ${isDark ? "border-rose-400/30 bg-rose-400/10 text-rose-300" : "border-rose-200 bg-rose-50 text-rose-700"}`}>
+                                <ExclamationTriangleIcon className="mt-0.5 h-4 w-4 shrink-0" />
+                                <span>{altKonuUyarisi}</span>
+                            </div>
+                        )}
+                        <fieldset className="min-w-0">
                         <legend className={`mb-2 text-[12px] font-bold ${metinAna}`}>Konu Seçimi</legend>
                         <OzetSecimDropdown
                             id="test-konu"
                             value={konuId}
-                            onChange={(deger) => secimiDegistir(setKonuId, deger)}
+                            onChange={konuSeciminiDegistir}
                             options={konuDropdownSecenekleri}
                             disabled={olusturuluyor || sayfaYukleniyor || konuDropdownSecenekleri.length === 0}
                             emptyLabel={sayfaYukleniyor ? "Konular yükleniyor..." : "Hazır konu yok"}
@@ -544,7 +546,8 @@ function DersTestler() {
                                 {hedefUyarisi}
                             </p>
                         )}
-                    </fieldset>
+                        </fieldset>
+                    </div>
 
                     {/* Kapsam seçenekleri yeniden açıldığında kullanılmak üzere görünüm dışında korunuyor. */}
                     {gizliKapsamArayuzuGorunur && (
@@ -588,7 +591,7 @@ function DersTestler() {
                                         key={sayi}
                                         type="button"
                                         aria-pressed={secili}
-                                        disabled={olusturuluyor || altKonuSayisi > sayi}
+                                        disabled={olusturuluyor}
                                         onClick={() => secimiDegistir(setSoruSayisi, sayi)}
                                         className={`rounded-xl border text-[12px] font-bold transition-colors ${
                                             secili
@@ -601,22 +604,6 @@ function DersTestler() {
                                 );
                             })}
                         </div>
-                        <label className={`mt-2 flex items-center gap-2 text-[11px] ${metinIkincil}`}>
-                            Soru sayısı (1–20)
-                            <input type="number" min="1" max="20" step="1" value={soruSayisi}
-                                disabled={olusturuluyor}
-                                onChange={(event) => secimiDegistir(setSoruSayisi,
-                                    event.target.value === "" ? "" : Number(event.target.value))}
-                                className={`w-16 rounded-lg border px-2 py-1 ${ortakButon}`} />
-                        </label>
-                        {altKonuSayisi > 0 && (
-                            <p role={yetersizSoruSayisi ? "alert" : undefined}
-                                className={`mt-2 text-[11px] ${yetersizSoruSayisi ? "text-amber-500" : metinIkincil}`}>
-                                {altKonuSayisi} konu için en az {altKonuSayisi} soru gerekir.
-                                {yetersizSoruSayisi && " Daha yüksek soru sayısı seçin."}
-                                {altKonuSayisi > 20 && " Mevcut seçeneklerle bu konu test edilemez."}
-                            </p>
-                        )}
                     </fieldset>
 
                     <fieldset className="xl:col-span-3">
@@ -686,10 +673,7 @@ function DersTestler() {
                                 <OzetSecimDropdown
                                     id="test-konu"
                                     value={konuId}
-                                    onChange={(deger) => {
-                                        secimiDegistir(setKonuId, deger);
-                                        setSoruSayisi(10);
-                                    }}
+                                    onChange={konuSeciminiDegistir}
                                     options={konuDropdownSecenekleri}
                                     disabled={olusturuluyor || sayfaYukleniyor || konuDropdownSecenekleri.length === 0}
                                     emptyLabel={sayfaYukleniyor ? "Konular yükleniyor..." : "Hazır konu yok"}
@@ -750,15 +734,6 @@ function DersTestler() {
                             <div className="flex shrink-0 flex-wrap items-center gap-2">
                             <button
                                 type="button"
-                                onClick={() => { setJsonAcik((acik) => !acik); setJsonKopyalandi(false); }}
-                                className={`inline-flex h-10 items-center justify-center rounded-xl border px-3 text-[12px] font-bold ${ortakButon}`}
-                                aria-expanded={jsonAcik}
-                                aria-controls="test-json-denetim"
-                            >
-                                JSON
-                            </button>
-                            <button
-                                type="button"
                                 onClick={() => testeGit(olusturulanTest)}
                                 disabled={Boolean(eylemdekiTestId)}
                                 className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 text-[12px] font-bold text-white transition-colors hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-60"
@@ -772,33 +747,6 @@ function DersTestler() {
                             </button>
                             </div>
                         </div>
-                        {jsonAcik && (
-                            <div id="test-json-denetim" className="mt-3 rounded-xl border p-3">
-                                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                                    <p className={`text-[12px] font-bold ${metinAna}`}>
-                                        Geçici JSON Denetimi — cevap anahtarı içermez
-                                    </p>
-                                    <button
-                                        type="button"
-                                        className={`rounded-lg border px-3 py-1.5 text-[11px] font-bold ${ortakButon}`}
-                                        onClick={async () => {
-                                            try {
-                                                await navigator.clipboard.writeText(jsonMetni);
-                                                setJsonKopyalandi(true);
-                                            } catch {
-                                                setJsonKopyalandi(false);
-                                            }
-                                        }}
-                                    >
-                                        {jsonKopyalandi ? "Kopyalandı" : "JSON Kopyala"}
-                                    </button>
-                                </div>
-                                <textarea readOnly value={jsonMetni} rows={13}
-                                    aria-label="Test soru ve alt konu JSON çıktısı"
-                                    className={`w-full rounded-lg border p-3 font-mono text-[11px] ${isDark ? "border-slate-700 bg-slate-950 text-slate-100" : "border-slate-200 bg-white text-slate-900"}`}
-                                />
-                            </div>
-                        )}
                     </div>
                 )}
             </section>

@@ -16,6 +16,15 @@ const zorlukEtiketleri = {
 
 const sinirla = (deger, alt, ust) => Math.min(Math.max(deger, alt), ust);
 
+export const testSoruSayilariGetir = (kapsamTuru, konuId = "") => (
+    kapsamTuru === "konu" && String(konuId).startsWith("sub-") ? [5, 10] : [10, 15, 20]
+);
+
+export const testAltKonuUyarisiGetir = (altKonuSayisi, soruSayisi) => {
+    if (altKonuSayisi <= soruSayisi) return "";
+    return `Seçilen konuda ${altKonuSayisi} alt konu var. En az ${altKonuSayisi} soru gerekir. ${altKonuSayisi > 20 ? "Mevcut seçeneklerle bu konu test edilemez." : "Daha yüksek soru sayısı seçin."}`;
+};
+
 export const testOlusturmaGirdisiOlustur = ({
     kapsamTuru,
     soruSayisi,
@@ -26,7 +35,7 @@ export const testOlusturmaGirdisiOlustur = ({
     const sayi = Number(soruSayisi);
     if (
         !TEST_KAPSAMLARI.includes(kapsamTuru) ||
-        !Number.isInteger(sayi) || sayi < 1 || sayi > 20 || typeof soruSayisi === "boolean" ||
+        !testSoruSayilariGetir(kapsamTuru, konuId).includes(sayi) || typeof soruSayisi === "boolean" ||
         !TEST_ZORLUKLARI.includes(zorluk)
     ) {
         return null;
@@ -56,49 +65,6 @@ export const testEksikSoruMesaji = (test) => {
         : "Gemini'nin yanıtındaki bazı sorularda soru metni, dört seçenek veya cevap eksikti.";
     return `İstenen ${istenen} sorudan ${hazirlanan} soru hazırlandı (${eksik} eksik). ${neden} Hazırlanan sorularla teste devam edebilirsiniz.`;
 };
-
-// Geçici test denetim çıktısı; doğru cevap ve açıklama kesinlikle aktarılmaz.
-export const testDenetimVerisiniOlustur = (test, konular = []) => ({
-    testId: String(test?._id || ""),
-    konu: String(test?.konuBasligi || ""),
-    soruSayisi: Number(test?.soruSayisi || 0),
-    istenenSoruSayisi: Number(test?.istenenSoruSayisi || test?.soruSayisi || 0),
-    eksikSoruNedeni: String(test?.eksikSoruNedeni || ""),
-    sorular: (test?.sorular || []).map((soru, index) => ({
-        sira: index + 1,
-        soru: String(soru?.metin || ""),
-        secenekler: (soru?.secenekler || []).map((secenek) => ({
-            anahtar: secenek.anahtar,
-            metin: secenek.metin,
-        })),
-        konuId: String(soru?.konuId || ""),
-        konuBasligi: String(soru?.konuBasligi || konular.find(
-            (konu) => konu.konuId === soru?.konuId
-        )?.baslik || "Belirtilmedi"),
-        kaynakDosyalari: [...new Set(
-            (soru?.kaynaklar || []).map((kaynak) => kaynak.dosyaAdi).filter(Boolean)
-        )],
-        kaynakParcalari: (soru?.kaynaklar || []).flatMap((kaynak) => (
-            (kaynak.parcaIndeksleri || []).map((parcaIndex) => ({
-                dosyaAdi: kaynak.dosyaAdi,
-                parcaIndex,
-                // Sadece gerçekten mevcut ve doğrulanmış skorlar gösterilir.
-                semantikSkor: (kaynak.parcaSkorlari || []).find(
-                    (parca) => parca.parcaIndex === parcaIndex
-                )?.skor ?? null,
-            }))
-        )),
-        konuDogrulama: soru?.konuDogrulama ? {
-            hedefSkor: soru.konuDogrulama.hedefSkor ?? null,
-            rakipSkor: soru.konuDogrulama.rakipSkor ?? null,
-            rakipKonuBasligi: soru.konuDogrulama.rakipKonuBasligi || "",
-        } : null,
-        kaliteDogrulama: soru?.kaliteDogrulama ? {
-            durum: String(soru.kaliteDogrulama.durum || ""),
-            guven: soru.kaliteDogrulama.guven ?? null,
-        } : null,
-    })),
-});
 
 export const testOlusturmaButonuDevreDisiMi = ({
     sayfaYukleniyor,
