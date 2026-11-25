@@ -24,7 +24,7 @@ Tam bölünmede eşitlik kesin koşuldur. Bölünemeyen sayıda kalanların yeri
 
 ## Sınırlar ve hata davranışı
 
-- Normal üretim 1; yalnızca tamamlama gerektiğinde toplam en fazla 2 SDK çağrısı. Her çağrı tek denemedir; 429/503, bozuk JSON veya kesilmiş çıktı yeni bir üretim zinciri başlatmaz.
+- Normal üretim 1; gerekirse eksik geçerli sorular için 1 tamamlama. Yalnızca sağlayıcının gerçek 503 hatası için tüm işlem boyunca en fazla 1 ek SDK retry (en az 2,5 saniye bekleme, sağlayıcı bekleme bilgisi ve toplam süre sınırı korunur). Böylece toplam en fazla 3 SDK çağrısı; 400/401/403/404/429, yerel sınır, bozuk JSON ve kesilmiş çıktı otomatik retry başlatmaz.
 - Toplam Gemini zaman bütçesi 120 saniye, tek çağrı en fazla 90 saniyedir. Çıktı token bütçesi istenen sayıyla artar. Gerçek süre/tokenlar mevcut üretim izleyicisinden takip edilir; canlı performans iddiası değildir.
 - Kaynak hazırlama üst sınırı `TEST_MAKS_KAYNAK_KARAKTERI` (varsayılan 160.000); tek istek paketi `TEST_TEK_ISTEK_KAYNAK_KARAKTER_BUTCESI` (varsayılan 90.000; 30.000–110.000).
 - Hedef karşılanmazsa `TEST_HEDEFI_KARSILANAMADI` ve anlaşılır Türkçe hata döner. Hiçbir eksik test başarı olarak sunulmaz.

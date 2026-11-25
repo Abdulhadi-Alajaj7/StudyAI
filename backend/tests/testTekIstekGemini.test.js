@@ -91,7 +91,7 @@ test("sayı tam olsa bile modelin kaynak yetersizliği bildirimi başarıya çev
     assert.equal(mock.istekler.length, 1);
 });
 
-for (const status of [429, 503]) {
+for (const status of [400, 401, 403, 404, 429]) {
     test(`${status} API hatası tekrar denenmez ve kısmi başarıya dönüşmez`, async () => {
         const { girdi } = ornekPaket();
         const mock = geminiTaklidi([Object.assign(new Error("provider failure"), { status })]);
@@ -100,11 +100,61 @@ for (const status of [429, 503]) {
     });
 }
 
-test("tamamlama API hatası önceki soruları başarılı sonuç olarak döndürmez", async () => {
+const gecici503 = () => Object.assign(new Error("provider unavailable"), { status: 503 });
+
+test("ilk 503 sonrası aynı istek bir kez tekrarlanır ve tam test döner", async () => {
     const { girdi, sorular } = ornekPaket();
-    const mock = geminiTaklidi([{ sorular: sorular.slice(0, 8) }, Object.assign(new Error("provider"), { status: 503 })]);
-    await assert.rejects(geminiIleTestSorulariUret(girdi, mock.bagimliliklar), { status: 503 });
+    const mock = geminiTaklidi([gecici503(), { sorular }]);
+    const beklemeler = [], izleme = [];
+    const sonuc = await geminiIleTestSorulariUret(girdi, {
+        ...mock.bagimliliklar, bekle: async (ms) => { beklemeler.push(ms); },
+        uretimIzleyicisi: { sdkCagrisiBasladi: (veri) => izleme.push(veri) },
+    });
+    assert.equal(sonuc.sorular.length, 10);
+    assert.equal(sonuc.apiCagriSayisi, 2);
+    assert.equal(mock.istekler[0].contents, mock.istekler[1].contents);
+    assert.equal(beklemeler.length, 1);
+    assert.ok(beklemeler[0] >= 2500);
+    assert.deepEqual(izleme.map((x) => x.sdkDenemesi), [1, 2]);
+});
+
+test("iki ardışık 503 sonrasında üçüncü üretim çağrısı yapılmaz", async () => {
+    const { girdi } = ornekPaket();
+    const mock = geminiTaklidi([gecici503(), gecici503()]);
+    await assert.rejects(geminiIleTestSorulariUret(girdi, { ...mock.bagimliliklar, bekle: async () => {} }), { status: 503 });
     assert.equal(mock.istekler.length, 2);
+});
+
+test("ilk üretim retry kullandıysa eksik sorular için yalnızca bir çağrı kalır", async () => {
+    const { girdi, sorular } = ornekPaket();
+    const mock = geminiTaklidi([gecici503(), { sorular: sorular.slice(0, 8) }, { sorular: sorular.slice(8) }]);
+    const sonuc = await geminiIleTestSorulariUret(girdi, { ...mock.bagimliliklar, bekle: async () => {} });
+    assert.equal(sonuc.sorular.length, 10);
+    assert.equal(sonuc.apiCagriSayisi, 3);
+    assert.match(mock.istekler[2].contents, /tam 2 yeni soru/);
+});
+
+test("tamamlama 503 alırsa kullanılmamış tek retry ile eksikler tamamlanır", async () => {
+    const { girdi, sorular } = ornekPaket();
+    const mock = geminiTaklidi([{ sorular: sorular.slice(0, 8) }, gecici503(), { sorular: sorular.slice(8) }]);
+    const sonuc = await geminiIleTestSorulariUret(girdi, { ...mock.bagimliliklar, bekle: async () => {} });
+    assert.equal(sonuc.sorular.length, 10);
+    assert.equal(sonuc.apiCagriSayisi, 3);
+    assert.equal(mock.istekler[1].contents, mock.istekler[2].contents);
+});
+
+test("üretim retry kullandıktan sonra tamamlama 503 alırsa dördüncü çağrı ve kısmi başarı yoktur", async () => {
+    const { girdi, sorular } = ornekPaket();
+    const mock = geminiTaklidi([gecici503(), { sorular: sorular.slice(0, 8) }, gecici503()]);
+    await assert.rejects(geminiIleTestSorulariUret(girdi, { ...mock.bagimliliklar, bekle: async () => {} }), { status: 503 });
+    assert.equal(mock.istekler.length, 3);
+});
+
+test("503 beklemesi toplam süreye sığmıyorsa tekrar çağrılmaz", async () => {
+    const { girdi } = ornekPaket();
+    const mock = geminiTaklidi([gecici503()]);
+    await assert.rejects(geminiIleTestSorulariUret(girdi, { ...mock.bagimliliklar, timeoutMs: 1000, bekle: async () => {} }), { status: 503 });
+    assert.equal(mock.istekler.length, 1);
 });
 
 test("konu sayısından az soru veya kaynaksız alt konu API çağrısından önce reddedilir", async () => {

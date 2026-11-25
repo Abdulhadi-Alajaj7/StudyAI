@@ -191,6 +191,8 @@ const yapilandirilmisGeminiCagrisi = async ({
     apiCagriButcesi = null,
     uretimIzleyicisi = null,
     sdkCagriBaglami = null,
+    retrySadece503 = false,
+    sonSureMs = null,
     istekYonetimi = ortakGeminiIstekYonetimi,
 }) => {
     maxDeneme = sinirliGeminiDenemesi(maxDeneme);
@@ -206,6 +208,10 @@ const yapilandirilmisGeminiCagrisi = async ({
                 "Yapay zekâ çağrı bütçesi aşıldığı için test güvenle tamamlanamadı.",
                 { status: 503, kod: "GEMINI_CAGRI_BUTCESI_ASILDI" }
             );
+        }
+        const etkinTimeoutMs = sonSureMs == null ? timeoutMs : Math.min(timeoutMs, sonSureMs - performance.now());
+        if (etkinTimeoutMs <= 0) {
+            throw new GeminiSohbetHatasi("Test oluşturma süresi doldu. Lütfen yeniden deneyin.", { status: 504, kod: "GEMINI_ZAMAN_ASIMI" });
         }
         try {
             // İstemci kurulumu da güvenli hata sınıflandırmasına dahildir.
@@ -227,7 +233,7 @@ const yapilandirilmisGeminiCagrisi = async ({
                             abortSignal,
                         },
                     });
-                }, timeoutMs);
+                }, etkinTimeoutMs);
             } finally {
                 yeriBirak();
             }
@@ -281,8 +287,15 @@ const yapilandirilmisGeminiCagrisi = async ({
             };
         } catch (hata) {
             sonHata = geminiHatasiniSiniflandir(hata);
-            const beklemeMs = retryBeklemeSuresiniHesapla(sonHata, deneme, rastgele);
-            const retryUygunMu = beklemeMs != null;
+            let beklemeMs = retryBeklemeSuresiniHesapla(sonHata, deneme, rastgele);
+            if (retrySadece503) {
+                // Yalnızca sağlayıcının gerçek 503 hatası; yerel sınır, 429 ve kalıcı hatalar hariç.
+                beklemeMs = sonHata.status === 503 && sonHata.kod === "GEMINI_GECICI_HATA" &&
+                    sonHata.tanilama?.orijinalHttpDurumu === 503 && beklemeMs != null
+                    ? Math.max(2500, beklemeMs) : null;
+            }
+            const retryUygunMu = beklemeMs != null &&
+                (sonSureMs == null || performance.now() + beklemeMs + 1000 < sonSureMs);
             sonHata.tanilama = {
                 ...sonHata.tanilama,
                 ...hamGeminiHataTanilamasiniOlustur(hata),
@@ -295,7 +308,7 @@ const yapilandirilmisGeminiCagrisi = async ({
                 gercekDenemeSayisi,
                 maksimumDenemeSayisi: maxDeneme,
                 istekMaxOutputTokens: maxOutputTokens,
-                istekTimeoutMs: timeoutMs,
+                istekTimeoutMs: etkinTimeoutMs,
                 ...(apiCagriButcesi ? { apiCagriSayisi: apiCagriButcesi.kullanilan } : {}),
             };
             if (!retryUygunMu || deneme === maxDeneme) break;
@@ -615,7 +628,8 @@ export const geminiIleTestSorulariUret = async ({
     const kurallar = testDagilimKurallariniOlustur({ soruSayisi, zorlukDagilimi, konuDagilimi });
     const secilenKaynaklar = testKaynakPaketiniSec(kaynaklar, kurallar.konuIds, konuEslesmeleriZorunlu);
     const ayarlar = { soruSayisi, zorlukDagilimi, konuDagilimi, kaynaklar: secilenKaynaklar, izinliKonuIds };
-    const apiCagriButcesi = { kullanilan: 0, maksimum: 2 };
+    // Bir üretim + gerekirse bir tamamlama + tüm işlem boyunca yalnızca bir 503 retry.
+    const apiCagriButcesi = { kullanilan: 0, maksimum: 3 };
     const tokenKullanimi = { girdi: 0, cikti: 0, toplam: 0 };
     const zamanButcesi = Number.isFinite(bagimliliklar.timeoutMs) ? Math.max(1, bagimliliklar.timeoutMs) : 120_000;
     let sorular = [];
@@ -649,9 +663,13 @@ export const geminiIleTestSorulariUret = async ({
         const sonuc = await yapilandirilmisGeminiCagrisi({
             istemci: bagimliliklar.istemci || null, modelAdi, prompt, systemInstruction: TEST_SISTEM_TALIMATI,
             istekYonetimi: bagimliliklar.istekYonetimi || ortakGeminiIstekYonetimi,
-            timeoutMs: Math.min(90_000, kalanSure), maxDeneme: 1,
+            timeoutMs: Math.min(90_000, kalanSure),
+            // Önceki aşamada retry kullanıldıysa ikinci aşamada bir daha retry yapma.
+            maxDeneme: apiCagriButcesi.kullanilan === deneme ? 2 : 1,
+            retrySadece503: true, sonSureMs: baslangic + zamanButcesi,
             maxOutputTokens: Math.min(28_000, 2_000 + eksik.soruSayisi * 1_200),
-            bekle: () => Promise.resolve(), apiCagriButcesi,
+            bekle: bagimliliklar.bekle || ((ms) => new Promise((resolve) => setTimeout(resolve, ms))),
+            apiCagriButcesi,
             // JSON biçimi prompt ile tanımlanır; sayılar ve kimlikler yerel doğrulayıcıda zorunludur.
             uretimIzleyicisi: bagimliliklar.uretimIzleyicisi,
             sdkCagriBaglami: { anaCagriTuru: deneme ? "onarim" : "uretim" },
