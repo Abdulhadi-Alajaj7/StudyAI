@@ -188,7 +188,6 @@ const yapilandirilmisGeminiCagrisi = async ({
     maxOutputTokens,
     bekle,
     rastgele = Math.random,
-    responseJsonSchema = null,
     apiCagriButcesi = null,
     uretimIzleyicisi = null,
     sdkCagriBaglami = null,
@@ -225,7 +224,7 @@ const yapilandirilmisGeminiCagrisi = async ({
                         config: {
                             systemInstruction, temperature: 0.2, maxOutputTokens,
                             responseMimeType: "application/json",
-                            ...(responseJsonSchema ? { responseJsonSchema } : {}), abortSignal,
+                            abortSignal,
                         },
                     });
                 }, timeoutMs);
@@ -295,6 +294,9 @@ const yapilandirilmisGeminiCagrisi = async ({
                 retryEdildiMi: deneme > 1,
                 gercekDenemeSayisi,
                 maksimumDenemeSayisi: maxDeneme,
+                istekMaxOutputTokens: maxOutputTokens,
+                istekTimeoutMs: timeoutMs,
+                ...(apiCagriButcesi ? { apiCagriSayisi: apiCagriButcesi.kullanilan } : {}),
             };
             if (!retryUygunMu || deneme === maxDeneme) break;
             await bekle(beklemeMs);
@@ -561,31 +563,12 @@ Kolay: kaynakta açık bilgi; orta: ilişki/uygulama; zor: kaynak içindeki bilg
 Konu ve zorluk dağılımına kesin uy. Bölünemeyen sayıda her konuya en az bir soru ver; kalanı kaynakların farklı öğrenme hedeflerine göre dağıt. Metin uzunluğu tek başına gerekçe değildir.
 Yanıtı göndermeden sayı, dağılım, tekrar, kaynak desteği ve bütün seçeneklerin doğruluğunu kontrol et.
 Kaynak istenen sayıda farklı, güvenilir soruya yetmiyorsa durum=yetersiz_kaynak döndür. Eksik sayıyı tahmin veya düşük kaliteli sorularla doldurma.
-Yalnızca belirtilen JSON şemasında yanıt ver.`;
-
-const testYanitSemasi = (soruSayisi, kaynaklar, izinliKonuIds, zorlukDagilimi) => ({
-    type: "object", required: ["durum", "sorular"],
-    properties: {
-        durum: { type: "string", enum: ["tamamlandi", "yetersiz_kaynak"] },
-        sorular: { type: "array", minItems: 0, maxItems: soruSayisi, items: {
-            type: "object",
-            required: ["metin", "secenekler", "dogruCevap", "aciklama", "ogrenmeHedefi", "zorluk", "konuId", "kaynakReferanslari", "kaynakKanitlari"],
-            properties: {
-                metin: { type: "string" }, aciklama: { type: "string" }, ogrenmeHedefi: { type: "string" },
-                secenekler: { type: "array", minItems: 4, maxItems: 4, items: { type: "object", required: ["anahtar", "metin"], properties: {
-                    anahtar: { type: "string", enum: ["A", "B", "C", "D"] }, metin: { type: "string" },
-                } } },
-                dogruCevap: { type: "string", enum: ["A", "B", "C", "D"] },
-                zorluk: { type: "string", enum: Object.keys(zorlukDagilimi).filter((z) => zorlukDagilimi[z] > 0) },
-                konuId: { type: "string", enum: izinliKonuIds.length ? izinliKonuIds.map((k) => k.konuId) : [""] },
-                kaynakReferanslari: { type: "array", minItems: 1, maxItems: 3, items: { type: "string", enum: kaynaklar.map((k) => k.anahtar) } },
-                kaynakKanitlari: { type: "array", minItems: 1, maxItems: 3, items: { type: "object", required: ["kaynakReferansi", "alinti"], properties: {
-                    kaynakReferansi: { type: "string", enum: kaynaklar.map((k) => k.anahtar) }, alinti: { type: "string" },
-                } } },
-            },
-        } },
-    },
-});
+Yalnızca geçerli bir JSON nesnesi döndür; Markdown veya ek metin yazma.
+durum alanı yalnızca "tamamlandi" veya "yetersiz_kaynak" olabilir. Yeterli kaynak varsa bu istekte belirtilen yeni soru sayısını tam karşıla ve durum="tamamlandi" yaz.
+Her soruda aşağıdaki alanların tamamı bulunmalı. konuId ve kaynakReferanslari değerlerini yalnızca istekte verilen kimlik ve anahtarlardan seç. Konu kimliği listesi boşsa konuId boş dize olmalıdır.
+Her soru 1–3 kaynak referansı ve 1–3 kısa kanıt alıntısı içermeli; her referans için aynı kaynaktan birebir bir kanıt bulunmalı.
+Aşağıdaki JSON yalnızca biçim örneğidir; örnek değerleri kopyalama:
+{"durum":"tamamlandi","sorular":[{"metin":"...","secenekler":[{"anahtar":"A","metin":"..."},{"anahtar":"B","metin":"..."},{"anahtar":"C","metin":"..."},{"anahtar":"D","metin":"..."}],"dogruCevap":"A","aciklama":"...","ogrenmeHedefi":"...","zorluk":"orta","konuId":"sub-...","kaynakReferanslari":["K1"],"kaynakKanitlari":[{"kaynakReferansi":"K1","alinti":"..."}]}]}`;
 
 const testKaynakPaketiniSec = (kaynaklar, konuIds, eslesmeZorunlu) => {
     const ayar = Number.parseInt(process.env.TEST_TEK_ISTEK_KAYNAK_KARAKTER_BUTCESI, 10);
@@ -669,7 +652,7 @@ export const geminiIleTestSorulariUret = async ({
             timeoutMs: Math.min(90_000, kalanSure), maxDeneme: 1,
             maxOutputTokens: Math.min(28_000, 2_000 + eksik.soruSayisi * 1_200),
             bekle: () => Promise.resolve(), apiCagriButcesi,
-            responseJsonSchema: testYanitSemasi(eksik.soruSayisi, secilenKaynaklar, izinliKonuIds, eksik.zorlukDagilimi),
+            // JSON biçimi prompt ile tanımlanır; sayılar ve kimlikler yerel doğrulayıcıda zorunludur.
             uretimIzleyicisi: bagimliliklar.uretimIzleyicisi,
             sdkCagriBaglami: { anaCagriTuru: deneme ? "onarim" : "uretim" },
         });

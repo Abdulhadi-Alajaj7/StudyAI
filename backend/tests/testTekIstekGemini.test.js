@@ -13,7 +13,11 @@ for (const dagilim of [[2, 2, 2, 2, 2], [4, 4, 4, 4, 4], [3, 3, 3, 3], [2, 2, 1,
         assert.deepEqual(girdi.izinliKonuIds.map((k) => sonuc.sorular.filter((s) => s.konuId === k.konuId).length), dagilim);
         assert.equal(mock.istekler.length, 1);
         assert.equal(sonuc.apiCagriSayisi, 1);
-        assert.equal(mock.istekler[0].config.responseJsonSchema.properties.sorular.maxItems, girdi.soruSayisi);
+        assert.equal(mock.istekler[0].config.responseMimeType, "application/json");
+        assert.equal("responseJsonSchema" in mock.istekler[0].config, false);
+        assert.equal("responseSchema" in mock.istekler[0].config, false);
+        assert.match(mock.istekler[0].contents, new RegExp("tam " + girdi.soruSayisi + " yeni soru"));
+        assert.match(mock.istekler[0].config.systemInstruction, /"kaynakKanitlari":/);
         assert.match(mock.istekler[0].config.systemInstruction, /farklı öğrenme hedefi/);
         assert.ok(mock.istekler[0].config.maxOutputTokens >= girdi.soruSayisi * 1200);
     });
@@ -120,8 +124,32 @@ test("zaman aşımı çağrıyı iptal eder ve yeni istek başlatmaz", async () 
     assert.equal(mock.istekler.length, 1);
 });
 
-test("kurulu Gemini SDK gerçek JSON şemasını HTTP gövdesine aktarır; ağ taklit edilir", async (t) => {
-    const { girdi, sorular } = ornekPaket([5]);
+test("kurulu Gemini SDK 7 konu, 15 soru ve 42 kaynak için şemasız JSON isteği gönderir; ağ taklit edilir", async (t) => {
+    const { girdi, sorular } = ornekPaket([3, 3, 3, 2, 2]);
+    const ekler = [
+        { baslik: "AVL Ağacı", metin: "AVL ağacında denge faktörü nasıl hesaplanır?", cevap: "Yükseklik farkı", kanit: "AVL ağacında denge faktörü sol ve sağ alt ağaçların yükseklik farkı olarak hesaplanır." },
+        { baslik: "Dijkstra Algoritması", metin: "Dijkstra algoritması hangi tür kenar ağırlıklarını gerektirir?", cevap: "Negatif olmayan ağırlıklar", kanit: "Dijkstra algoritması negatif olmayan kenar ağırlıkları gerektirir." },
+    ];
+    for (const [index, ek] of ekler.entries()) {
+        const konuId = "sub-" + (index + 5);
+        const anahtar = "K" + (index + 6);
+        const konu = { konuId, baslik: ek.baslik, konuTuru: "alt" };
+        girdi.izinliKonuIds.push(konu);
+        girdi.konuDagilimi.push({ ...konu, adet: 1 });
+        girdi.kaynaklar.push({ anahtar, materyalId: "m" + (index + 6), parcaIndex: 0, konuIds: [konuId], icerik: ek.kanit });
+        sorular.push({ metin: ek.metin, aciklama: ek.kanit, ogrenmeHedefi: ek.kanit, dogruCevap: "A",
+            secenekler: [ek.cevap, "Rastgele seçim", "Veri kopyalama", "Bütün elemanları silme"].map((metin, i) => ({ anahtar: "ABCD"[i], metin })),
+            konuId, kaynakReferanslari: [anahtar], kaynakKanitlari: [{ kaynakReferansi: anahtar, alinti: ek.kanit }] });
+    }
+    const ilkKaynaklar = [...girdi.kaynaklar];
+    for (let i = 7; i < 42; i++) {
+        const kaynak = ilkKaynaklar[i % ilkKaynaklar.length];
+        girdi.kaynaklar.push({ ...kaynak, anahtar: "K" + (i + 1), parcaIndex: i });
+    }
+    girdi.soruSayisi = 15;
+    girdi.zorlukDagilimi = { kolay: 5, orta: 5, zor: 5 };
+    girdi.konuDagilimi = girdi.konuDagilimi.map((konu) => ({ ...konu, adet: 1 }));
+    sorular.forEach((soru, i) => { soru.zorluk = ["kolay", "orta", "zor"][i % 3]; });
     const govdeler = [];
     t.mock.method(globalThis, "fetch", async (_url, ayarlar) => {
         govdeler.push(JSON.parse(ayarlar.body));
@@ -133,8 +161,13 @@ test("kurulu Gemini SDK gerçek JSON şemasını HTTP gövdesine aktarır; ağ t
         istemci: new GoogleGenAI({ apiKey: "yalnizca-test-anahtari" }),
         istekYonetimi: { yerAyir: () => () => {} },
     });
-    assert.equal(sonuc.sorular.length, 5);
+    assert.equal(sonuc.sorular.length, 15);
     assert.equal(govdeler.length, 1);
-    assert.equal(govdeler[0].generationConfig.responseJsonSchema.properties.sorular.maxItems, 5);
+    assert.equal("responseJsonSchema" in govdeler[0].generationConfig, false);
+    assert.equal("responseSchema" in govdeler[0].generationConfig, false);
     assert.equal(govdeler[0].generationConfig.responseMimeType, "application/json");
+    assert.equal(girdi.izinliKonuIds.length, 7);
+    assert.equal(girdi.kaynaklar.length, 42);
+    assert.match(JSON.stringify(govdeler[0].contents), /KAYNAK K42/);
+    assert.deepEqual(girdi.izinliKonuIds.map((konu) => sonuc.sorular.filter((soru) => soru.konuId === konu.konuId).length), [3, 3, 3, 2, 2, 1, 1]);
 });
