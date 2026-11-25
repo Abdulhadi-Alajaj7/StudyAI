@@ -74,3 +74,14 @@ test("GPT OSS için düşük düşünme ayarı gönderilir",async()=>{
     await client.models.generateContent({model:"openai/gpt-oss-120b",contents:"test",config:{systemInstruction:"JSON",maxOutputTokens:4000}});
     assert.equal(govde.reasoning_effort,"low");assert.equal(govde.max_completion_tokens,4000);
 });
+
+test("parçalı harita Groq dakika kotasını yeni API çağrısı yapmadan bekler",async()=>{
+    let now=0,calls=0;
+    const m=aiIstekYonetimiOlustur({simdi:()=>now,bekle:async ms=>{now+=ms},logger:{}});
+    const cfg={adaylar:[{saglayici:"groq",model:"test",rpm:30,tpm:8000,rpd:1000,tpd:200000,cikti:65536}],
+        tahminiGirdi:3000,groqMaxOutputTokens:2500,maxDeneme:1,kotaBekleMs:65000,istek:async()=>{calls++;return true}};
+    await m.calistir(cfg);
+    await m.calistir(cfg);
+    assert.equal(calls,2);
+    assert.equal(now,60000);
+});

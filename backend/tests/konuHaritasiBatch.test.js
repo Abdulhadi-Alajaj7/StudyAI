@@ -34,3 +34,9 @@ test("Değişen imza eski checkpoint'i kullanmaz",async()=>{
     await haritaParcaliAnaliz({gruplar,imza:"v2",kontrolNoktasi:{imza:"v1",sonuclar:[{konular:konu("P1")}]},normalize,dogrula:async()=>{},kaydet:async()=>{},logger:{},analiz:async g=>{islenen.push(g.kodlar[0]);return konu(g.kodlar[0]);}});
     assert.deepEqual(islenen,["P1","P2","P3"]);
 });
+
+test("İlk grup başarısız olsa da parçalı plan işaretlenir",async()=>{
+    let nokta;
+    await assert.rejects(haritaParcaliAnaliz({gruplar,imza:"v1",normalize,dogrula:async()=>{},kaydet:async x=>{nokta=x},logger:{},analiz:async()=>{throw Error("503")}}));
+    assert.deepEqual(nokta,{imza:"v1",sonuclar:[]});
+});

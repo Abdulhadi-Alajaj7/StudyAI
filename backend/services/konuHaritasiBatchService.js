@@ -68,6 +68,11 @@ export const haritaParcaliAnaliz = async ({gruplar, imza, kontrolNoktasi, analiz
             kayitlar.push(kayit);
         }
     }
+    // İlk grup dahi başarısız olsa sonraki denemede büyük çağrı tekrarlanmaz.
+    if (kontrolNoktasi?.imza !== imza) {
+        await dogrula();
+        await kaydet({imza,sonuclar:[]});
+    }
     for (let i=kayitlar.length;i<gruplar.length;i++) {
         await dogrula();
         const konular = await analiz(gruplar[i]);
