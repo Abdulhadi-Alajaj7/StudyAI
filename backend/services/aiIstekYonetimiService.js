@@ -93,9 +93,9 @@ export const aiIstekYonetimiOlustur = ({
                     if(status===429){d.engel=simdi()+Math.max(1000,sinif.retryAfterMs??60000);break;}
                     if(status===404||status===402){d.engel=simdi()+300000;break;}
                     if([400,401,403].includes(status)||kod==="GEMINI_YAPILANDIRMA"||kod==="AI_GUVENLIK_ENGELI")throw ham;
-                    if(kod==="GEMINI_ISTEK_YOGUNLUGU" || kod==="GEMINI_SERVIS_HATASI" && ham?.tanilama?.orijinalHttpDurumu==null || !retry)throw ham;
+                    if(kod==="GEMINI_ISTEK_YOGUNLUGU" || (kod==="GEMINI_SERVIS_HATASI" && ham?.tanilama?.orijinalHttpDurumu==null) || sinif.kod==="HAZIRLAMA_HATASI" || !retry)throw ham;
                     if(status===503){d.ardArda++;if(d.ardArda>=2)d.engel=simdi()+Math.max(60000,sinif.retryAfterMs??0);}
-                    gecikme=Math.max(1200+Math.floor(rastgele()*300),sinif.retryAfterMs??0);
+                    gecikme=Math.max((status===503?2500:1200)+Math.floor(rastgele()*300),sinif.retryAfterMs??0);
                     if(sinif.retryAfterMs>5000)d.engel=Math.max(d.engel,simdi()+sinif.retryAfterMs);
                     if(n>=Math.min(2,maxDeneme)||gecikme>5000||bitis-simdi()-gecikme-rezerve<8000||d.engel>simdi())break;
                 }finally{clearTimeout(timer);aktif--;}

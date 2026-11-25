@@ -1,13 +1,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { callGeminiStructuredJson } from "../services/geminiService.js";
-import { haritaIstekAyarlari, haritaSinirlayiciOlustur } from "../utils/geminiHaritaSiniri.js";
+import { haritaIstekAyarlari } from "../utils/geminiHaritaSiniri.js";
+import { aiIstekYonetimiOlustur } from "../services/aiIstekYonetimiService.js";
 
 const ortam = (uret, ayarlar = {}, { yedekModel = null } = {}) => {
     const istekler = [], beklemeler = [], loglar = [];
-    let saat = Date.parse("2026-11-11T10:00:00Z");
+    let saat = Date.now();
     const ai = { models: { async generateContent(istek) { istekler.push(istek); return uret(istekler.length, istek); } } };
-    const bagimliliklar = { ayarlar: { ...haritaIstekAyarlari(), ...ayarlar }, sinir: haritaSinirlayiciOlustur(),
+    const aiYonetimi=aiIstekYonetimiOlustur({simdi:()=>saat,bekle:async ms=>{beklemeler.push(ms);saat+=ms;},rastgele:()=>0,logger:{info(){}}});
+    const bagimliliklar = { ayarlar: { ...haritaIstekAyarlari(), ...ayarlar }, aiYonetimi,
         simdi: () => saat, beklet: async ms => { beklemeler.push(ms); saat += ms; }, yedekModel, logger: { info(...args) { loglar.push(args); } } };
     return { istekler, beklemeler, loglar, calistir: () => callGeminiStructuredJson(ai, "mock-model", "Özel materyal", "Talimat", bagimliliklar) };
 };
@@ -16,8 +18,8 @@ const hata = (status, extra = {}) => Object.assign(new Error("Gizli sağlayıcı
 test("429 Retry-After dikkate alınır ve deneme sayısı sınırlıdır", async () => {
     const t = ortam(() => { throw hata(429, { headers: { "retry-after": "2" } }); });
     await assert.rejects(t.calistir(), { status: 429, kod: "GEMINI_429" });
-    assert.equal(t.istekler.length, 2);
-    assert.deepEqual(t.beklemeler, [2000]);
+    assert.equal(t.istekler.length, 1);
+    assert.deepEqual(t.beklemeler, []);
 });
 
 test("bilinmeyen dakika kotasında hızlı otomatik veya manuel çağrı yapılmaz", async () => {
@@ -41,8 +43,8 @@ test("günlük sağlayıcı kotası otomatik retry ve yeni hızlı manuel API ç
 test("503 sınırlı backoff ile denenir; gerçek sağlayıcı kodu logda korunur", async () => {
     const t = ortam(() => { throw hata(503, { error: { status: "UNAVAILABLE" } }); });
     await assert.rejects(t.calistir(), { kod: "GEMINI_503", status: 503 });
-    assert.equal(t.istekler.length, 3);
-    assert.deepEqual(t.beklemeler, [2500, 5000]);
+    assert.equal(t.istekler.length, 2);
+    assert.deepEqual(t.beklemeler, [2500]);
     assert.equal(t.loglar[0][1].httpDurumu, 503);
     assert.equal(t.loglar[0][1].saglayiciHataKodu, "UNAVAILABLE");
     assert.doesNotMatch(JSON.stringify(t.loglar), /Gizli sağlayıcı|Özel materyal|Talimat/);
@@ -54,11 +56,11 @@ for (const [yanit, kod] of [
     [{ text: "" }, "GEMINI_BOS_YANIT"],
     [{ text: "[", candidates: [{ finishReason: "MAX_TOKENS" }] }, "GEMINI_CIKTI_SINIRI"],
 ]) {
-    test(`${kod} kota/503 olarak sunulmaz ve otomatik yeniden üretilmez`, async () => {
+    test(`${kod} kota/503 olarak sunulmaz; sınırlı yeniden deneme yapılır`, async () => {
         const t = ortam(() => yanit);
         await assert.rejects(t.calistir(), { kod, status: 502 });
-        assert.equal(t.istekler.length, 1);
-        assert.equal(t.beklemeler.length, 0);
+        assert.equal(t.istekler.length, 2);
+        assert.equal(t.beklemeler.length, 1);
     });
 }
 
@@ -111,19 +113,19 @@ test("eksik API yapılandırması HTTP 503'e çevrilmez; model ve aşama güvenl
 });
 
 
-test("503 ilk iki denemede dönerse üçüncü deneme sonunda konu haritası kurtarılır", async () => {
+test("503 ilk iki denemede dönerse yedek model ile konu haritası kurtarılır", async () => {
     const t = ortam(n => {
         if (n < 3) throw hata(503, { error: { status: "UNAVAILABLE" } });
         return { text: '[{"baslik":"Ağaçlar","altKonular":[]}]' };
-    });
+    }, {}, {yedekModel:"mock-backup"});
     const sonuc = await t.calistir();
     assert.equal(t.istekler.length, 3);
-    assert.deepEqual(t.beklemeler, [2500, 5000]);
+    assert.deepEqual(t.beklemeler, [2500]);
     assert.equal(sonuc[0].baslik, "Ağaçlar");
-    assert.equal(sonuc.kullanilanModel, "mock-model");
+    assert.equal(sonuc.kullanilanModel, "mock-backup");
 });
 
-test("503 üç kez devam ederse yalnız yapılandırılmış yedek model denenir", async () => {
+test("503 iki kez devam ederse yalnız yapılandırılmış yedek model denenir", async () => {
     const t = ortam((_n, istek) => {
         if (istek.model === "mock-model") throw hata(503, { error: { status: "UNAVAILABLE" } });
         return { text: '[{"baslik":"Veri Kalitesi","altKonular":[]}]' };
@@ -132,25 +134,25 @@ test("503 üç kez devam ederse yalnız yapılandırılmış yedek model denenir
     assert.equal(sonuc[0].baslik, "Veri Kalitesi");
     assert.equal(sonuc.kullanilanModel, "mock-backup");
     assert.deepEqual(t.istekler.map(i => i.model), [
-        "mock-model", "mock-model", "mock-model", "mock-backup",
+        "mock-model", "mock-model", "mock-backup",
     ]);
-    assert.ok(t.loglar.some((g) => g[0].includes("Yedek modele geçiliyor")));
+    assert.ok(t.loglar.some((g) => g[1]?.model === "mock-backup"));
 });
 
 test("Kalıcı 503'te yedek model ayarlanmadıysa anahtar veya model sessizce değiştirilmez", async () => {
     const t = ortam(() => { throw hata(503, { error: { status: "UNAVAILABLE" } }); });
     await assert.rejects(t.calistir(), { kod: "GEMINI_503", status: 503 });
-    assert.equal(t.istekler.length, 3);
+    assert.equal(t.istekler.length, 2);
     assert.ok(t.istekler.every(i => i.model === "mock-model"));
 });
 
-test("429 günlük kota hatası yedek modele geçişi tetiklemez", async () => {
+test("429 günlük kota hatası aynı modeli tekrar denemeden yedek modele geçer", async () => {
     const t = ortam(() => { throw hata(429, { error: {
         status: "RESOURCE_EXHAUSTED",
         details: [{ "@type": "type.googleapis.com/google.rpc.QuotaFailure",
             violations: [{ quotaId: "GenerateRequestsPerDayPerProjectPerModel" }] }],
     } }); }, {}, { yedekModel: "mock-backup" });
     await assert.rejects(t.calistir(), { status: 429, kod: "GEMINI_GUNLUK_KOTA" });
-    assert.equal(t.istekler.length, 1);
-    assert.equal(t.istekler[0].model, "mock-model");
+    assert.equal(t.istekler.length, 2);
+    assert.deepEqual(t.istekler.map(i=>i.model),["mock-model","mock-backup"]);
 });

@@ -159,15 +159,15 @@ for (const [ad, hata] of [
     ["504", Object.assign(new Error("provider timeout"), { status: 504 })],
     ["JSON_PARSE", () => ({ text: '{"sorular":[', candidates: [{ finishReason: "STOP" }] })],
 ]) {
-    test(`${ad} sonrası tek yedek model çağrısı yapılır`, async () => {
+    test(`${ad} iki deneme boyunca devam ederse yedek model çağrılır`, async () => {
         const { girdi, sorular } = ornekPaket();
-        const mock = geminiTaklidi([hata, { sorular }]);
+        const mock = geminiTaklidi([hata,hata, { sorular }]);
         const sonuc = await geminiIleTestSorulariUret({ ...girdi, modelAdi: "gemini-3.1-flash-lite" }, {
             ...mock.bagimliliklar, bekle: async () => {},
         });
-        assert.deepEqual(mock.istekler.map((i) => i.model), ["gemini-3.1-flash-lite", "gemini-3.5-flash-lite"]);
+        assert.deepEqual(mock.istekler.map((i) => i.model), ["gemini-3.1-flash-lite", "gemini-3.1-flash-lite", "gemini-3.5-flash-lite"]);
         assert.equal(sonuc.model, "gemini-3.5-flash-lite");
-        assert.equal(sonuc.apiCagriSayisi, 2);
+        assert.equal(sonuc.apiCagriSayisi, 3);
         assert.equal(sonuc.sorular.length, 10);
     });
 }

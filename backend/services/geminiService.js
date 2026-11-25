@@ -743,7 +743,7 @@ export const geminiIleTestSorulariUret = async ({
     ].join("\n\n");
     const zamanButcesi = Number.isFinite(bagimliliklar.timeoutMs) ? Math.max(1, bagimliliklar.timeoutMs) : 120_000;
     const apiCagriButcesi = { kullanilan: 0, maksimum: 6 };
-    const yedekModelAdi = process.env.AI_GEMINI_YEDEK_MODELI?.trim() || null;
+    const yedekModelAdi = bagimliliklar.istemci ? (bagimliliklar.yedekModelAdi || null) : (process.env.AI_GEMINI_YEDEK_MODELI?.trim() || null);
     const sonuc = await yapilandirilmisGeminiCagrisi({
         istemci: bagimliliklar.istemci || null, modelAdi, prompt, systemInstruction: TEST_SISTEM_TALIMATI,
         istekYonetimi: bagimliliklar.istekYonetimi || ortakGeminiIstekYonetimi,
@@ -833,7 +833,7 @@ export async function callGeminiStructuredJson(ai, modelAdi, prompt, systemInstr
             bekle: bagimliliklar.beklet || (ms => new Promise(r=>setTimeout(r,ms))),
             yedekModelAdi: bagimliliklar.yedekModel,
             aiYonetimi: bagimliliklar.aiYonetimi,
-            maxDeneme: 2,
+            maxDeneme: Math.min(2, ayarlar.maksDeneme || 2),
             veriDogrula: veri => {
                 if (!semaDogrulaVeNormalizeEt(veri, {kaynakKodlariniKoru:bagimliliklar.kaynakKodlariniKoru===true}).length)
                     throw Object.assign(new Error("Geçersiz şema"),{kod:"GEMINI_GECERSIZ_SEMA",status:502});

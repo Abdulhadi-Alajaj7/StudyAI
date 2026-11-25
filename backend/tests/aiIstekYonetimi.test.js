@@ -41,3 +41,10 @@ test("devre açık modeli sonraki istekte atlar",async()=>{
 test("son zaman geçtiyse istek gönderilmez",async()=>{
     let n=0;await assert.rejects(ortam().calistir({adaylar,tahminiGirdi:100,sonZaman:Date.now()-1,istek:async()=>{n++;}}));assert.equal(n,0);
 });
+
+test("tüm uygun sağlayıcılar başarısızsa en fazla altı çağrı",async()=>{
+    let n=0;await assert.rejects(ortam().calistir({adaylar,tahminiGirdi:100,istek:async()=>{n++;throw hata(503);}}));assert.equal(n,6);
+});
+test("güvenlik engeli başka sağlayıcıya gönderilmez",async()=>{
+    let n=0;await assert.rejects(ortam().calistir({adaylar,tahminiGirdi:100,istek:async()=>{n++;throw Object.assign(hata(403),{kod:"AI_GUVENLIK_ENGELI"});}}));assert.equal(n,1);
+});

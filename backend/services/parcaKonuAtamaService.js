@@ -97,6 +97,8 @@ export const atamaYanitiniIncele = (rows, batchBoyutu, izinliIds) => {
 export const geminiIleParcalariKonularaAta = async ({
     parcalar, anaKonular, modelAdi = VARSAYILAN_GEMINI_MODELI,
     istemci = null,
+    aiYonetimi,
+    yedekModelAdi,
     ayarlar = haritaIstekAyarlari(),
     beklet = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
     logger = console,
@@ -139,8 +141,8 @@ SADECE JSON döndür: {"atamalar":[{"index":0,"konuIds":["sub-..."]}]}.`;
         let sonuc;
         try {
             const cevap = await yapilandirilmisGeminiCagrisi({
-                istemci, modelAdi, prompt: JSON.stringify(istek), systemInstruction: instruction,
-                timeoutMs: ayarlar.timeoutMs || 55_000, maxOutputTokens: 4096,
+                istemci, modelAdi, aiYonetimi, yedekModelAdi, prompt: JSON.stringify(istek), systemInstruction: instruction,
+                timeoutMs: ayarlar.timeoutMs || 55_000, maxOutputTokens: 4096, maxDeneme: Math.min(2,ayarlar.maksDeneme||2),
                 bekle: beklet,
                 veriDogrula: veri => {
                     const inceleme = atamaYanitiniIncele(veri?.atamalar,batch.length,new Set(konular.map(k=>k.id)));

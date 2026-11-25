@@ -45,7 +45,6 @@ test("Gemini bir chunkı atladığında veya bilinmeyen ID verdiğinde harita re
 
 test("chunk sınıflandırması ortak kota sayacını kullanır ve 503'ü kontrollü tekrar dener", async () => {
     let apiCagriSayisi = 0;
-    let kotaKontrolSayisi = 0;
     const beklemeler = [];
     const loglar = [];
     const istemci = { models: { generateContent: async () => {
@@ -58,22 +57,18 @@ test("chunk sınıflandırması ortak kota sayacını kullanır ve 503'ü kontro
             { index: 1, konuIds: ["sub-2"] },
         ] }) };
     } } };
-    const sinir = {
-        kontrolEt: () => { kotaKontrolSayisi++; },
-        hataKaydet: () => {},
-    };
     const sonuc = await geminiIleParcalariKonularaAta({
         parcalar, anaKonular, istemci, modelAdi: "mock",
-        sinir, ayarlar: { maksDeneme: 2, timeoutMs: 60000, maksBeklemeMs: 30000 },
+        ayarlar: { maksDeneme: 2, timeoutMs: 60000, maksBeklemeMs: 30000 },
         beklet: async (ms) => { beklemeler.push(ms); },
         logger: { info: (...args) => loglar.push(args), error: (...args) => loglar.push(args) },
     });
     assert.equal(sonuc.length, 2);
     assert.equal(apiCagriSayisi, 2);
-    assert.equal(kotaKontrolSayisi, 2);
-    assert.deepEqual(beklemeler, [2500]);
+    assert.equal(beklemeler.length,1);
+    assert.ok(beklemeler[0]>=2500);
     assert.ok(loglar.some(([etiket, veri]) =>
-        etiket === "[ParcaAtama] Batch hatası" && veri.httpDurumu === 503));
+        etiket === "[ParcaAtama] Batch tamamlandı" && veri.toplamApiCagrisi===2));
 });
 
 test("429 günlük kota hatasında tekrar deneme yapmaz ve terminalde batch'i bildirir", async () => {
@@ -106,7 +101,7 @@ test("şema tanısı eksik, tekrar eden ve bilinmeyen konu indexlerini ayırır"
     ], 2, ids).neden, "UNKNOWN_TOPIC_ID");
 });
 
-test("503 sonrası eksik index dönerse sadece başarısız batch yeniden istenir", async () => {
+test("503 ve eksik index sonrası aynı batch yedek modelle kurtarılır", async () => {
     let cagrilar = 0;
     const loglar = [];
     const istemci = { models: { generateContent: async () => {
@@ -118,7 +113,7 @@ test("503 sonrası eksik index dönerse sadece başarısız batch yeniden isteni
         ] }) };
     } } };
     const sonuc = await geminiIleParcalariKonularaAta({
-        parcalar, anaKonular, istemci, modelAdi: "mock",
+        parcalar, anaKonular, istemci, modelAdi: "mock", yedekModelAdi:"mock-backup",
         sinir: { kontrolEt: () => {}, hataKaydet: () => {} },
         ayarlar: { maksDeneme: 2, timeoutMs: 60000, maksBeklemeMs: 30000 },
         beklet: async () => {},
