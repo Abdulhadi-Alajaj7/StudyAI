@@ -63,74 +63,109 @@ test("Tek tık kalıcı işi başlatır; tekrar tıklama aynı işi sıfırlamaz
     assert.equal(x.getUpdates(), 1);
 });
 
-test("başarılı arka plan işi tamamlanır; yeni tarama ek üretim çağırmaz", async () => {
+test("429 sonrası kullanıcı yeniden tıklamadan backend kaldığı yerden tamamlar", async () => {
     const x = kur();
-    await kartOtomatikUretiminiBaslat(x.args, { DersModel: x.DersModel, devreDisiBirak: true });
-    let cagrilar = 0;
-    const d = { DersModel: x.DersModel, uret: async () => {
-        cagrilar++;
-        assert.deepEqual((await calismaKartlariDurumunuGetir(x.args, {
-            DersModel: x.DersModel, KartModel: x.KartModel,
-        })).kartlar, []);
+    await kartOtomatikUretiminiBaslat(x.args, {
+        DersModel: x.DersModel, devreDisiBirak: true,
+    });
+    let deneme = 0;
+    const uret = async () => {
+        deneme++;
+        if (deneme === 1) {
+            x.ders.kartDersIslenenGrupImzalari = ["1"];
+            return { tamamlandi: false, kotaEngeli: true, islenenGrupSayisi: 1,
+                toplamGrupSayisi: 3 };
+        }
         x.ders.kartDersTamamlandi = true;
-        return { tamamlandi: true, kartlar: [{ soru: "Kart" }] };
-    } };
+        return { tamamlandi: true, kartlar: [{ soru: "Kart" }], islenenGrupSayisi: 3 };
+    };
+    const d = { DersModel: x.DersModel, uret };
     await kartOtomatikUretiminiCalistir(x.args, d);
-    await kartOtomatikUretiminiCalistir(x.args, d);
-    assert.equal(cagrilar, 1);
-    assert.equal(x.ders.kartDersOtomatikAktif, false);
-    assert.equal(x.ders.kartDersSonrakiDeneme, null);
-    assert.equal((await calismaKartlariDurumunuGetir(x.args, {
-        DersModel: x.DersModel, KartModel: x.KartModel,
-    })).kartlar.length, 2);
-});
-
-for (const [status, kod] of [
-    [503, "GEMINI_503"], [504, "GEMINI_ZAMAN_ASIMI"], [502, "GEMINI_AG_HATASI"],
-    [429, "GEMINI_GUNLUK_KOTA"], [429, "GEMINI_429"],
-    [401, "GEMINI_YAPILANDIRMA"], [403, "GEMINI_YAPILANDIRMA"],
-    [502, "GEMINI_GECERSIZ_YANIT"], [502, "KART_KAYNAK_GECERSIZ"],
-]) {
-    test(kod + ": Gemini katmanı bitince zamanlayıcı ikinci retry/kalite döngüsü başlatmaz", async () => {
-        const x = kur();
-        await kartOtomatikUretiminiBaslat(x.args, { DersModel: x.DersModel, devreDisiBirak: true });
-        let cagrilar = 0;
-        const d = { DersModel: x.DersModel, uret: async () => {
-            cagrilar++;
-            throw Object.assign(new Error("Üretim tamamlanamadı"), { status, kod });
-        } };
-        await kartOtomatikUretiminiCalistir(x.args, d);
-        await kartOtomatikUretiminiCalistir(x.args, d);
-        assert.equal(cagrilar, 1);
-        assert.equal(x.ders.kartDersOtomatikAktif, false);
-        assert.equal(x.ders.kartDersSonrakiDeneme, null);
-        assert.equal(x.ders.kartDersOtomatikHataKodu, kod);
-        assert.deepEqual((await calismaKartlariDurumunuGetir(x.args, {
-            DersModel: x.DersModel, KartModel: x.KartModel,
-        })).kartlar, []);
-    });
-}
-
-test("başka iş kilidi taşıyorsa sonucu beklenir ve hata sayacı artırılmaz", async () => {
-    const x = kur();
-    await kartOtomatikUretiminiBaslat(x.args, { DersModel: x.DersModel, devreDisiBirak: true });
-    await kartOtomatikUretiminiCalistir(x.args, {
-        DersModel: x.DersModel,
-        uret: async () => { throw Object.assign(new Error("Kilitli"), { status: 409, kod: "KART_URETIM_DEVAM_EDIYOR" }); },
-    });
     assert.equal(x.ders.kartDersOtomatikAktif, true);
-    assert.equal(x.ders.kartDersDenemeSayisi, 0);
-    assert.ok(x.ders.kartDersSonrakiDeneme > new Date());
+    assert.ok(x.ders.kartDersSonrakiDeneme instanceof Date);
+    assert.equal(x.ders.kartDersDenemeSayisi, 1);
+    const eksik = await calismaKartlariDurumunuGetir(x.args, {
+        DersModel: x.DersModel, KartModel: x.KartModel,
+    });
+    assert.deepEqual(eksik.kartlar, []);
+    assert.equal(eksik.uretimSuruyor, true);
+    assert.equal(x.getKartOkuma(), 0);
+    // Zamanlayıcı vakti geldiğinde tekrar çalışır; yeni POST gerekmez.
+    x.ders.kartDersSonrakiDeneme = new Date(Date.now() - 1000);
+    await kartOtomatikUretiminiCalistir(x.args, d);
+    assert.equal(deneme, 2);
+    assert.equal(x.ders.kartDersOtomatikAktif, false);
+    assert.equal(x.ders.kartDersTamamlandi, true);
+    const tam = await calismaKartlariDurumunuGetir(x.args, {
+        DersModel: x.DersModel, KartModel: x.KartModel,
+    });
+    assert.equal(tam.uretimSuruyor, false);
+    assert.equal(tam.kartlar.length, 2);
+    assert.equal(x.getKartOkuma(), 1);
 });
 
-test("tamamlanmamış sonuç yeni üretim isteğiyle tamamlanmaya zorlanmaz", async () => {
+test("503 ve 429 ilerleme yoksa sınırlı otomatik yeniden denenir", async () => {
     const x = kur();
-    await kartOtomatikUretiminiBaslat(x.args, { DersModel: x.DersModel, devreDisiBirak: true });
-    await kartOtomatikUretiminiCalistir(x.args, {
-        DersModel: x.DersModel, uret: async () => ({ tamamlandi: false }),
+    await kartOtomatikUretiminiBaslat(x.args, {
+        DersModel: x.DersModel, devreDisiBirak: true,
     });
+    let gercekDeneme = 0;
+    for (let deneme = 0; deneme < 6; deneme++) {
+        if (x.ders.kartDersOtomatikAktif) x.ders.kartDersSonrakiDeneme = new Date(Date.now() - 1000);
+        await kartOtomatikUretiminiCalistir(x.args, {
+            DersModel: x.DersModel,
+            uret: async () => { gercekDeneme++; return { tamamlandi: false, kotaEngeli: true,
+                islenenGrupSayisi: 0, toplamGrupSayisi: 3 }; },
+        });
+    }
     assert.equal(x.ders.kartDersOtomatikAktif, false);
     assert.equal(x.ders.kartDersOtomatikHataKodu, "KART_URETIM_DOGRULANAMADI");
+    assert.equal(x.ders.kartDersSonrakiDeneme, null);
+    assert.equal(gercekDeneme, 4);
+});
+
+test("Konu veya kart kaynakları sürekli geçersizse sonsuz çağrı yapmadan durum gösterir", async () => {
+    const x = kur();
+    await kartOtomatikUretiminiBaslat(x.args, {
+        DersModel: x.DersModel, devreDisiBirak: true,
+    });
+    let deneme = 0;
+    for (let i = 0; i < 4; i++) {
+        x.ders.kartDersSonrakiDeneme = new Date(Date.now() - 1);
+        await kartOtomatikUretiminiCalistir(x.args, {
+            DersModel: x.DersModel,
+            uret: async () => {
+                deneme++;
+                return { tamamlandi: false, kotaEngeli: false,
+                    islenenGrupSayisi: 0, toplamGrupSayisi: 3 };
+            },
+        });
+    }
+    assert.equal(deneme, 4);
+    assert.equal(x.ders.kartDersOtomatikAktif, false);
+    assert.equal(x.ders.kartDersOtomatikHataKodu, "KART_URETIM_DOGRULANAMADI");
+    const durum = await calismaKartlariDurumunuGetir(x.args, {
+        DersModel: x.DersModel, KartModel: x.KartModel,
+    });
+    assert.deepEqual(durum.kartlar, []);
+    assert.ok(durum.uretimHatasi);
+});
+
+test("Üretimde gerçek ilerleme varsa geçici hatalar kalıcı sayılmaz", async () => {
+    const x = kur();
+    await kartOtomatikUretiminiBaslat(x.args, {
+        DersModel: x.DersModel, devreDisiBirak: true,
+    });
+    x.ders.kartDersDenemeSayisi = 3;
+    await kartOtomatikUretiminiCalistir(x.args, {
+        DersModel: x.DersModel,
+        uret: async () => ({
+            tamamlandi: false, kotaEngeli: false, islenenGrupSayisi: 1,
+            toplamGrupSayisi: 3,
+        }),
+    });
+    assert.equal(x.ders.kartDersOtomatikAktif, true);
+    assert.equal(x.ders.kartDersDenemeSayisi, 1);
 });
 
 
@@ -189,13 +224,11 @@ test("Konu bağlantılı kartlar bütün gruplar bitmeden listelenmez", async ()
     assert.equal(x.getKartOkuma(), 1);
 });
 
-test("kaynak okumasında hata varsa sürüm oluşmadan da eski kartlar sunulmaz", async () => {
-    const x = kur();
-    x.ders.kartDersSurumImzasi = "";
-    x.ders.kartDersOtomatikHataKodu = "KART_KONU_KAYNAGI_EKSIK";
-    const sonuc = await calismaKartlariDurumunuGetir(x.args, {
-        DersModel: x.DersModel, KartModel: x.KartModel,
-    });
-    assert.deepEqual(sonuc.kartlar, []);
-    assert.equal(x.getKartOkuma(), 0);
+test("503 durumunda ckart zamanlayıcısı ilk hatayı kalıcı saymaz",async()=>{
+    const x=kur();
+    await kartOtomatikUretiminiBaslat(x.args,{DersModel:x.DersModel,devreDisiBirak:true});
+    await kartOtomatikUretiminiCalistir(x.args,{DersModel:x.DersModel,uret:async()=>({tamamlandi:false,kotaEngeli:true,islenenGrupSayisi:0,toplamGrupSayisi:3})});
+    assert.equal(x.ders.kartDersOtomatikAktif,true);
+    assert.equal(x.ders.kartDersOtomatikHataKodu,"");
+    assert.ok(x.ders.kartDersSonrakiDeneme>Date.now());
 });

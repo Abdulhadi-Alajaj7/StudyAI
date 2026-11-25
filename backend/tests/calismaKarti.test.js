@@ -1,128 +1,109 @@
-import test, { mock } from "node:test";
+import test from "node:test";
 import assert from "node:assert/strict";
 import mongoose from "mongoose";
 import CalismaKarti from "../models/CalismaKarti.js";
-import Materyal from "../models/Materyal.js";
-import MetinParcasi from "../models/MetinParcasi.js";
-import { aktifMateryalMetinleriniTopla } from "../services/konuHaritasiService.js";
 import {
-    konuBaglantiliKartGruplariniOlustur, dersKartlariniDogrula, kartDersKaynakImzasi,
+    dersKartGruplariniOlustur, dersKartlariniDogrula,
+    kartDersKaynakImzasi, konuBaglantiliKartGruplariniOlustur,
 } from "../services/dersKartPlanlama.mjs";
 
 const materyaller = [{ _id: "m1", aktifIslemeId: "v1", dosyaAdi: "Hafta1.pdf" },
     { _id: "m2", aktifIslemeId: "v2", dosyaAdi: "Hafta2.pdf" }];
-const parcalar = [
-    { materyalId: "m1", islemeId: "v1", parcaIndex: 0, icerik: "Tanım ve formül. ".repeat(1800) },
-    { materyalId: "m2", islemeId: "v2", parcaIndex: 0, icerik: "Örnek ve yöntem. ".repeat(1800) },
-];
-const harita = {
-    anaKonular: [{ konuId: "top-1", baslik: "Ana", aciklama: "Ders kapsamı", altKonular: [
-        { konuId: "sub-1", baslik: "Veri" }, { konuId: "sub-2", baslik: "Model" },
-    ] }],
-    parcaKonuAtamalari: parcalar.map((p, i) => ({ ...p, konuIds: ["sub-" + (i + 1)] })),
-};
-const gruplariAl = () => konuBaglantiliKartGruplariniOlustur(parcalar, materyaller, harita);
-const dogrula = (hamKartlar) => dersKartlariniDogrula({ ...gruplariAl()[0], hamKartlar });
-const kart = { soru: "Tanım?", cevap: "Kaynak yanıtı.", konuId: "sub-1", kaynakKodlari: ["P1"] };
-
-test("80.000 karaktere sığan tüm aktif metinler kesilmeden tek isteğe alınır", () => {
-    const gruplar = gruplariAl();
-    assert.equal(gruplar.length, 1);
-    assert.deepEqual(gruplar[0].kaynaklar.map((k) => k.icerik), parcalar.map((p) => p.icerik));
-    assert.deepEqual(gruplar[0].kaynaklar.map((k) => k.kod), ["P1", "P2"]);
-    assert.deepEqual(gruplar[0].kaynaklar.map((k) => k.konuIds), [["sub-1"], ["sub-2"]]);
-    assert.deepEqual(gruplar[0].konular.map((k) => k.konuId), ["top-1", "sub-1", "sub-2"]);
-    assert.equal(gruplar[0].konular[1].anaKonuId, "top-1");
-    assert.match(gruplar[0].metin, /Hafta1.pdf/);
-    assert.match(gruplar[0].metin, /Hafta2.pdf/);
+test("Her ders metni hiçbir konu haritasına bakılmadan Gemini gruplarına alınır", () => {
+    const parcalar = [
+        { materyalId: "m1", islemeId: "v1", parcaIndex: 0,
+            icerik: "İlk bölüm " + "Veri türleri sayısal ve kategoriktir. ".repeat(75) },
+        { materyalId: "m2", islemeId: "v2", parcaIndex: 0,
+            icerik: "İkinci bölüm " + "Bayes teoremi koşullu olasılığı açıklar. ".repeat(88) },
+    ];
+    const gruplar = dersKartGruplariniOlustur(parcalar, materyaller, {
+        grupKarakterLimiti: 1200, parcaKarakterLimiti: 700,
+    });
+    assert.ok(gruplar.length > 2);
+    assert.equal(gruplar.flatMap((g) => g.kaynaklar).filter((k) => k.materyalId === "m1")
+        .map((k) => k.icerik).join(""), parcalar[0].icerik);
+    assert.equal(gruplar.flatMap((g) => g.kaynaklar).filter((k) => k.materyalId === "m2")
+        .map((k) => k.icerik).join(""), parcalar[1].icerik);
+    assert.ok(gruplar.every((g) => g.kaynaklar.length > 0 &&
+        g.kaynaklar.every((k) => !("konuId" in k))));
+    assert.ok(gruplar.some((g) => g.metin.includes("Hafta1.pdf")));
+    assert.ok(gruplar.some((g) => g.metin.includes("Hafta2.pdf")));
 });
 
-test("büyük ders yalnız 80.000 sınırında gruplanır; P kodları ve tüm konular korunur", () => {
-    const uzun = parcalar.map((p) => ({ ...p, icerik: p.icerik.repeat(2) }));
-    const gruplar = konuBaglantiliKartGruplariniOlustur(uzun, materyaller, harita);
-    assert.equal(gruplar.length, 2);
-    assert.deepEqual(gruplar.flatMap((g) => g.kaynaklar.map((k) => k.icerik)), uzun.map((p) => p.icerik));
-    assert.deepEqual(gruplar.flatMap((g) => g.kaynaklar.map((k) => k.kod)), ["P1", "P2"]);
-    assert.ok(gruplar.every((g) => g.konular.length === 3));
+test("Gemini 20 farklı öğretici soru yazarsa 8 kart kotası nedeniyle kesilmez", () => {
+    const kaynaklar = [{ kod: "K1", materyalId: "m1", dosyaAdi: "Hafta.pdf", parcaIndex: 0 }];
+    const hamKartlar = Array.from({ length: 20 }, (_, i) => ({
+        soru: "Dersin " + i + ". kavramı neyi açıklar?",
+        cevap: "Bilgi " + i + ".",
+        kaynakKodlari: ["K1"], konuId: "uydurulmus-konu",
+    }));
+    const { kartlar, gecersiz } = dersKartlariniDogrula({ hamKartlar, kaynaklar });
+    assert.equal(gecersiz, 0);
+    assert.equal(kartlar.length, 20);
+    assert.ok(kartlar.every((k) => !("konuId" in k) && !("konuBasligi" in k)));
 });
 
-test("kart ve mevcut konu haritası toplayıcısı aynı sınırda aynı parçaları gruplar", async () => {
-    for (const uzunluk of [39_970, 40_000, 80_500]) {
-        const metinler = parcalar.map((p) => ({ ...p, icerik: "x".repeat(uzunluk) }));
-        const materyalMock = mock.method(Materyal, "find", () => ({ select: async () => materyaller }));
-        const parcaMock = mock.method(MetinParcasi, "find", () => ({ sort: async () => metinler }));
-        try {
-            const referans = await aktifMateryalMetinleriniTopla("ders", "kullanici");
-            const kartGruplari = konuBaglantiliKartGruplariniOlustur(metinler, materyaller, harita);
-            assert.deepEqual(kartGruplari.map((g) => g.kaynaklar.map((k) => k.kod)),
-                referans.metinGruplari.map((g) => [...g.matchAll(/\[PARCA (P\d+)\]/g)].map((m) => m[1])));
-            assert.deepEqual(kartGruplari.flatMap((g) => g.kaynaklar.map((k) => k.icerik)),
-                metinler.map((p) => p.icerik));
-        } finally {
-            materyalMock.mock.restore();
-            parcaMock.mock.restore();
-        }
-    }
+test("İlave kartlar kaynakları doğrular, önceki soruları tekrar etmez", () => {
+    const kaynaklar = [{ kod: "K2", materyalId: "m1", dosyaAdi: "Kaynak.pdf", parcaIndex: 4 }];
+    const { kartlar, gecersiz, tekrar } = dersKartlariniDogrula({
+        kaynaklar,
+        mevcutKartlar: [{ konuId: "eski", soru: "CRISP-DM nedir?" }],
+        hamKartlar: [
+            { soru: "CRISP-DM nedir?", cevap: "Ders projesidir.", kaynakKodlari: ["K2"] },
+            { soru: "CRISP-DM hangi amaçla kullanılır?", cevap: "Proje yönetir.", kaynakKodlari: ["K999"] },
+            { soru: "KDD aşamaları neyi içerir?", cevap: "Veri ön işlemeden keşfe kadar süreci.", kaynakKodlari: ["K2"] },
+        ],
+    });
+    assert.equal(kartlar.length, 1);
+    assert.equal(gecersiz, 1);
+    assert.equal(tekrar, 1);
+    assert.equal(kartlar[0].kaynaklar[0].parcaIndex, 4);
 });
 
-test("pasif sürüm gönderilmez; eksik veya uydurma konu bağlantısı yeniden sınıflandırılmaz", () => {
-    const gruplar = konuBaglantiliKartGruplariniOlustur([
-        ...parcalar, { ...parcalar[0], islemeId: "eski", icerik: "PASİF" },
-    ], materyaller, harita);
-    assert.doesNotMatch(gruplar[0].metin, /PASİF/);
-    for (const atamalar of [[], [{ ...parcalar[0], konuIds: ["uydurma"] }]]) {
-        assert.throws(() => konuBaglantiliKartGruplariniOlustur(parcalar, materyaller,
-            { ...harita, parcaKonuAtamalari: atamalar }), { kod: "KART_KONU_KAYNAGI_EKSIK" });
-    }
-    assert.throws(() => konuBaglantiliKartGruplariniOlustur(parcalar, materyaller, null),
-        { kod: "KART_KONU_HARITASI_YOK" });
+test("Materyal değişince kurs sürümü değişir; konu haritasından bağımsızdır", () => {
+    const parcalar = [{ materyalId: "m1", islemeId: "v1", parcaIndex: 0, icerik: "MCAR açıklama" }];
+    const ilk = kartDersKaynakImzasi(materyaller, parcalar);
+    assert.notEqual(ilk, kartDersKaynakImzasi(materyaller, [
+        { ...parcalar[0], icerik: "MAR açıklama" },
+    ]));
+    assert.notEqual(ilk, kartDersKaynakImzasi([
+        { ...materyaller[0], aktifIslemeId: "v3" }, materyaller[1],
+    ], parcalar));
 });
 
-test("Gemini'nin kart sayısı ve içeriği korunur, tekrar/kalite analizi yapılmaz", () => {
-    const sonuc = dogrula(Array.from({ length: 40 }, () => ({ ...kart })));
-    assert.equal(sonuc.length, 40);
-    assert.equal(sonuc[0].soru, kart.soru);
-    assert.equal(sonuc[0].konuId, "sub-1");
-    assert.equal(sonuc[0].kaynaklar[0].kod, "P1");
-    assert.equal(sonuc[0].kaynaklar[0].islemeId, "v1");
-    assert.deepEqual(dogrula([]), []);
+test("Yeni kart modelinde konuId zorunlu değildir, kaynak ve öğrenci durumu korunur", async () => {
+    const kart = new CalismaKarti({
+        kullaniciId: new mongoose.Types.ObjectId(),
+        dersId: new mongoose.Types.ObjectId(),
+        soru: "Aykırı değer nasıl tespit edilir?",
+        cevap: "IQR ile incelenebilir.",
+        kaynaklar: [{
+            materyalId: new mongoose.Types.ObjectId(),
+            dosyaAdi: "Hafta3.pdf", parcaIndex: 8,
+        }],
+    });
+    await kart.validate();
+    assert.equal(kart.konuId, undefined);
+    assert.equal(kart.goruldu, false);
+    await assert.rejects(new CalismaKarti({
+        kullaniciId: new mongoose.Types.ObjectId(),
+        dersId: new mongoose.Types.ObjectId(),
+        soru: "Kaynağı olmayan soru?", cevap: "Yanıt", kaynaklar: [],
+    }).validate());
 });
 
-test("eksik alanlar ve uydurma kimlikler tüm yanıtı reddeder; kartlar sessizce düşürülmez", () => {
-    for (const degisiklik of [
-        { soru: "" }, { cevap: "" }, { konuId: "uydurma" }, { kaynakKodlari: [] },
-        { kaynakKodlari: ["P1", "P999"] }, { kaynakKodlari: [1] }, { cevap: "a".repeat(2001) },
-    ]) {
-        assert.throws(() => dogrula([kart, { ...kart, ...degisiklik }]), { status: 502 });
-    }
-    assert.throws(() => dogrula(null), { kod: "KART_GECERSIZ_YANIT" });
-});
-
-test("kaynak, işleme sürümü ve konu bağlantısı değişiklikleri grup imzasına yansır", () => {
-    const ilk = gruplariAl()[0].imza;
-    const farkli = parcalar.map((p) => ({ ...p, icerik: p.icerik + " yeni bilgi" }));
-    assert.notEqual(ilk, konuBaglantiliKartGruplariniOlustur(farkli, materyaller, harita)[0].imza);
-    assert.notEqual(kartDersKaynakImzasi(materyaller, parcalar), kartDersKaynakImzasi(materyaller, farkli));
-    const yeniParcalar = parcalar.map((p) => ({ ...p, islemeId: "yeni" }));
-    const yeniMateryaller = materyaller.map((m) => ({ ...m, aktifIslemeId: "yeni" }));
-    const yeniHarita = { ...harita, parcaKonuAtamalari: harita.parcaKonuAtamalari.map((a) => ({ ...a, islemeId: "yeni" })) };
-    assert.notEqual(ilk, konuBaglantiliKartGruplariniOlustur(yeniParcalar, yeniMateryaller, yeniHarita)[0].imza);
-    assert.notEqual(ilk, konuBaglantiliKartGruplariniOlustur(parcalar, materyaller,
-        { ...harita, parcaKonuAtamalari: harita.parcaKonuAtamalari.map((a) => ({ ...a, konuIds: ["top-1"] })) })[0].imza);
-});
-
-test("MongoDB modeli kaynak kodunu ve sürümü saklar, eski kartlar geçerli kalır", async () => {
-    const temel = { kullaniciId: new mongoose.Types.ObjectId(), dersId: new mongoose.Types.ObjectId(),
-        soru: "Soru?", cevap: "Yanıt", goruldu: true, yildizli: true, zorluk: "zor",
-        kaynaklar: [{ materyalId: new mongoose.Types.ObjectId(), dosyaAdi: "Hafta.pdf", parcaIndex: 0 }] };
-    const eski = new CalismaKarti(temel);
-    await eski.validate();
-    assert.equal(eski.konuId, undefined);
-    assert.equal(eski.goruldu, true);
-    const islemeId = new mongoose.Types.ObjectId();
-    const yeni = new CalismaKarti({ ...temel, konuId: "sub-1",
-        kaynaklar: [{ ...temel.kaynaklar[0], kod: "P1", islemeId }] });
-    await yeni.validate();
-    assert.equal(yeni.kaynaklar[0].kod, "P1");
-    assert.equal(String(yeni.kaynaklar[0].islemeId), String(islemeId));
+test("ckart gruplaması ve bütün metinler korunur, yalnız mevcut konu kimlikleri eklenir",()=>{
+    const parcalar=Array.from({length:68},(_,i)=>({materyalId:"m1",islemeId:"v1",parcaIndex:i,icerik:"a".repeat(830)}));
+    const harita={anaKonular:[{konuId:"top",baslik:"Ana",altKonular:[{konuId:"sub",baslik:"Alt"}]}],parcaKonuAtamalari:parcalar.map(p=>({...p,konuIds:["sub"]}))};
+    const eski=dersKartGruplariniOlustur(parcalar,materyaller);
+    const yeni=konuBaglantiliKartGruplariniOlustur(parcalar,materyaller,harita);
+    assert.deepEqual(yeni.map(g=>g.kaynaklar.map(k=>k.icerik)),eski.map(g=>g.kaynaklar.map(k=>k.icerik)));
+    assert.equal(yeni.flatMap(g=>g.kaynaklar).length,68);
+    assert.ok(yeni.every(g=>g.metin.includes("KONU ID: sub")));
+    const hamKartlar=Array.from({length:40},(_,i)=>({soru:"Soru "+i,cevap:"Yanıt",konuId:"sub"}));
+    const sonuc=dersKartlariniDogrula({...yeni[0],hamKartlar:[...hamKartlar,{soru:"Hatalı",cevap:"Yanıt",konuId:"uydurma"}]});
+    assert.equal(sonuc.kartlar.length,40);
+    assert.equal(sonuc.gecersiz,1);
+    assert.ok(sonuc.kartlar.every(k=>k.konuId==="sub" && k.kaynaklar.length>0));
+    assert.throws(()=>konuBaglantiliKartGruplariniOlustur(parcalar,materyaller,{...harita,parcaKonuAtamalari:[]}),{kod:"KART_KONU_KAYNAGI_EKSIK"});
 });

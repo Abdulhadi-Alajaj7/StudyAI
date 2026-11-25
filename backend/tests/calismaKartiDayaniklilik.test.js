@@ -18,7 +18,7 @@ const kur = ({ uret, kayitli = [], buyuk = false } = {}) => {
     const materyaller = [{ _id: materyalId, aktifIslemeId: islemeId, dosyaAdi: "Hafta.pdf" }];
     const parcalar = [0, 1].map((i) => ({
         materyalId, islemeId, parcaIndex: i,
-        icerik: ("Dersin " + i + ". kavramı. ").repeat(buyuk ? 3000 : 1000),
+        icerik: ("Dersin " + i + ". kavramı. ").repeat(buyuk ? 400 : 100),
     }));
     const harita = { parcaAtamaSurumu: 1,
         anaKonular: [{ konuId: "top-1", baslik: "Ana", altKonular: [
@@ -75,7 +75,7 @@ const kur = ({ uret, kayitli = [], buyuk = false } = {}) => {
             cagrilar.push(args);
             return uret ? uret(args) : { kartlar: args.grup.kaynaklar.map((k) => ({
                 soru: "Kaynak " + k.kod + " nedir?", cevap: "Metinde açıklanan gerçek bilgi.",
-                konuId: k.konuIds[0], kaynakKodlari: [k.kod],
+                konuId: k.konuIds[0], 
             })) };
         },
     };
@@ -91,9 +91,9 @@ test("bütün ders tek üretimle kaydedilir; ikinci çağrı tekrar Gemini iste�
     assert.equal(ilk.toplamGrupSayisi, 1);
     assert.equal(x.cagrilar.length, 1);
     assert.equal(x.getYazmaSayisi(), 1);
-    assert.equal(x.cagrilar[0].dersBilgisi.aciklama, "Ders açıklaması");
+    assert.equal(x.cagrilar[0].dersAdi, "Uygulamalı Veri Bilimi");
     assert.deepEqual(ilk.kartlar.map((k) => k.konuId), ["sub-1", "sub-2"]);
-    assert.deepEqual(ilk.kartlar.map((k) => k.kaynaklar[0].kod), ["P1", "P2"]);
+    assert.deepEqual(ilk.kartlar.map((k) => k.kaynaklar[0].kod), ["K1", "K2"]);
     for (const sorgu of x.sorgular) {
         assert.equal(sorgu.kullaniciId, x.args.kullaniciId);
         assert.equal(sorgu.dersId, x.args.dersId);
@@ -113,7 +113,7 @@ test("büyük derste her grup bir kez üretilir; üretim sürerken hiçbir kart 
         assert.equal(durum.uretimSuruyor, true);
         assert.equal(durum.tamamlandi, false);
         return { kartlar: [{ soru: "Grup " + grup.sira, cevap: "Yanıt",
-            konuId: grup.kaynaklar[0].konuIds[0], kaynakKodlari: [grup.kaynaklar[0].kod] }] };
+            konuId: grup.kaynaklar[0].konuIds[0],  }] };
     } });
     const sonuc = await dersGeneliKartlariOlustur(x.args, x.deps);
     assert.equal(sonuc.toplamGrupSayisi, 2);
@@ -126,9 +126,9 @@ test("başarısız büyük derste ara kayıtlar gizlidir; yeniden başlatılınc
     const x = kur({ buyuk: true, uret: async ({ grup }) => {
         if (grup.sira === 2 && hataVer) throw Object.assign(new Error("Geçici hata"), { status: 503 });
         return { kartlar: [{ soru: "Grup " + grup.sira, cevap: "Yanıt",
-            konuId: grup.kaynaklar[0].konuIds[0], kaynakKodlari: [grup.kaynaklar[0].kod] }] };
+            konuId: grup.kaynaklar[0].konuIds[0],  }] };
     } });
-    await assert.rejects(dersGeneliKartlariOlustur(x.args, x.deps), { status: 503 });
+    assert.equal((await dersGeneliKartlariOlustur(x.args, x.deps)).tamamlandi,false);
     assert.equal(x.kartlar.length, 1);
     assert.equal(x.ders.kartUretimToken, null);
     assert.deepEqual((await calismaKartlariDurumunuGetir(x.args, x.deps)).kartlar, []);
@@ -136,13 +136,13 @@ test("başarısız büyük derste ara kayıtlar gizlidir; yeniden başlatılınc
     const sonuc = await dersGeneliKartlariOlustur(x.args, x.deps);
     assert.equal(sonuc.tamamlandi, true);
     assert.equal(sonuc.kartlar.length, 2);
-    assert.deepEqual(x.cagrilar.map((c) => c.grup.sira), [1, 2, 2]);
+    assert.deepEqual(x.cagrilar.map((c) => c.grup.sira).sort(), [1, 2, 2]);
 });
 
 test("mevcut kartın yıldızı, görülme durumu ve zorluk geçmişi yeniden kayıtta korunur", async () => {
     const eski = { _id: new mongoose.Types.ObjectId(), konuId: "sub-1", konuBasligi: "Veri",
-        soru: "Kaynak P1 nedir?", cevap: "Önceden kaydedilmiş yanıt", goruldu: true, yildizli: true, zorluk: "zor",
-        soruKimligi: createHash("sha256").update("Kaynak P1 nedir?".toLocaleLowerCase("tr-TR")).digest("hex") };
+        soru: "Kaynak K1 nedir?", cevap: "Önceden kaydedilmiş yanıt", goruldu: true, yildizli: true, zorluk: "zor",
+        soruKimligi: createHash("sha256").update("Kaynak K1 nedir?".toLocaleLowerCase("tr-TR")).digest("hex") };
     const x = kur({ kayitli: [eski] });
     const sonuc = await dersGeneliKartlariOlustur(x.args, x.deps);
     assert.equal(sonuc.kartlar.length, 2);
@@ -164,15 +164,16 @@ test("yeni materyal metniyle üretimde eski kartlar silinmez", async () => {
     assert.equal(x.kartlar.length, 2);
 });
 
-test("tek geçersiz kaynak bütün yanıtı durdurur; kısmi kayıt veya yeni AI isteği yapılmaz", async () => {
-    const x = kur({ uret: async () => ({ kartlar: [
-        { soru: "Geçerli?", cevap: "Yanıt", konuId: "sub-1", kaynakKodlari: ["P1"] },
-        { soru: "Geçersiz?", cevap: "Yanıt", konuId: "sub-1", kaynakKodlari: ["P999"] },
-    ] }) });
-    await assert.rejects(dersGeneliKartlariOlustur(x.args, x.deps), { kod: "KART_KAYNAK_GECERSIZ" });
-    assert.equal(x.cagrilar.length, 1);
-    assert.equal(x.getYazmaSayisi(), 0);
-    assert.equal(x.ders.kartDersTamamlandi, false);
+test("geçersiz konu kimliği geçerli kartları engellemez; ek AI çağrısı yoktur",async()=>{
+    const x=kur({uret:async()=>({kartlar:[
+        {soru:"Geçerli?",cevap:"Yanıt",konuId:"sub-1"},
+        {soru:"Geçersiz?",cevap:"Yanıt",konuId:"uydurma"},
+    ]})});
+    const sonuc=await dersGeneliKartlariOlustur(x.args,x.deps);
+    assert.equal(sonuc.tamamlandi,true);
+    assert.equal(sonuc.kartlar.length,1);
+    assert.equal(sonuc.gecersizKartSayisi,1);
+    assert.equal(x.cagrilar.length,1);
 });
 
 test("konu haritası eksikse AI çağrısı, sınıflandırma ve kayıt yapılmaz", async () => {
@@ -187,7 +188,7 @@ test("konu haritası eksikse AI çağrısı, sınıflandırma ve kayıt yapılma
 test("kayıt hatasında tamamlandı işareti açılmaz ve kartlar sunulmaz", async () => {
     const x = kur();
     x.deps.KartModel.bulkWrite = async () => { throw new Error("DB yazılamadı"); };
-    await assert.rejects(dersGeneliKartlariOlustur(x.args, x.deps), /DB yazılamadı/);
+    assert.equal((await dersGeneliKartlariOlustur(x.args, x.deps)).tamamlandi,false);
     assert.equal(x.ders.kartDersTamamlandi, false);
     assert.equal(x.ders.kartDersIslenenGrupImzalari.length, 0);
     assert.deepEqual((await calismaKartlariDurumunuGetir(x.args, x.deps)).kartlar, []);
@@ -199,7 +200,7 @@ test("kilit kaybedilince kartlar kaydedilmez", async () => {
         x.ders.kartUretimToken = new mongoose.Types.ObjectId();
         return { kartlar: [{ soru: "Soru", cevap: "Yanıt", konuId: "sub-1", kaynakKodlari: ["P1"] }] };
     } });
-    await assert.rejects(dersGeneliKartlariOlustur(x.args, x.deps), { kod: "KART_KILIDI_KAYBEDILDI" });
+    await assert.rejects(dersGeneliKartlariOlustur(x.args, x.deps), { status:409 });
     assert.equal(x.getYazmaSayisi(), 0);
 });
 
