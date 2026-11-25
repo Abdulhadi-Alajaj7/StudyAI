@@ -25,7 +25,8 @@ export const aiModelSirasiGetir = (birincil, env=process.env, yedek) => {
         /^[a-zA-Z0-9._/-]{1,120}$/.test(env.GROQ_MODELI||"")) {
         const rpm=tam(env.GROQ_RPM,1000), tpm=tam(env.GROQ_TPM,100000), rpd=tam(env.GROQ_RPD,100000);
         const cikti=tam(env.GROQ_MAKS_CIKTI_TOKEN,65536);
-        if(rpm&&tpm&&rpd&&cikti) liste.push({saglayici:"groq",model:env.GROQ_MODELI,rpm,tpm,rpd,cikti});
+        const tpd=tam(env.GROQ_TPD || "200000",100000000);
+        if(rpm&&tpm&&rpd&&cikti&&tpd) liste.push({saglayici:"groq",model:env.GROQ_MODELI,rpm,tpm,rpd,cikti,tpd});
     }
     return liste;
 };
@@ -38,23 +39,27 @@ export const aiIstekYonetimiOlustur = ({
     const durum=aday=>{
         const key=aday.saglayici+"/"+aday.model,t=simdi(),tarih=gun(t);
         let d=durumlar.get(key);
-        if(!d){d={tarih,gunluk:0,dakika:[],engel:0,ardArda:0};durumlar.set(key,d);}
+        if(!d){d={tarih,gunluk:0,dakika:[],gunlukTokenlar:[],engel:0,ardArda:0};durumlar.set(key,d);}
         if(d.tarih!==tarih){d.tarih=tarih;d.gunluk=0;d.gunlukDolu=false;d.sonHata=null;}
         d.dakika=d.dakika.filter(k=>t-k.zaman<60000);
+        d.gunlukTokenlar=d.gunlukTokenlar.filter(k=>t-k.zaman<86400000);
         return d;
     };
     const kapasite=(aday,token)=>{
         const d=durum(aday);
         return !d.gunlukDolu&&d.engel<=simdi()&&d.gunluk<aday.rpd&&
-            d.dakika.length<aday.rpm&&d.dakika.reduce((a,k)=>a+k.token,0)+token<=aday.tpm;
+            d.dakika.length<aday.rpm&&d.dakika.reduce((a,k)=>a+k.token,0)+token<=aday.tpm&&
+            (!aday.tpd||d.gunlukTokenlar.reduce((a,k)=>a+k.token,0)+token<=aday.tpd);
     };
-    return {async calistir({adaylar,tahminiGirdi,maxOutputTokens=0,sonZaman,istek,
+    return {async calistir({adaylar,tahminiGirdi,maxOutputTokens=0,groqMaxOutputTokens=maxOutputTokens,sonZaman,istek,
         tekDenemeMs=55000,maxDeneme=2,oncelik="normal"}) {
         let sonHata,denemeSayisi=0;
         const bitis=Math.min(sonZaman??simdi()+120000,simdi()+120000);
-        const token=aday=>tahminiGirdi+(aday.saglayici==="groq"?maxOutputTokens:0);
+        // Groq'un ücretsiz kotası için ayrı çıktı bütçesi; Gemini ayarına dokunulmaz.
+        const cikti=aday=>aday.saglayici==="groq"?groqMaxOutputTokens:maxOutputTokens;
+        const token=aday=>tahminiGirdi+(aday.saglayici==="groq"?128+cikti(aday):0);
         const uygunlar=adaylar.filter(a=>token(a)<=a.tpm&&
-            (a.saglayici!=="groq"||maxOutputTokens<=a.cikti));
+            (a.saglayici!=="groq"||(cikti(a)>0&&cikti(a)<=a.cikti)));
         for(let i=0;i<uygunlar.length;i++){
             const aday=uygunlar[i];
             for(let n=1;n<=Math.min(2,maxDeneme);n++){
@@ -70,12 +75,16 @@ export const aiIstekYonetimiOlustur = ({
                 const rezerve=digerleri*23000;
                 const sure=Math.min(tekDenemeMs,bitis-simdi()-Math.min(rezerve,Math.max(0,bitis-simdi()-5000)));
                 if(sure<=0)break;
-                d.gunluk++;d.dakika.push({zaman:simdi(),token:token(aday)});aktif++;denemeSayisi++;
+                d.gunluk++;
+                const rezervasyon={zaman:simdi(),token:token(aday)};
+                d.dakika.push(rezervasyon);
+                if(aday.tpd)d.gunlukTokenlar.push(rezervasyon);
+                aktif++;denemeSayisi++;
                 let timer,gecikme=null;
                 const controller=new AbortController();
                 try{
                     const sonuc=await Promise.race([
-                        Promise.resolve().then(()=>istek(aday,sure,controller.signal)),
+                        Promise.resolve().then(()=>istek({...aday,maxOutputTokens:cikti(aday)},sure,controller.signal)),
                         new Promise((_,reject)=>{timer=setTimeout(()=>{
                             controller.abort();reject(hata("GEMINI_ZAMAN_ASIMI",504,"Yapay zekâ isteği zaman aşımına uğradı."));
                         },sure);}),
@@ -118,6 +127,7 @@ export const groqIstemcisiOlustur=({apiKey=process.env.GROQ_API_KEY,fetcher=fetc
                 {role:"system",content:config.systemInstruction+"\nYanıtı tek JSON nesnesinin sonuc alanına koy. Asıl istenen JSON nesnesini/dizisini değiştirme: {\"sonuc\": ...}."},
                 {role:"user",content:contents},
             ],response_format:{type:"json_object"},temperature:0.2,
+            ...(["openai/gpt-oss-120b","openai/gpt-oss-20b"].includes(model)?{reasoning_effort:"low"}:{}),
             ...(config.maxOutputTokens?{max_completion_tokens:config.maxOutputTokens}:{})}),
         });
         if(!cevap.ok){

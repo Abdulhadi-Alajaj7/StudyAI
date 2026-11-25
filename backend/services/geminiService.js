@@ -364,6 +364,7 @@ export const yapilandirilmisGeminiCagrisi = async (ayar) => {
         const r = await yonetim.calistir({
             adaylar, tahminiGirdi: Math.ceil((ayar.prompt.length + ayar.systemInstruction.length)/3),
             maxOutputTokens: ayar.maxOutputTokens || 0,
+            groqMaxOutputTokens: ayar.groqMaxOutputTokens ?? ayar.maxOutputTokens ?? 0,
             sonZaman, tekDenemeMs: Math.min(55_000, ayar.timeoutMs || 55_000),
             maxDeneme: Math.min(2, ayar.maxDeneme || 2), oncelik: ayar.oncelik || "normal",
             istek: async (aday, sure, signal) => {
@@ -372,6 +373,7 @@ export const yapilandirilmisGeminiCagrisi = async (ayar) => {
                 try {
                     const sonuc = await tekGeminiCagrisi({
                         ...ayar, istemci, modelAdi: aday.model, maxDeneme: 1,
+                        maxOutputTokens: aday.maxOutputTokens || ayar.maxOutputTokens,
                         retrySadece503: false, yedekModelAdi: null, sonSureMs: null,
                         timeoutMs: sure, hariciSinyal: signal, apiCagriButcesi: butce,
                         sdkDenemeNo: ++gercekDeneme,
@@ -753,6 +755,8 @@ export const geminiIleTestSorulariUret = async ({
         yedekModelAdi,
         responseJsonSchema: process.env.GEMINI_TEST_JSON_SEMA === "false" ? null : TEST_JSON_SEMASI,
         maxOutputTokens: Math.min(28_000, 2_000 + soruSayisi * 1_200),
+        // 10 soru/4000 çıktı bütçesi gerçek sağlayıcıyla doğrulandı; büyük girişler atlanır.
+        groqMaxOutputTokens: Math.min(6000, 2000 + soruSayisi * 200),
         bekle: bagimliliklar.bekle || ((ms) => new Promise((resolve) => setTimeout(resolve, ms))),
         apiCagriButcesi, uretimIzleyicisi: bagimliliklar.uretimIzleyicisi,
         sdkCagriBaglami: { anaCagriTuru: "uretim" },
@@ -829,6 +833,7 @@ export async function callGeminiStructuredJson(ai, modelAdi, prompt, systemInstr
             istemci: ai, modelAdi, prompt, systemInstruction,
             timeoutMs: ayarlar.timeoutMs,
             maxOutputTokens: ayarlar.maxOutputTokens || 16_000,
+            groqMaxOutputTokens: Math.min(4000, ayarlar.maxOutputTokens || 4000),
             sonZaman: bagimliliklar.sonZaman ?? null,
             bekle: bagimliliklar.beklet || (ms => new Promise(r=>setTimeout(r,ms))),
             yedekModelAdi: bagimliliklar.yedekModel,
@@ -1173,6 +1178,7 @@ export const geminiIleDersKartlariUret = async ({
         timeoutMs: bagimliliklar.timeoutMs ?? 45_000,
         maxDeneme: 2,
         maxOutputTokens: 12288,
+        groqMaxOutputTokens: 4000,
         bekle: bagimliliklar.bekle || (() => Promise.resolve()),
         istekYonetimi: bagimliliklar.istekYonetimi || ortakGeminiIstekYonetimi,
     });
