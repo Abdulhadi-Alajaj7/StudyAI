@@ -165,3 +165,23 @@ test("eş zamanlı test izleyicileri sayaçlarını korelasyon kimliğine göre 
     assert.equal(ikinciOzet.ilkUretimCagriSayisi, 0);
     assert.equal(ikinciOzet.onarimCagriSayisi, 1);
 });
+
+
+test("soru doğrulama logu yalnızca güvenli sayaç ve sabit red kodlarını içerir", () => {
+    const satirlar = [];
+    const izleyici = testUretimIzleyicisiOlustur({}, {
+        logger: (satir) => satirlar.push(satir),
+        ortam: { NODE_ENV: "development" },
+    });
+    izleyici.soruDogrulamasiTamamlandi({
+        asama: "uretim", istenenYeniSoru: 15, gelenYeniSoru: 15, gecerliSoru: 5,
+        eksikSoru: 10, reddedilenSoru: 10, redNedenleri: { KAYNAK_KANITI: 10, LOGDA_OLMAMALI: 1 },
+        eksikZorluk: { orta: 3, LOGDA_OLMAMALI: 2 }, prompt: "LOGDA_OLMAMALI",
+    });
+    const kayit = kaydiAyikla(satirlar[0]);
+    assert.equal(kayit.olay, "soru_dogrulama_sonucu");
+    assert.equal(kayit.eksikSoru, 10);
+    assert.deepEqual(kayit.redNedenleri, { KAYNAK_KANITI: 10 });
+    assert.deepEqual(kayit.eksikZorluk, { orta: 3 });
+    assert.doesNotMatch(satirlar[0], /LOGDA_OLMAMALI/);
+});

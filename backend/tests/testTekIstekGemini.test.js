@@ -221,3 +221,21 @@ test("kurulu Gemini SDK 7 konu, 15 soru ve 42 kaynak için şemasız JSON isteğ
     assert.match(JSON.stringify(govdeler[0].contents), /KAYNAK K42/);
     assert.deepEqual(girdi.izinliKonuIds.map((konu) => sonuc.sorular.filter((soru) => soru.konuId === konu.konuId).length), [3, 3, 3, 2, 2, 1, 1]);
 });
+
+
+test("tamamlama 503 olsa da ilk yanıtın red nedenleri ve eksik sayısı izlenir", async () => {
+    const { girdi, sorular } = ornekPaket();
+    const hatali = { ...sorular[8], kaynakKanitlari: [] };
+    const mock = geminiTaklidi([{ sorular: [...sorular.slice(0, 8), hatali] }, gecici503(), gecici503()]);
+    const izleme = [];
+    await assert.rejects(geminiIleTestSorulariUret(girdi, {
+        ...mock.bagimliliklar, bekle: async () => {},
+        uretimIzleyicisi: { soruDogrulamasiTamamlandi: (v) => izleme.push(v) },
+    }), { status: 503 });
+    assert.equal(izleme.length, 1);
+    assert.equal(izleme[0].gelenYeniSoru, 9);
+    assert.equal(izleme[0].gecerliSoru, 8);
+    assert.equal(izleme[0].eksikSoru, 2);
+    assert.deepEqual(izleme[0].redNedenleri, { KAYNAK_KANITI: 1 });
+    assert.equal(mock.istekler.length, 3);
+});

@@ -5,6 +5,11 @@ export const TEST_URETIM_IZLEME_ETIKETI = "[TEST_URETIM_IZLEME]";
 const CAGRI_TURLERI = new Set(["uretim", "onarim"]);
 const KAPSAM_TURLERI = new Set(["tum_ders", "materyal", "konu"]);
 const ZORLUKLAR = new Set(["kolay", "orta", "zor", "karisik"]);
+const RED_KODLARI = [
+    "EKSIK_ALAN", "DOGRU_CEVAP", "SECENEK_FORMATI", "ZORLUK_DAGILIMI",
+    "BILINMEYEN_KONU_KIMLIGI", "KAYNAK_REFERANSI", "KAYNAK_KONU_UYUSMAZLIGI",
+    "KAYNAK_KANITI", "CEVAP_ACIKLAMA_UYUSMAZLIGI", "TEKRARLAYAN_SORU",
+];
 
 const guvenliTanimlayici = (deger, azamiUzunluk = 100) => (
     typeof deger === "string" &&
@@ -91,6 +96,23 @@ export const testUretimIzleyicisiOlustur = (meta = {}, {
                 const deger = guvenliSayi(tokenKullanimi?.[alan]);
                 if (deger != null) sayaclar.tokenKullanimi[alan] += deger;
             }
+        },
+        soruDogrulamasiTamamlandi(veri = {}) {
+            const alanlar = {};
+            for (const alan of [
+                "istenenYeniSoru", "gelenYeniSoru", "oncekiGecerliSoru",
+                "reddedilenSoru", "kotaDisiSoru", "gecerliSoru", "eksikSoru", "eksikKonu",
+            ]) alanlar[alan] = guvenliPozitifTamSayi(veri[alan]);
+            const redNedenleri = Object.fromEntries(RED_KODLARI
+                .filter((kod) => guvenliPozitifTamSayi(veri.redNedenleri?.[kod]) > 0)
+                .map((kod) => [kod, veri.redNedenleri[kod]]));
+            const eksikZorluk = Object.fromEntries(["kolay", "orta", "zor"]
+                .filter((kod) => guvenliPozitifTamSayi(veri.eksikZorluk?.[kod]) !== null)
+                .map((kod) => [kod, veri.eksikZorluk[kod]]));
+            yaz("soru_dogrulama_sonucu", {
+                asama: CAGRI_TURLERI.has(veri.asama) ? veri.asama : null,
+                ...alanlar, redNedenleri, eksikZorluk,
+            });
         },
         onarimBasladi({ hataNedeni, soruIndeksi, onarimDenemesi } = {}) {
             sayaclar.toplamOnarimDenemesi += 1;

@@ -679,8 +679,27 @@ export const geminiIleTestSorulariUret = async ({
         if (!Array.isArray(sonuc.veri?.sorular) || !["tamamlandi", "yetersiz_kaynak"].includes(sonuc.veri.durum)) {
             throw new TestDogrulamaHatasi("YANIT_YAPISI");
         }
-        const secim = gecerliTestSorulariniSec([...sorular, ...sonuc.veri.sorular], ayarlar);
-        reddedilenSoruSayisi += Object.values(secim.redNedenleri).reduce((a, b) => a + b, 0);
+        const adaylar = [...sorular, ...sonuc.veri.sorular];
+        const secim = gecerliTestSorulariniSec(adaylar, ayarlar);
+        const reddedilen = Object.values(secim.redNedenleri).reduce((a, b) => a + b, 0);
+        const kalan = testEksikleriniGetir(secim.sorular, ayarlar);
+        // İçerik veya kimlik değil, yalnızca sayılar ve sabit doğrulama kodları.
+        try {
+            bagimliliklar.uretimIzleyicisi?.soruDogrulamasiTamamlandi?.({
+                asama: deneme ? "onarim" : "uretim",
+                istenenYeniSoru: eksik.soruSayisi,
+                gelenYeniSoru: sonuc.veri.sorular.length,
+                oncekiGecerliSoru: sorular.length,
+                reddedilenSoru: reddedilen,
+                kotaDisiSoru: Math.max(0, Math.min(adaylar.length, 40) - reddedilen - secim.sorular.length),
+                gecerliSoru: secim.sorular.length,
+                eksikSoru: kalan.soruSayisi,
+                eksikKonu: kalan.konuDagilimi.length,
+                eksikZorluk: kalan.zorlukDagilimi,
+                redNedenleri: secim.redNedenleri,
+            });
+        } catch { /* Tanılama üretimi etkilemez. */ }
+        reddedilenSoruSayisi += reddedilen;
         sonTanilama = { ...sonTanilama, reddedilenSoruSayisi, apiCagriSayisi: apiCagriButcesi.kullanilan };
         sorular = secim.sorular;
         if (sonuc.veri.durum === "yetersiz_kaynak") {
