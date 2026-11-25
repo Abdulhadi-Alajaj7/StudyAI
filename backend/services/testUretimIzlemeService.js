@@ -71,6 +71,7 @@ export const testUretimIzleyicisiOlustur = (meta = {}, {
         sdkCagrisiBasladi({
             anaCagriTuru,
             sdkDenemesi,
+            model,
         } = {}) {
             const guvenliAnaTur = CAGRI_TURLERI.has(anaCagriTuru)
                 ? anaCagriTuru
@@ -89,6 +90,7 @@ export const testUretimIzleyicisiOlustur = (meta = {}, {
                 cagriTuru: retryMi ? "sdk_retry" : guvenliAnaTur,
                 anaCagriTuru: guvenliAnaTur,
                 sdkDenemesi: guvenliPozitifTamSayi(sdkDenemesi),
+                model: guvenliTanimlayici(model),
             });
         },
         sdkCagrisiTamamlandi({ tokenKullanimi } = {}) {

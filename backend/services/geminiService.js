@@ -192,6 +192,8 @@ const yapilandirilmisGeminiCagrisi = async ({
     uretimIzleyicisi = null,
     sdkCagriBaglami = null,
     retrySadece503 = false,
+    yedekModelAdi = null,
+    responseJsonSchema = null,
     sonSureMs = null,
     istekYonetimi = ortakGeminiIstekYonetimi,
 }) => {
@@ -199,7 +201,9 @@ const yapilandirilmisGeminiCagrisi = async ({
     const baslangic = performance.now();
     let gercekDenemeSayisi = 0;
     let sonHata;
+    const toplamToken = { girdi: 0, cikti: 0, toplam: 0 };
     for (let deneme = 1; deneme <= maxDeneme; deneme += 1) {
+        const etkinModel = deneme > 1 && yedekModelAdi ? yedekModelAdi : modelAdi;
         if (
             apiCagriButcesi &&
             apiCagriButcesi.kullanilan >= apiCagriButcesi.maksimum
@@ -216,20 +220,21 @@ const yapilandirilmisGeminiCagrisi = async ({
         try {
             // İstemci kurulumu da güvenli hata sınıflandırmasına dahildir.
             istemci ||= getGeminiClient();
-            const yeriBirak = istekYonetimi.yerAyir(modelAdi);
+            const yeriBirak = istekYonetimi.yerAyir(etkinModel);
             let response;
             try {
                 response = await zamanAsimliCalistir((abortSignal) => {
                     if (apiCagriButcesi) apiCagriButcesi.kullanilan += 1;
                     gercekDenemeSayisi += 1;
                     try {
-                        uretimIzleyicisi?.sdkCagrisiBasladi?.({ ...sdkCagriBaglami, sdkDenemesi: deneme });
+                        uretimIzleyicisi?.sdkCagrisiBasladi?.({ ...sdkCagriBaglami, sdkDenemesi: deneme, model: etkinModel });
                     } catch { /* İzleme, SDK çağrısını engellemez. */ }
                     return istemci.models.generateContent({
-                        model: modelAdi, contents: prompt,
+                        model: etkinModel, contents: prompt,
                         config: {
                             systemInstruction, temperature: 0.2, maxOutputTokens,
                             responseMimeType: "application/json",
+                            ...(responseJsonSchema ? { responseJsonSchema } : {}),
                             abortSignal,
                         },
                     });
@@ -247,6 +252,7 @@ const yapilandirilmisGeminiCagrisi = async ({
             } catch {
                 // Terminal izleme, Gemini yanıtının işlenmesini engellememelidir.
             }
+            for (const alan of Object.keys(toplamToken)) toplamToken[alan] += tokenKullanimi[alan] || 0;
             const yanitMetni = String(response?.text || "").trim();
             const sdkTanilamasi = {
                 geminiYanitiBos: !yanitMetni,
@@ -282,8 +288,9 @@ const yapilandirilmisGeminiCagrisi = async ({
             }
             return {
                 veri,
-                tokenKullanimi,
-                tanilama: { ...sdkTanilamasi, gercekDenemeSayisi, toplamIslemSureMs: Math.round(performance.now() - baslangic) },
+                model: etkinModel,
+                tokenKullanimi: yedekModelAdi ? toplamToken : tokenKullanimi,
+                tanilama: { ...sdkTanilamasi, model: etkinModel, gercekDenemeSayisi, toplamIslemSureMs: Math.round(performance.now() - baslangic) },
             };
         } catch (hata) {
             sonHata = geminiHatasiniSiniflandir(hata);
@@ -293,11 +300,19 @@ const yapilandirilmisGeminiCagrisi = async ({
                 beklemeMs = sonHata.status === 503 && sonHata.kod === "GEMINI_GECICI_HATA" &&
                     sonHata.tanilama?.orijinalHttpDurumu === 503 && beklemeMs != null
                     ? Math.max(2500, beklemeMs) : null;
+                // Yalnız testte, farklı modelle bir kurtarma isteği. İçerik kalitesi
+                // veya kalıcı 400/401/403/404/429 hataları yeniden denenmez.
+                if (yedekModelAdi && (sonHata.kod === "GEMINI_ZAMAN_ASIMI" ||
+                    (sonHata.kod === "GEMINI_GECERSIZ_YANIT" &&
+                        sonHata.tanilama?.dogrulamaAltKodu === "JSON_PARSE"))) {
+                    beklemeMs = 2500;
+                }
             }
             const retryUygunMu = beklemeMs != null &&
                 (sonSureMs == null || performance.now() + beklemeMs + 1000 < sonSureMs);
             sonHata.tanilama = {
                 ...sonHata.tanilama,
+                model: etkinModel,
                 ...hamGeminiHataTanilamasiniOlustur(hata),
                 orijinalHttpDurumu: hata?.yerelSinir ? null : sonHata.tanilama?.orijinalHttpDurumu,
                 saglayiciHataKodu: sonHata.tanilama?.saglayiciHataKodu || saglayiciHataKodunuGetir(hata),
@@ -577,6 +592,41 @@ Yalnızca geçerli JSON döndür, Markdown veya ek metin yazma.
 Biçim örneği:
 {"sorular":[{"metin":"...","secenekler":[{"anahtar":"A","metin":"..."},{"anahtar":"B","metin":"..."},{"anahtar":"C","metin":"..."},{"anahtar":"D","metin":"..."}],"dogruCevap":"A","aciklama":"...","zorluk":"orta","konuId":"sub-...","kaynakReferanslari":["K1"]}]}`;
 
+// Sabit ve küçük şema: yalnızca veri biçimi. Dinamik enum/kota/alıntı yok.
+const TEST_JSON_SEMASI = {
+    type: "object",
+    properties: {
+        sorular: {
+            type: "array",
+            items: {
+                type: "object",
+                properties: {
+                    metin: { type: "string" },
+                    secenekler: { type: "array", items: {
+                        type: "object", properties: { anahtar: { type: "string" }, metin: { type: "string" } },
+                        required: ["anahtar", "metin"],
+                    } },
+                    dogruCevap: { type: "string" },
+                    aciklama: { type: "string" },
+                    zorluk: { type: "string" },
+                    konuId: { type: "string" },
+                    kaynakReferanslari: { type: "array", items: { type: "string" } },
+                },
+                required: ["metin", "secenekler", "dogruCevap", "aciklama", "zorluk", "konuId", "kaynakReferanslari"],
+            },
+        },
+    },
+    required: ["sorular"],
+};
+
+const testYedekModeliniGetir = (model) => {
+    const ayar = process.env.GEMINI_TEST_YEDEK_MODELI;
+    const varsayilan = model === "gemini-3.1-flash-lite" ? "gemini-3.5-flash-lite"
+        : model === "gemini-3.5-flash-lite" ? "gemini-3.1-flash-lite" : "";
+    const yedek = (ayar ?? varsayilan).trim();
+    return yedek && yedek !== model ? yedek : null;
+};
+
 const testKaynakPaketiniSec = (kaynaklar, konuIds, eslesmeZorunlu) => {
     const ayar = Number.parseInt(process.env.TEST_TEK_ISTEK_KAYNAK_KARAKTER_BUTCESI, 10);
     const butce = Number.isInteger(ayar) ? Math.max(30_000, Math.min(110_000, ayar)) : 90_000;
@@ -634,11 +684,14 @@ export const geminiIleTestSorulariUret = async ({
     ].join("\n\n");
     const zamanButcesi = Number.isFinite(bagimliliklar.timeoutMs) ? Math.max(1, bagimliliklar.timeoutMs) : 120_000;
     const apiCagriButcesi = { kullanilan: 0, maksimum: 2 };
+    const yedekModelAdi = testYedekModeliniGetir(modelAdi);
     const sonuc = await yapilandirilmisGeminiCagrisi({
         istemci: bagimliliklar.istemci || null, modelAdi, prompt, systemInstruction: TEST_SISTEM_TALIMATI,
         istekYonetimi: bagimliliklar.istekYonetimi || ortakGeminiIstekYonetimi,
-        timeoutMs: Math.min(90_000, zamanButcesi),
+        timeoutMs: Math.min(yedekModelAdi ? 55_000 : 90_000, zamanButcesi),
         maxDeneme: 2, retrySadece503: true, sonSureMs: baslangic + zamanButcesi,
+        yedekModelAdi,
+        responseJsonSchema: process.env.GEMINI_TEST_JSON_SEMA === "false" ? null : TEST_JSON_SEMASI,
         maxOutputTokens: Math.min(28_000, 2_000 + soruSayisi * 1_200),
         bekle: bagimliliklar.bekle || ((ms) => new Promise((resolve) => setTimeout(resolve, ms))),
         apiCagriButcesi, uretimIzleyicisi: bagimliliklar.uretimIzleyicisi,
@@ -651,7 +704,7 @@ export const geminiIleTestSorulariUret = async ({
         hata.tanilama = { ...sonuc.tanilama, ...hata.tanilama, apiCagriSayisi: apiCagriButcesi.kullanilan };
         throw hata;
     }
-    return { sorular, model: modelAdi, tokenKullanimi: sonuc.tokenKullanimi,
+    return { sorular, model: sonuc.model || modelAdi, tokenKullanimi: sonuc.tokenKullanimi,
         apiCagriSayisi: apiCagriButcesi.kullanilan, tanilama: sonuc.tanilama };
 };
 

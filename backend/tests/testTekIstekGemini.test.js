@@ -14,7 +14,7 @@ for (const dagilim of [[2, 2, 2, 2, 2], [4, 4, 4, 4, 4], [3, 3, 3, 3], [2, 2, 1,
         assert.equal(mock.istekler.length, 1);
         assert.equal(sonuc.apiCagriSayisi, 1);
         assert.equal(mock.istekler[0].config.responseMimeType, "application/json");
-        assert.equal("responseJsonSchema" in mock.istekler[0].config, false);
+        assert.equal(mock.istekler[0].config.responseJsonSchema.properties.sorular.type, "array");
         assert.equal("responseSchema" in mock.istekler[0].config, false);
         assert.match(mock.istekler[0].contents, new RegExp("Tam " + girdi.soruSayisi + " soru"));
         assert.match(mock.istekler[0].config.systemInstruction, /"kaynakReferanslari":/);
@@ -106,7 +106,7 @@ test("zaman aşımı çağrıyı iptal eder ve yeni istek başlatmaz", async () 
     assert.equal(mock.istekler.length, 1);
 });
 
-test("kurulu Gemini SDK 7 konu, 15 soru ve 42 kaynak için şemasız JSON isteği gönderir; ağ taklit edilir", async (t) => {
+test("kurulu Gemini SDK 7 konu, 15 soru ve 42 kaynak için basit şemalı JSON isteği gönderir; ağ taklit edilir", async (t) => {
     const { girdi, sorular } = ornekPaket([3, 3, 3, 2, 2]);
     const ekler = [
         { baslik: "AVL Ağacı", metin: "AVL ağacında denge faktörü nasıl hesaplanır?", cevap: "Yükseklik farkı", kanit: "AVL ağacında denge faktörü sol ve sağ alt ağaçların yükseklik farkı olarak hesaplanır." },
@@ -145,7 +145,7 @@ test("kurulu Gemini SDK 7 konu, 15 soru ve 42 kaynak için şemasız JSON isteğ
     });
     assert.equal(sonuc.sorular.length, 15);
     assert.equal(govdeler.length, 1);
-    assert.equal("responseJsonSchema" in govdeler[0].generationConfig, false);
+    assert.equal(govdeler[0].generationConfig.responseJsonSchema.properties.sorular.type, "array");
     assert.equal("responseSchema" in govdeler[0].generationConfig, false);
     assert.equal(govdeler[0].generationConfig.responseMimeType, "application/json");
     assert.equal(girdi.izinliKonuIds.length, 7);
@@ -153,3 +153,21 @@ test("kurulu Gemini SDK 7 konu, 15 soru ve 42 kaynak için şemasız JSON isteğ
     assert.match(JSON.stringify(govdeler[0].contents), /KAYNAK K42/);
     assert.deepEqual(girdi.izinliKonuIds.map((konu) => sonuc.sorular.filter((soru) => soru.konuId === konu.konuId).length), [3, 3, 3, 2, 2, 1, 1]);
 });
+
+for (const [ad, hata] of [
+    ["503", gecici503()],
+    ["504", Object.assign(new Error("provider timeout"), { status: 504 })],
+    ["JSON_PARSE", () => ({ text: '{"sorular":[', candidates: [{ finishReason: "STOP" }] })],
+]) {
+    test(`${ad} sonrası tek yedek model çağrısı yapılır`, async () => {
+        const { girdi, sorular } = ornekPaket();
+        const mock = geminiTaklidi([hata, { sorular }]);
+        const sonuc = await geminiIleTestSorulariUret({ ...girdi, modelAdi: "gemini-3.1-flash-lite" }, {
+            ...mock.bagimliliklar, bekle: async () => {},
+        });
+        assert.deepEqual(mock.istekler.map((i) => i.model), ["gemini-3.1-flash-lite", "gemini-3.5-flash-lite"]);
+        assert.equal(sonuc.model, "gemini-3.5-flash-lite");
+        assert.equal(sonuc.apiCagriSayisi, 2);
+        assert.equal(sonuc.sorular.length, 10);
+    });
+}
