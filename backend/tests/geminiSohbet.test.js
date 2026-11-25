@@ -62,7 +62,11 @@ test("Gemini kota aşımını agresif yeniden denemeden güvenli 429 hatasına �
         (hata) => {
             assert.equal(hata.status, 429);
             assert.equal(hata.kod, "GEMINI_KOTA_ASIMI");
-            const { kotaTuru, retryAfterMs, toplamIslemSureMs, ...temelTanilama } = hata.tanilama;
+            const { kotaTuru, retryAfterMs, toplamIslemSureMs, model, istekMaxOutputTokens, istekTimeoutMs, apiCagriSayisi, ...temelTanilama } = hata.tanilama;
+            assert.equal(apiCagriSayisi, 2);
+            assert.ok(model);
+            assert.equal(istekMaxOutputTokens, 2000);
+            assert.ok(istekTimeoutMs > 0);
             assert.equal(kotaTuru, "bilinmiyor");
             assert.equal(retryAfterMs, null);
             assert.ok(toplamIslemSureMs >= 0);
@@ -75,13 +79,13 @@ test("Gemini kota aşımını agresif yeniden denemeden güvenli 429 hatasına �
                 sdkCagriAsamasi: "models.generateContent",
                 retryUygunMu: false,
                 retryEdildiMi: false,
-                gercekDenemeSayisi: 1,
+                gercekDenemeSayisi: 2,
                 maksimumDenemeSayisi: 2,
             });
             return true;
         }
     );
-    assert.equal(cagrilar, 1);
+    assert.equal(cagrilar, 2); // Her model bir kez; aynı model kota hatasında tekrarlanmaz.
 });
 
 test("Gemini timeout güvenli 504 hatasına çevrilir", async () => {
@@ -102,7 +106,7 @@ test("Gemini timeout güvenli 504 hatasına çevrilir", async () => {
             assert.equal(hata.tanilama?.orijinalHttpDurumu, null);
             assert.equal(hata.tanilama?.retryUygunMu, true);
             assert.equal(hata.tanilama?.retryEdildiMi, false);
-            assert.equal(hata.tanilama?.gercekDenemeSayisi, 1);
+            assert.equal(hata.tanilama?.gercekDenemeSayisi, 2);
             return true;
         }
     );
@@ -151,7 +155,7 @@ test("Gemini geçici servis hatasını güvenli 503 yanıtına çevirir", async 
             assert.equal(hata.tanilama?.hataKaynagi, "saglayici_http");
             assert.equal(hata.tanilama?.retryUygunMu, true);
             assert.equal(hata.tanilama?.retryEdildiMi, false);
-            assert.equal(hata.tanilama?.gercekDenemeSayisi, 1);
+            assert.equal(hata.tanilama?.gercekDenemeSayisi, 2);
             return true;
         }
     );
@@ -216,11 +220,11 @@ test("Gemini sürekli 503 hatasında yeniden deneme sınırını aşmaz", async 
         }),
         (hata) => (
             hata.kod === "GEMINI_GECICI_HATA" &&
-            hata.tanilama?.gercekDenemeSayisi === 2 &&
+            hata.tanilama?.gercekDenemeSayisi === 4 &&
             hata.tanilama?.retryEdildiMi === true
         )
     );
-    assert.equal(cagrilar, 2);
+    assert.equal(cagrilar, 4); // İki model, her biri en fazla iki deneme.
 });
 
 test("başlık çağrısı kısa Türkçe başlığı doğrular ve yalnızca tek API denemesi yapar", async () => {
