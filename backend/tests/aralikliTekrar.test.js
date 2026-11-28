@@ -62,22 +62,24 @@ const ortam = (kartlar = [], simdi = () => tarih("2026-11-28T12:00:00Z")) => {
     };
 };
 
-test("Leitner tablosu, eski kayıt ve İstanbul gün değişimi", () => {
-    const donusler = [[1, 1, 2], [1, 2, 3], [1, 3, 4], [1, 4, 4]];
-    const sureler = [1, 3, 7, 14];
-    const simdi = tarih("2026-12-31T21:01:00Z"); // İstanbul'da 1 Ocak.
-    for (const seviye of [undefined, 1, 2, 3, 4]) {
-        for (const [i, zorluk] of ["zor", "orta", "kolay"].entries()) {
-            const plan = tekrarPlaniOlustur(seviye, zorluk, simdi);
-            const sonuc = donusler[(seviye || 1) - 1][i];
-            assert.equal(plan.tekrarSeviyesi, sonuc);
-            assert.equal(plan.sonTekrarTarihi, simdi);
-            assert.equal(plan.sonrakiTekrarTarihi.toISOString(), new Date(Date.UTC(2027, 0, sureler[sonuc - 1], 21)).toISOString());
+test("sabit süreler, ikinci Kolay, eski kayıt ve İstanbul gün değişimi", () => {
+    const simdi = tarih("2026-12-31T21:01:00Z");
+    for (const [zorluk, gun] of [["zor", 1], ["orta", 2], ["kolay", 3]]) {
+        const plan = tekrarPlaniOlustur(undefined, zorluk, simdi);
+        assert.equal(plan.ardisikKolaySayisi, zorluk === "kolay" ? 1 : 0);
+        assert.equal(plan.sonTekrarTarihi, simdi);
+        assert.equal(plan.sonrakiTekrarTarihi.toISOString(), new Date(Date.UTC(2027, 0, gun, 21)).toISOString());
+        if (zorluk !== "kolay") {
+            assert.deepEqual(tekrarPlaniOlustur(1, zorluk, simdi), plan);
+            assert.deepEqual(tekrarPlaniOlustur(0, zorluk, simdi), plan);
         }
     }
-    assert.equal(tekrarPlaniOlustur(1, "zor", tarih("2026-12-31T20:59:00Z")).sonrakiTekrarTarihi.toISOString(), "2026-12-31T21:00:00.000Z");
+    assert.deepEqual(tekrarPlaniOlustur(1, "kolay", simdi), {
+        ardisikKolaySayisi: 0, zorluk: null, sonTekrarTarihi: null, sonrakiTekrarTarihi: null
+    });
+    assert.equal(tekrarPlaniOlustur(0, "zor", tarih("2026-12-31T20:59:00Z")).sonrakiTekrarTarihi.toISOString(), "2026-12-31T21:00:00.000Z");
     const eski = new CalismaKarti({ ...args, zorluk: "kolay" });
-    assert.equal(eski.tekrarSeviyesi, 1);
+    assert.equal(eski.ardisikKolaySayisi, 0);
     assert.equal(eski.sonTekrarTarihi, null);
     assert.equal(eski.sonrakiTekrarTarihi, null);
 });
@@ -85,7 +87,7 @@ test("Leitner tablosu, eski kayıt ve İstanbul gün değişimi", () => {
 test("günlük liste tarih sırasını, vade ve tamamlanan sınırlarını ve sahipliği korur", async () => {
     let simdi = tarih("2026-11-27T21:00:00Z");
     const deps = ortam([
-        kart(14, { sonrakiTekrarTarihi: tarih("2026-11-28T19:00:00Z"), tekrarSeviyesi: 2 }),
+        kart(14, { sonrakiTekrarTarihi: tarih("2026-11-28T19:00:00Z"), ardisikKolaySayisi: 1 }),
         kart(13, { sonrakiTekrarTarihi: tarih("2026-11-27T21:00:00Z") }),
         kart(12, { sonrakiTekrarTarihi: tarih("2026-11-26T21:00:00Z") }),
         kart(11, { sonrakiTekrarTarihi: tarih("2026-11-26T21:00:00Z") }),
@@ -100,7 +102,7 @@ test("günlük liste tarih sırasını, vade ve tamamlanan sınırlarını ve sa
     const { kartlar, bekleyen, toplam, tamamlanan } = await calismaKartiTekrarlariniGetir(args, deps);
     assert.deepEqual(kartlar.map(k => k._id), [11, 12, 13, 14].map(kimlik));
     assert.equal(kartlar[0].konuId, undefined);
-    assert.deepEqual(kartlar.at(-1).tekrarSureleri, { zor: 1, orta: 3, kolay: 7 });
+    assert.deepEqual(kartlar.at(-1).tekrarSureleri, { zor: 1, orta: 2, kolay: null });
     assert.deepEqual([bekleyen, tamamlanan, toplam], [4, 1, 5]);
     await assert.rejects(calismaKartiTekrarlariniGetir({ ...args, kullaniciId: digerKullanici }, deps), { status: 404 });
     simdi = tarih("2026-11-28T21:00:00Z");
@@ -109,27 +111,27 @@ test("günlük liste tarih sırasını, vade ve tamamlanan sınırlarını ve sa
 });
 
 test("değerlendirme, atlama, sıfırlama ve yeniden değerlendirme kalıcı kart alanlarını korur", async () => {
-    const kayitlar = [kart(10, { goruldu: false }), kart(11, { tekrarSeviyesi: 2, sonrakiTekrarTarihi: tarih("2026-11-27") })];
+    const kayitlar = [kart(10, { goruldu: false }), kart(11, { ardisikKolaySayisi: 1, sonrakiTekrarTarihi: tarih("2026-11-27") })];
     const deps = ortam(kayitlar);
     const durum = (kartId, alanlar) => calismaKartiDurumuGuncelle({ ...args, kartId: kimlik(kartId), ...alanlar }, deps);
     const yeni = await durum(10, { goruldu: true });
     assert.equal(yeni.sonrakiTekrarTarihi, undefined);
-    assert.equal(yeni.tekrarSeviyesi, undefined);
+    assert.equal(yeni.ardisikKolaySayisi, undefined);
     const atlanan = await durum(11, { goruldu: true });
     assert.equal(atlanan.sonrakiTekrarTarihi.toISOString(), "2026-11-27T00:00:00.000Z");
-    assert.equal(atlanan.tekrarSeviyesi, 2);
+    assert.equal(atlanan.ardisikKolaySayisi, 1);
     assert.equal((await calismaKartiTekrarlariniGetir(args, deps)).bekleyen, 1);
 
     await calismaKartiTekrariniSifirla({ ...args, kartId: kimlik(11), surum: 0 }, deps);
     const normalListe = await calismaKartlariniListele(args, deps);
     const silinmeyen = normalListe.find(k => k._id === kimlik(11));
-    assert.deepEqual([silinmeyen.tekrarSeviyesi, silinmeyen.zorluk, silinmeyen.sonTekrarTarihi, silinmeyen.sonrakiTekrarTarihi],
-        [1, null, null, null]);
+    assert.deepEqual([silinmeyen.ardisikKolaySayisi, silinmeyen.zorluk, silinmeyen.sonTekrarTarihi, silinmeyen.sonrakiTekrarTarihi],
+        [0, null, null, null]);
     assert.deepEqual([silinmeyen.goruldu, silinmeyen.yildizli, silinmeyen.soru, silinmeyen.cevap, silinmeyen.kaynaklar],
         [true, true, "Soru", "Cevap", [{ dosyaAdi: "ders.pdf" }]]);
     assert.deepEqual(await calismaKartiTekrarlariniGetir(args, deps), { kartlar: [], bekleyen: 0, tamamlanan: 0, toplam: 0 });
     const planlanan = await durum(11, { zorluk: "kolay", surum: 1 });
-    assert.equal(planlanan.tekrarSeviyesi, 2);
+    assert.equal(planlanan.ardisikKolaySayisi, 1);
     assert.equal(planlanan.sonrakiTekrarTarihi.toISOString(), "2026-11-30T21:00:00.000Z");
     // Yeni bir servis çağrısı sadece depodaki alanlardan aynı sayıyı yeniden kurar.
     assert.deepEqual(await calismaKartiTekrarlariniGetir(args, ortam(structuredClone(kayitlar))),
@@ -137,7 +139,7 @@ test("değerlendirme, atlama, sıfırlama ve yeniden değerlendirme kalıcı kar
 });
 
 test("aynı sürümle çift değerlendirme veya sıfırlama yarışında tek yazma kabul edilir", async () => {
-    const kayitlar = [kart(10, { tekrarSeviyesi: 2 }), kart(11, { tekrarSeviyesi: 2 })];
+    const kayitlar = [kart(10, { tekrarSeviyesi: 4 }), kart(11, { ardisikKolaySayisi: 1 })];
     const deps = ortam(kayitlar);
     const degerlendir = (n, surum) => calismaKartiDurumuGuncelle({ ...args, kartId: kimlik(n), zorluk: "kolay", surum }, deps);
     const sifirla = n => calismaKartiTekrariniSifirla({ ...args, kartId: kimlik(n), surum: 0 }, deps);
@@ -147,12 +149,21 @@ test("aynı sürümle çift değerlendirme veya sıfırlama yarışında tek yaz
         assert.equal(sonuclar.find(x => x.status === "rejected").reason.status, 409);
     };
     await yariyiDogrula(degerlendir(10, 0), degerlendir(10, 0));
-    assert.equal(kayitlar[0].tekrarSeviyesi, 3);
+    assert.equal(kayitlar[0].ardisikKolaySayisi, 1);
     assert.equal(kayitlar[0].__v, 1);
     await assert.rejects(degerlendir(10, 0), { status: 409 });
+    const otomatik = await calismaKartiDurumuGuncelle({
+        ...args, kartId: kimlik(10), zorluk: "kolay", surum: 1, goruldu: false, yildizli: false
+    }, deps);
+    assert.deepEqual([otomatik.zorluk, otomatik.ardisikKolaySayisi, otomatik.sonTekrarTarihi, otomatik.sonrakiTekrarTarihi],
+        [null, 0, null, null]);
+    assert.deepEqual([otomatik.goruldu, otomatik.yildizli, otomatik.soru, otomatik.cevap], [true, true, "Soru", "Cevap"]);
+    assert.equal((await calismaKartlariniListele(args, deps)).length, 2);
+    assert.equal((await calismaKartiTekrarlariniGetir(args, deps)).tamamlanan, 0);
+    assert.equal((await degerlendir(10, 2)).ardisikKolaySayisi, 1);
     await yariyiDogrula(degerlendir(11, 0), sifirla(11));
     assert.equal(kayitlar[1].__v, 1);
-    assert.equal(kayitlar[1].tekrarSeviyesi, 1);
+    assert.equal(kayitlar[1].ardisikKolaySayisi, 0);
     assert.equal(kayitlar[1].sonrakiTekrarTarihi, null);
     assert.equal(kayitlar[1].sonTekrarTarihi, null);
     await assert.rejects(degerlendir(11, 0), { status: 409 });
@@ -190,10 +201,10 @@ test("kimlik doğrulamalı tekrar rotaları, mevcut PATCH ve istemci tarihi", as
     assert.equal((await istek("tekrarlar")).veri.bekleyen, 1);
     assert.equal((await istek(kimlik(11), kullaniciId, { zorluk: "kolay" })).status, 400);
     const sonuc = await istek(kimlik(11), kullaniciId, {
-        zorluk: "kolay", surum: 0, tekrarSeviyesi: 4, sonrakiTekrarTarihi: "2000-01-01"
+        zorluk: "kolay", surum: 0, ardisikKolaySayisi: 1, sonrakiTekrarTarihi: "2000-01-01"
     });
     assert.equal(sonuc.status, 200);
-    assert.equal(sonuc.veri.kart.tekrarSeviyesi, 2);
+    assert.equal(sonuc.veri.kart.ardisikKolaySayisi, 1);
     assert.notEqual(sonuc.veri.kart.sonrakiTekrarTarihi, "2000-01-01");
     assert.equal((await istek(`${kimlik(11)}/tekrar/sifirla`, kullaniciId, { surum: 0 })).status, 409);
     assert.equal((await istek(`${kimlik(11)}/tekrar/sifirla`, kullaniciId, { surum: 1 })).status, 200);

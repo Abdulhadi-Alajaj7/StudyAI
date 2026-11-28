@@ -28,6 +28,7 @@ function DersCalismaKartlari() {
   const [uretimMesaji, setUretimMesaji] = useState("");
   const uretimControllerRef = useRef(null);
   const [hata, setHata] = useState("");
+  const [tekrarBilgilendirmesi, setTekrarBilgilendirmesi] = useState("");
   const [filtre, setFiltre] = useState("tum");
   const [index, setIndex] = useState(0);
   const [cevapAcik, setCevapAcik] = useState(false);
@@ -52,6 +53,7 @@ function DersCalismaKartlari() {
     const controller = new AbortController();
     setYukleniyor(true);
     setHata("");
+    setTekrarBilgilendirmesi("");
     setKartlar([]);
     setUretim({ dersKartTamamlandi: false, uretimSuruyor: false,
       toplamGrupSayisi: 0, islenenGrupSayisi: 0 });
@@ -175,13 +177,17 @@ function DersCalismaKartlari() {
     kartYaziliyorRef.current = true;
     setKaydediliyor(true);
     setHata("");
+    setTekrarBilgilendirmesi("");
     try {
       const girdi = degisiklik.zorluk ? { ...degisiklik, surum: kart.__v ?? 0 } : degisiklik;
       const r = await api.durumuGuncelle(dersId, kart._id, girdi);
       const { goruldu, yildizli } = r.data.kart;
       setKartlar(eski => eski.map(k => k._id === kart._id
         ? (degisiklik.zorluk ? r.data.kart : { ...k, goruldu, yildizli }) : k));
-      if (degisiklik.zorluk) setTekrarYenile(sayi => sayi + 1);
+      if (degisiklik.zorluk) {
+        if (r.data.kart.zorluk === null) setTekrarBilgilendirmesi("Bu kartı art arda iki kez kolay olarak değerlendirdiğin için tekrar listesinden çıkarıldı.");
+        setTekrarYenile(sayi => sayi + 1);
+      }
       return true;
     } catch (e) {
       setHata(kullaniciHataMesaji(e, "Kart güncellenemedi."));
@@ -267,6 +273,7 @@ function DersCalismaKartlari() {
       </div>
     )}
     {hata && <p role="alert" className="rounded-xl border border-rose-400/40 bg-rose-500/10 p-4 text-sm text-rose-400">{hata}</p>}
+    {tekrarBilgilendirmesi && <p role="status" className={`rounded-xl border p-4 text-sm ${panel}`}>{tekrarBilgilendirmesi}</p>}
     {yukleniyor ? <div role="status" className="py-14 text-center">Kartlar yükleniyor...</div> : !gosterilenKartlar.length ?
       <div className={`flex min-h-[380px] flex-col items-center justify-center rounded-2xl border p-8 text-center ${panel}`}>
         <RectangleStackIcon className="h-14 w-14 text-violet-400" />
@@ -306,7 +313,9 @@ function DersCalismaKartlari() {
           <div className="grid grid-cols-3 gap-2 sm:gap-3">
             {ZORLUKLAR.map(z => <button type="button" key={z.id} disabled={kaydediliyor}
               onClick={() => degerlendir(z.id)}
-              className={`rounded-xl border px-2 py-3 text-sm font-semibold transition-colors disabled:opacity-50 sm:text-base ${z.renk} ${aktif.zorluk === z.id ? "ring-2 ring-current ring-offset-2 ring-offset-transparent" : ""}`}>{z.ad}</button>)}
+              className={`rounded-xl border px-2 py-3 text-sm font-semibold transition-colors disabled:opacity-50 sm:text-base ${z.renk} ${aktif.zorluk === z.id ? "ring-2 ring-current ring-offset-2 ring-offset-transparent" : ""}`}>
+              {z.ad}<span className={`mt-0.5 block text-xs font-medium ${ikincil}`}>{aktif.tekrarSureleri[z.id] === null ? "Listeden çıkar" : `${aktif.tekrarSureleri[z.id]} gün`}</span>
+            </button>)}
           </div>
           <p className={`mt-4 text-xs ${ikincil}`}>Değerlendirmeniz kartın sonraki tekrar tarihini belirler.</p>
         </div>}

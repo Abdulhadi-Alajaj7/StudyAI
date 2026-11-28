@@ -17,6 +17,7 @@ function TekrarOturumu({ dersId, isDark }) {
     const [index, setIndex] = useState(0);
     const [cevapAcik, setCevapAcik] = useState(false);
     const [hata, setHata] = useState("");
+    const [bilgi, setBilgi] = useState("");
     const [yenileme, setYenileme] = useState(0);
     const [kaydediliyor, setKaydediliyor] = useState(false);
     const istekRef = useRef(null);
@@ -52,6 +53,7 @@ function TekrarOturumu({ dersId, isDark }) {
         istekRef.current = controller;
         setKaydediliyor(true);
         setHata("");
+        setBilgi("");
         const surum = aktif.__v ?? 0;
         const siradakiId = kartlar[(index + 1) % kartlar.length]?._id;
         const listeyiUygula = data => {
@@ -71,7 +73,9 @@ function TekrarOturumu({ dersId, isDark }) {
             }
 
             const kalan = kartlar.filter(kart => kart._id !== aktif._id);
-            const tamamlanan = veri.tamamlanan + (islem === "degerlendir" ? 1 : 0);
+            const otomatikCikarildi = islem === "degerlendir" && data.kart.zorluk === null;
+            if (otomatikCikarildi) setBilgi("Bu kartı art arda iki kez kolay olarak değerlendirdiğin için tekrar listesinden çıkarıldı.");
+            const tamamlanan = veri.tamamlanan + (islem === "degerlendir" && !otomatikCikarildi ? 1 : 0);
             listeyiUygula({ kartlar: kalan, bekleyen: kalan.length, tamamlanan, toplam: kalan.length + tamamlanan });
             const guncel = await api.tekrarlariGetir(dersId, controller.signal).catch(() => null);
             if (!controller.signal.aborted && guncel) listeyiUygula(guncel.data);
@@ -115,6 +119,7 @@ function TekrarOturumu({ dersId, isDark }) {
                 setHata(""); setYenileme(n => n + 1);
             }}>Yeniden Dene</button>}
         </div>}
+        {bilgi && <p role="status" className={`rounded-xl border p-4 text-sm ${panel}`}>{bilgi}</p>}
         {!veri && !hata && <p role="status" className={ikincil}>Tekrarlar yükleniyor...</p>}
 
         {veri && <>
@@ -141,7 +146,6 @@ function TekrarOturumu({ dersId, isDark }) {
             {aktif ? <>
                 <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
                     <span className="min-w-0 break-words">{aktif.konuBasligi || "Ders Çalışma Kartı"}</span>
-                    <span className={`font-semibold ${isDark ? "text-violet-300" : "text-violet-700"}`}>Seviye {aktif.tekrarSeviyesi ?? 1}</span>
                 </div>
                 <CalismaKartiYuzleri key={aktif._id} aktif={aktif} cevapAcik={cevapAcik} kaydediliyor={kaydediliyor}
                     cevir={cevir} yildizDegistir={() => kaydet({ yildizli: !aktif.yildizli })} panel={panel} ikincil={ikincil} />
@@ -149,7 +153,7 @@ function TekrarOturumu({ dersId, isDark }) {
                     {zorluklar.map(([kod, ad, acik, koyu]) => <button key={kod} type="button" disabled={kaydediliyor}
                         onClick={() => kaydet({ zorluk: kod, goruldu: true }, "degerlendir")}
                         className={`rounded-xl border px-2 py-3 text-sm font-semibold disabled:opacity-50 sm:text-base ${isDark ? koyu : acik}`}>
-                        {ad}<span className={`mt-0.5 block text-xs font-medium ${ikincil}`}>{aktif.tekrarSureleri[kod]} gün</span>
+                        {ad}<span className={`mt-0.5 block text-xs font-medium ${ikincil}`}>{aktif.tekrarSureleri[kod] === null ? "Listeden çıkar" : `${aktif.tekrarSureleri[kod]} gün`}</span>
                     </button>)}
                 </div>}
                 <div className="flex flex-wrap items-center justify-between gap-3 text-sm font-medium">

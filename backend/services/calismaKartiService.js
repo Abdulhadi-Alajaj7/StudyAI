@@ -2,7 +2,7 @@ import Ders from "../models/Ders.js";
 import CalismaKarti from "../models/CalismaKarti.js";
 import KonuHaritasi from "../models/KonuHaritasi.js";
 import { konuKartSurumuGerekliMi } from "./dersKartPlanlama.mjs";
-import { gunlukTekrarlariGetir, tekrarPlaniOlustur, tekrarPlaniSifirla } from "./aralikliTekrarService.js";
+import { gunlukTekrarlariGetir, tekrarPlaniOlustur, tekrarPlaniSifirla, tekrarSecenekleriyleKart } from "./aralikliTekrarService.js";
 
 export class CalismaKartiHatasi extends Error {
     constructor(message, status = 422, kod = "KART_HATASI") {
@@ -44,7 +44,7 @@ export const calismaKartlariDurumunuGetir = async ({ kullaniciId, dersId }, d = 
             .sort({ createdAt: 1, _id: 1 }).lean()
         : [];
     return {
-        kartlar, tamamlandi, yeniKonuKartlariGerekli,
+        kartlar: kartlar.map(tekrarSecenekleriyleKart), tamamlandi, yeniKonuKartlariGerekli,
         dersKartTamamlandi: tamamlandi,
         uretimSuruyor,
         uretimHatasi: !uretimSuruyor
@@ -110,9 +110,9 @@ export const calismaKartiDurumuGuncelle = async ({
         const mevcut = await x.KartModel.findOne(filtre).lean();
         if (!mevcut) throw new CalismaKartiHatasi("Kart bulunamadı.", 404);
         if ((mevcut.__v ?? 0) !== surum) throw tekrarSurumuDegisti();
-        return tekrarDegisikliginiKaydet(x, filtre, surum, {
-            ...set, ...tekrarPlaniOlustur(mevcut.tekrarSeviyesi, zorluk, x.simdi())
-        });
+        const plan = tekrarPlaniOlustur(mevcut.ardisikKolaySayisi, zorluk, x.simdi());
+        const kart = await tekrarDegisikliginiKaydet(x, filtre, surum, plan.zorluk === null ? plan : { ...set, ...plan });
+        return tekrarSecenekleriyleKart(kart);
     }
     if (!Object.keys(set).length) {
         throw new CalismaKartiHatasi("Geçersiz kart durumu.", 400);

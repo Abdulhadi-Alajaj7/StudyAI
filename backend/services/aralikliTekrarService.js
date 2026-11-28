@@ -1,5 +1,4 @@
-const GUNLER = [1, 3, 7, 14];
-const ZORLUKLAR = ["zor", "orta", "kolay"];
+const GUNLER = { zor: 1, orta: 2, kolay: 3 };
 const TAKVIM = new Intl.DateTimeFormat("en", {
     timeZone: "Europe/Istanbul", year: "numeric", month: "numeric", day: "numeric",
 });
@@ -16,22 +15,24 @@ const gunBaslangici = (tarih, eklenecekGun = 0) => {
     return new Date(geceYarisi - dakikaFarki * 60_000);
 };
 
-const plan = (seviye, zorluk) => {
-    const mevcut = GUNLER[seviye - 1] ? seviye : 1;
-    const yeni = zorluk === "zor" ? 1 : zorluk === "kolay" ? Math.min(mevcut + 1, GUNLER.length) : mevcut;
-    return { seviye: yeni, gun: GUNLER[yeni - 1] };
-};
+const listedenCikarilacakMi = (ardisikKolaySayisi, zorluk) => zorluk === "kolay" && ardisikKolaySayisi === 1;
 
-export const tekrarPlaniOlustur = (seviye, zorluk, simdi) => {
-    const sonuc = plan(seviye, zorluk);
+export const tekrarPlaniOlustur = (ardisikKolaySayisi, zorluk, simdi) => {
+    if (listedenCikarilacakMi(ardisikKolaySayisi, zorluk)) return tekrarPlaniSifirla();
     return {
-        zorluk, tekrarSeviyesi: sonuc.seviye, sonTekrarTarihi: simdi,
-        sonrakiTekrarTarihi: gunBaslangici(simdi, sonuc.gun)
+        zorluk, ardisikKolaySayisi: zorluk === "kolay" ? 1 : 0, sonTekrarTarihi: simdi,
+        sonrakiTekrarTarihi: gunBaslangici(simdi, GUNLER[zorluk])
     };
 };
 
 export const tekrarPlaniSifirla = () => ({
-    zorluk: null, tekrarSeviyesi: 1, sonTekrarTarihi: null, sonrakiTekrarTarihi: null
+    zorluk: null, ardisikKolaySayisi: 0, sonTekrarTarihi: null, sonrakiTekrarTarihi: null
+});
+
+export const tekrarSecenekleriyleKart = (kart) => ({
+    ...kart,
+    ardisikKolaySayisi: kart.ardisikKolaySayisi ?? 0,
+    tekrarSureleri: { ...GUNLER, kolay: listedenCikarilacakMi(kart.ardisikKolaySayisi, "kolay") ? null : GUNLER.kolay }
 });
 
 export const gunlukTekrarlariGetir = async (KartModel, filtre, simdi) => {
@@ -47,10 +48,7 @@ export const gunlukTekrarlariGetir = async (KartModel, filtre, simdi) => {
     }).sort({ sonrakiTekrarTarihi: 1, _id: 1 }).lean();
 
     const kartlar = kayitlar.filter(kart => kart.sonrakiTekrarTarihi && kart.sonrakiTekrarTarihi < yarin)
-        .map(kart => ({
-            ...kart,
-            tekrarSureleri: Object.fromEntries(ZORLUKLAR.map(zorluk => [zorluk, plan(kart.tekrarSeviyesi, zorluk).gun]))
-        }));
+        .map(tekrarSecenekleriyleKart);
     const tamamlanan = kayitlar.filter(kart => kart.sonTekrarTarihi >= bugun && kart.sonTekrarTarihi < yarin).length;
     return { kartlar, bekleyen: kartlar.length, tamamlanan, toplam: kartlar.length + tamamlanan };
 };

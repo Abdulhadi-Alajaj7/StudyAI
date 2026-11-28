@@ -13,7 +13,7 @@ const kullanici = { id: dersId, kullaniciAdi: "Ahmet Yılmaz", email: "ahmet@exa
 const kartlar = [1, 2, 3].map(n => ({
     bekliyor: n < 3, tamamlandi: false, kart: {
         _id: String(n), soru: `Soru yüzü ${n}`, cevap: `Cevap yüzü ${n}`, goruldu: false, yildizli: n === 2,
-        tekrarSeviyesi: n < 3 ? 2 : 1, tekrarSureleri: { zor: 1, orta: 3, kolay: 7 }
+        ardisikKolaySayisi: n === 2 ? 1 : 0, tekrarSureleri: { zor: 1, orta: 2, kolay: n === 2 ? null : 3 }
     }
 }));
 const yazmalar = [], hatalar = [], gecik = ms => new Promise(r => setTimeout(r, ms));
@@ -67,11 +67,13 @@ const q=new URLSearchParams(location.search);localStorage.setItem('studyai-theme
                         assert.equal(body.surum, x.kart.__v ?? 0);
                         if (hataSonraki) { hataSonraki = false; status = 503; }
                         else {
+                            const cikarildi = islem || (body.zorluk === "kolay" && x.kart.ardisikKolaySayisi === 1);
                             x.bekliyor = false;
-                            x.tamamlandi = !islem;
+                            x.tamamlandi = !cikarildi;
                             x.kart.__v = body.surum + 1;
-                            x.kart.zorluk = islem ? null : body.zorluk;
-                            x.kart.tekrarSeviyesi = islem ? 1 : 3;
+                            x.kart.zorluk = cikarildi ? null : body.zorluk;
+                            x.kart.ardisikKolaySayisi = x.kart.zorluk === "kolay" ? 1 : 0;
+                            x.kart.tekrarSureleri.kolay = x.kart.ardisikKolaySayisi ? null : 3;
                         }
                     } else Object.assign(x.kart, body);
                     data = { kart: x.kart };
@@ -111,7 +113,7 @@ const q=new URLSearchParams(location.search);localStorage.setItem('studyai-theme
     await cevir(); await bekle(gorunurYuz("Cevap yüzü 1"));
     assert.equal(await evaluate(gorunurYuz("Soru yüzü 1")), false);
     assert.ok(await evaluate(`${sayfa}.querySelector('[aria-hidden="true"][style*="backface"]').parentElement.style.transform === 'rotateY(180deg)'`));
-    assert.deepEqual(await evaluate(`[...${sayfa}.querySelectorAll('[aria-label="Tekrar değerlendirmesi"] button')].map(e=>e.lastElementChild.textContent)`), ["1 gün", "3 gün", "7 gün"]);
+    assert.deepEqual(await evaluate(`[...${sayfa}.querySelectorAll('[aria-label="Tekrar değerlendirmesi"] button')].map(e=>e.lastElementChild.textContent)`), ["1 gün", "2 gün", "3 gün"]);
     await tikla("Sonraki Kart"); await bekle(gorunurYuz("Soru yüzü 2"));
     assert.ok(await evaluate(ilerleme("0 / 2")));
     assert.deepEqual(yazmalar, [{ id: "1", islem: undefined, body: { goruldu: true } }]);
@@ -124,8 +126,11 @@ const q=new URLSearchParams(location.search);localStorage.setItem('studyai-theme
     await bekle(ilerleme("1 / 2"));
     assert.equal(yazmalar.filter(x => x.body.zorluk).length, 2); // Bir hata, bir başarılı tekrar.
     await bekle(gorunurYuz("Soru yüzü 2"));
-    await tikla("Tekrar Listesinden Çıkar");
+    assert.ok(await evaluate(`[...${sayfa}.querySelectorAll('button')].some(e=>e.innerText.includes('Tekrar Listesinden Çıkar'))`));
+    await cevir(); await bekle(metin("Listeden çıkar"));
+    await tikla("Kolay");
     await bekle(`${ilerleme("1 / 1")} && ${metin("Bugünkü tekrarlarını tamamladın.")}`);
+    assert.ok(await evaluate(metin("Bu kartı art arda iki kez kolay olarak değerlendirdiğin için tekrar listesinden çıkarıldı.")));
 
     await cdp("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
     await ac(tekrarYolu, "light"); await bekle(ilerleme("1 / 1"));

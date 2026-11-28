@@ -3,7 +3,7 @@ const kaynakSchema=new mongoose.Schema({kod:{type:String},islemeId:{type:mongoos
 const schema=new mongoose.Schema({kullaniciId:{type:mongoose.Schema.Types.ObjectId,ref:'Kullanici',required:true,immutable:true},dersId:{type:mongoose.Schema.Types.ObjectId,ref:'Ders',required:true,immutable:true},konuId:{type:String,trim:true,maxlength:200,immutable:true},konuBasligi:{type:String,trim:true,maxlength:500,immutable:true},soruKimligi:{type:String,trim:true,maxlength:64},uretimYontemi:{type:String,enum:['gemini','kaynak','genel'],default:'gemini'},soru:{type:String,required:true,trim:true,maxlength:1000},cevap:{type:String,required:true,trim:true,maxlength:2000},kaynaklar:{type:[kaynakSchema],required:true,validate:function(v){return Array.isArray(v)&&(v.length>0||this.uretimYontemi==='genel');}},goruldu:{type:Boolean,default:false},zorluk:{type:String,enum:['zor','orta','kolay',null],default:null},yildizli:{type:Boolean,default:false}},{timestamps:true});
 schema.index({kullaniciId:1,dersId:1,konuId:1,createdAt:1});
 schema.add({
-    tekrarSeviyesi: { type: Number, enum: [1, 2, 3, 4], default: 1 },
+    ardisikKolaySayisi: { type: Number, enum: [0, 1], default: 0 },
     sonTekrarTarihi: { type: Date, default: null },
     sonrakiTekrarTarihi: { type: Date, default: null }
 });
