@@ -129,6 +129,7 @@ const soruSchema = new mongoose.Schema({
         enum: ["A", "B", "C", "D", null],
         default: null,
     },
+    tekrarSoruId: { type: mongoose.Schema.Types.ObjectId, immutable: true },
     isaretli: {
         type: Boolean,
         default: false,
@@ -240,7 +241,9 @@ const testSchema = new mongoose.Schema(
             default: [],
             immutable: true,
             validate: {
-                validator: (kaynaklar) => Array.isArray(kaynaklar) && kaynaklar.length > 0,
+                validator(kaynaklar) {
+                    return Array.isArray(kaynaklar) && (kaynaklar.length > 0 || this.kaynak === "tekrar");
+                },
                 message: "Test en az bir doğrulanmış kaynak sürümüne bağlı olmalıdır.",
             },
         },
@@ -250,6 +253,7 @@ const testSchema = new mongoose.Schema(
             default: "",
             immutable: true,
         },
+        kaynak: { type: String, enum: ["tekrar"], immutable: true },
         durum: {
             type: String,
             enum: ["hazirlandi", "devam_ediyor", "tamamlandi"],

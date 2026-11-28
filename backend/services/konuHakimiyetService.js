@@ -28,6 +28,7 @@ export const konuHakimiyetiniGetir = async (dersId, kullaniciId) => {
     const testler = Test.find({
         ...filtre,
         durum: "tamamlandi",
+        kaynak: { $ne: "tekrar" },
         "sorular.konuId": { $in: [...sayimlar.keys()] }
     })
         .select("sorular._id sorular.konuId sorular.dogruCevap sorular.ogrenciCevabi")

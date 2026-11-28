@@ -14,7 +14,8 @@ const dersId = "100000000000000000000001";
 const digerDersId = "100000000000000000000002";
 const kullaniciId = "200000000000000000000001";
 const digerKullaniciId = "200000000000000000000002";
-const eslesir = (kayit, filtre) => Object.entries(filtre).every(([alan, deger]) => kayit[alan] === deger);
+const eslesir = (kayit, filtre) => Object.entries(filtre).every(([alan, deger]) =>
+    deger?.$ne !== undefined ? kayit[alan] !== deger.$ne : kayit[alan] === deger);
 let haritalar, testler, soruId, testId, okunanTestler, kapananCursorlar;
 
 const harita = {
@@ -80,6 +81,14 @@ test("test yokken ve dört soru varken yüzde verilmez", async () => {
 test("beş soruda yüzde hesaplanır, boşlar toplamda ve ayrı sayılır", async () => {
     testEkle("2026-01-01", sorular(["A", "A", "B", null, undefined]));
     assert.deepEqual(await analiz(), beklenen(2, 1, 2, 40, "zayif"));
+});
+
+test("tekrar testleri özgün konu kimliğini taşısa da son 20 soru penceresine girmez", async () => {
+    testEkle("2026-01-01", sorular(["A", "A", "B", null, "A"]));
+    const once = await analiz();
+    testEkle("2026-01-02", sorular(Array(20).fill("A")), { kaynak: "tekrar" });
+    assert.deepEqual(await analiz(), once);
+    assert.equal(once.yuzde, 60);
 });
 
 test("yüzde 50 ve 80 dahil, alt konular birbirinden bağımsız sınıflandırılır", async () => {

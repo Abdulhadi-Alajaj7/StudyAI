@@ -13,6 +13,7 @@ import sohbetRoutes from "./routes/sohbetRoutes.js";
 import dersOzetiRoutes from "./routes/dersOzetiRoutes.js";
 import testRoutes from "./routes/testRoutes.js";
 import calismaKartiRoutes from "./routes/calismaKartiRoutes.js";
+import yanlislarRoutes from "./routes/yanlislarRoutes.js";
 
 import { zamanlanmisTemizlikleriCalistir } from "./services/geciciDersTemizlemeService.js";
 import { baslangicIslemleriniKurtar } from "./services/baslangicKurtarmaService.js";
@@ -44,6 +45,7 @@ app.use("/dersler", dersOzetiRoutes);
 app.use("/dersler", testRoutes);
 app.use("/dersler", calismaKartiRoutes);
 app.use("/materyaller", materyalRoutes);
+app.use("/yanlislarim", yanlislarRoutes);
 
 // Ana route
 app.get("/", (req, res) => {
