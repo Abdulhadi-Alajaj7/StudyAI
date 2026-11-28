@@ -97,21 +97,26 @@ const q=new URLSearchParams(location.search);localStorage.setItem('studyai-theme
     assert.ok(await evaluate(`${kok}.querySelector('footer button').disabled`));
 
     senaryo = "normal"; await ac(sayfa); await kayitSayisi(4);
-    assert.deepEqual(await evaluate(`[...${kok}.querySelectorAll('.tabular-nums')].map(e=>e.textContent)`), ["1", "1", "2"]);
-    await evaluate(`${kok}.querySelector('summary').click()`);
+    assert.deepEqual(await evaluate(`[...${kok}.querySelectorAll('.tabular-nums')].map(e=>e.textContent)`), ["2", "1", "1"]);
+    await evaluate(`${kok}.querySelector('article h2').click()`);
     for (const metin of ["Seçenek A", "Seçenek D", "Doğru cevap A", "Cevabın B", "Kaynaklı açıklama", "ders.pdf"]) {
         assert.ok(await evaluate(`${kok}.querySelector('details[open]').innerText.includes(${JSON.stringify(metin)})`), metin);
     }
+    await evaluate(`${kok}.querySelector('details li').click()`);
+    assert.ok(await evaluate(`${kok}.querySelector('details').open`));
+    await evaluate(`${kok}.querySelector('summary').click()`);
+    assert.ok(await evaluate(`!${kok}.querySelector('details').open`));
     assert.ok(await evaluate(`${kok}.querySelector('label input[type=checkbox]').disabled`));
     await kartSec(0);
+    assert.ok(await evaluate(`!${kok}.querySelector('details').open`));
     assert.ok(await evaluate(`${kok}.querySelectorAll('article input')[3].disabled`));
-    await filtre(1, dersId); await kayitSayisi(3);
-    await filtre(0, `${dersId}:graf`); await kayitSayisi(2);
+    await filtre(0, dersId); await kayitSayisi(3);
+    await filtre(1, `${dersId}:graf`); await kayitSayisi(2);
     await sekme("Düzeltilen"); await kayitSayisi(1);
-    assert.deepEqual(await evaluate(`[...${kok}.querySelectorAll('.tabular-nums')].map(e=>e.textContent)`), ["1", "0", "0"]);
+    assert.deepEqual(await evaluate(`[...${kok}.querySelectorAll('.tabular-nums')].map(e=>e.textContent)`), ["0", "0", "1"]);
     await sekme("Yanlış"); await kayitSayisi(1);
     await sekme("Boş"); await kayitSayisi(0);
-    await filtre(0, ""); await kayitSayisi(1);
+    await filtre(1, ""); await kayitSayisi(1);
     await sekme("Tümü"); await kayitSayisi(3);
 
     await cdp("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
