@@ -10,6 +10,10 @@ const kurallar = {
     iyi: { zorluk: "zor", soruSayisi: 10, tanilayici: false },
 };
 
+const adaptifAltKonular = (harita) => (harita?.anaKonular || []).flatMap(ana => ana.altKonular || [])
+    .filter(({ konuId }) => typeof konuId === "string" && konuId.length > 0 &&
+        konuId.length <= 200 && konuId === konuId.trim());
+
 export const adaptifTestOnerisiniGetir = async ({ dersId, kullaniciId }) => {
     if (!await Ders.exists({ _id: dersId, kullaniciId, temizleniyor: { $ne: true } })) {
         throw new TestSistemiHatasi("Ders bulunamadı veya bu ders için yetkiniz yok.", {
@@ -18,12 +22,18 @@ export const adaptifTestOnerisiniGetir = async ({ dersId, kullaniciId }) => {
     }
     const harita = await KonuHaritasi.findOne({ dersId, kullaniciId, durum: "hazir" })
         .select("anaKonular.altKonular.konuId anaKonular.altKonular.baslik").lean();
-    const altKonular = (harita?.anaKonular || []).flatMap(ana => ana.altKonular || [])
-        .filter(({ konuId }) => typeof konuId === "string" && konuId.length > 0 &&
-            konuId.length <= 200 && konuId === konuId.trim());
+    const altKonular = adaptifAltKonular(harita);
     if (!altKonular.length) return null;
 
     const analiz = await konuHakimiyetiniGetir(dersId, kullaniciId);
+    return altKonulardanOneriGetir(altKonular, analiz);
+};
+
+export const analizdenAdaptifTestOnerisiGetir = (harita, analiz) => (
+    harita?.durum === "hazir" ? altKonulardanOneriGetir(adaptifAltKonular(harita), analiz) : null
+);
+
+const altKonulardanOneriGetir = (altKonular, analiz) => {
     const hakimiyetler = new Map(analiz.map(konu => [konu.konuId, konu]));
     const adaylar = altKonular.map(({ konuId, baslik }) => {
         const hakimiyet = hakimiyetler.get(konuId);

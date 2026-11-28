@@ -35,6 +35,13 @@ export const tekrarSecenekleriyleKart = (kart) => ({
     tekrarSureleri: { ...GUNLER, kolay: listedenCikarilacakMi(kart.ardisikKolaySayisi, "kolay") ? null : GUNLER.kolay }
 });
 
+const tekrarVadesiGeldiMi = (kart, yarin) => kart.sonrakiTekrarTarihi != null && kart.sonrakiTekrarTarihi < yarin;
+
+export const bekleyenTekrarSayisiniHesapla = (kartlar, simdi) => {
+    const yarin = gunBaslangici(simdi, 1);
+    return kartlar.filter(kart => tekrarVadesiGeldiMi(kart, yarin)).length;
+};
+
 export const gunlukTekrarlariGetir = async (KartModel, filtre, simdi) => {
     const bugun = gunBaslangici(simdi);
     const yarin = gunBaslangici(simdi, 1);
@@ -47,7 +54,7 @@ export const gunlukTekrarlariGetir = async (KartModel, filtre, simdi) => {
         ]
     }).sort({ sonrakiTekrarTarihi: 1, _id: 1 }).lean();
 
-    const kartlar = kayitlar.filter(kart => kart.sonrakiTekrarTarihi && kart.sonrakiTekrarTarihi < yarin)
+    const kartlar = kayitlar.filter(kart => tekrarVadesiGeldiMi(kart, yarin))
         .map(tekrarSecenekleriyleKart);
     const tamamlanan = kayitlar.filter(kart => kart.sonTekrarTarihi >= bugun && kart.sonTekrarTarihi < yarin).length;
     return { kartlar, bekleyen: kartlar.length, tamamlanan, toplam: kartlar.length + tamamlanan };

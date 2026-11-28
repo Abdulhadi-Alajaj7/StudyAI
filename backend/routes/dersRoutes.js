@@ -17,6 +17,7 @@ import kimlikDogrula from "../middleware/auth.js";
 import { dersHazirlamayiBaslat, dersHazirlamaDurumu, haritaIcinOnayGerekli } from "../controllers/dersHazirlamaController.js";
 import { semantikArama } from "../controllers/semanticAramaController.js";
 import { dersKonuHakimiyetiniGetir } from "../controllers/konuHakimiyetController.js";
+import { dersGenelBakisiGetir } from "../controllers/dersGenelBakisController.js";
 
 const router = express.Router();
 
@@ -27,6 +28,7 @@ router.post("/", kimlikDogrula, dersOlustur);
 router.get("/", kimlikDogrula, dersleriGetir);
 
 router.get("/:id", kimlikDogrula, dersGetir);
+router.get("/:id/genel-bakis", kimlikDogrula, dersGenelBakisiGetir);
 
 router.put("/:id", kimlikDogrula, dersGuncelle);
 

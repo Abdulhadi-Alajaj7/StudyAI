@@ -19,6 +19,8 @@ import {
 
 import api from "../api";
 import DersGorunumSimgesi from "./DersGorunumSimgesi";
+import { kullaniciHataMesaji } from "../utils/kullaniciHatasi.mjs";
+import { performansYuzdesi } from "../utils/dersPerformansSunumu.mjs";
 import {
     dersDetayTablari,
     dersDetayYolu,
@@ -40,6 +42,8 @@ function DersDetayLayout() {
     const { dersId } = useParams();
     const navigate = useNavigate();
     const location = useLocation();
+    const genelBakisAcik = /^\/dersler\/[^/]+\/?$/.test(location.pathname);
+    const sonucAcik = location.pathname.endsWith("/sonuc");
     const sohbetSayfasi = /^\/dersler\/[^/]+\/sohbet\/?$/.test(location.pathname);
     const gecisDersi = String(location.state?.ders?._id || "") === dersId
         ? location.state.ders
@@ -49,6 +53,28 @@ function DersDetayLayout() {
     const [ders, setDers] = useState(gecisDersi);
     const [yukleniyor, setYukleniyor] = useState(!gecisDersi);
     const [hata, setHata] = useState("");
+    const [performans, setPerformans] = useState(null);
+    const [performansYenileme, setPerformansYenileme] = useState(0);
+
+    useEffect(() => {
+        if (!gecerliDersKimligiMi(dersId)) return;
+        const controller = new AbortController();
+        const kimlik = { dersId, genelBakisAcik, sonucAcik, performansYenileme };
+        api.get(`${dersDetayYolu(dersId, "genel-bakis")}${genelBakisAcik ? "" : "?ozet=hakimiyet"}`, {
+            withCredentials: true, signal: controller.signal
+        }).then(({ data }) => {
+            if (!controller.signal.aborted) setPerformans({ ...kimlik, veri: data });
+        }).catch(err => {
+            if (!controller.signal.aborted) {
+                setPerformans({ ...kimlik, hata: kullaniciHataMesaji(err, "Ders performansı yüklenemedi.") });
+            }
+        });
+        return () => controller.abort();
+    }, [dersId, genelBakisAcik, sonucAcik, performansYenileme]);
+
+    const guncelPerformans = performans?.dersId === dersId && performans.genelBakisAcik === genelBakisAcik &&
+        performans.sonucAcik === sonucAcik && performans.performansYenileme === performansYenileme ? performans : null;
+    const hakimiyet = guncelPerformans?.veri?.genelHakimiyet;
 
     useEffect(() => {
         const controller = new AbortController();
@@ -98,7 +124,7 @@ function DersDetayLayout() {
     const kenarlik = isDark ? "border-[#26334A]" : "border-[#E7E5EF]";
     const altBilgiler = [ders?.dersKodu, ders?.donem].filter(Boolean);
 
-    if (yukleniyor) {
+    if (yukleniyor || (ders && String(ders._id).toLowerCase() !== dersId?.toLowerCase() && !hata)) {
         return (
             <div
                 className="mx-auto flex min-h-[420px] max-w-[1440px] items-center justify-center"
@@ -155,7 +181,9 @@ function DersDetayLayout() {
                                             : "border-indigo-200 bg-indigo-50 text-[#4F46E5]"
                                     }`}
                                 >
-                                    Genel Hâkimiyet: Veri yok
+                                    Genel Hâkimiyet: {hakimiyet
+                                        ? (hakimiyet.yuzde === null ? "Yeterli Veri Yok" : performansYuzdesi(hakimiyet.yuzde))
+                                        : guncelPerformans?.hata ? "Yüklenemedi" : "Yükleniyor…"}
                                 </span>
                             </div>
 
@@ -208,7 +236,10 @@ function DersDetayLayout() {
                 </nav>
             </header>
 
-            <Outlet context={{ isDark, ders }} />
+            <Outlet context={{
+                isDark, ders, performans: guncelPerformans,
+                performansiYenile: () => setPerformansYenileme(sayi => sayi + 1)
+            }} />
         </div>
     );
 }

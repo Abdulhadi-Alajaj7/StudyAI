@@ -55,6 +55,7 @@ const q=new URLSearchParams(location.search);localStorage.setItem('studyai-theme
             if (request.method !== "OPTIONS") {
                 const { pathname } = u;
                 if (pathname === "/auth/profil") data = { kullanici };
+                else if (pathname.endsWith("/genel-bakis")) data = { genelHakimiyet: { yuzde: null } };
                 else if (pathname === dersYolu) data = { ders: { _id: dersId, dersAdi: "İstatistik", materyallerOnaylandi: true } };
                 else if (pathname === dersYolu + "/konu-haritasi") data = { harita };
                 else if (pathname === dersYolu + "/konu-hakimiyeti") data = { altKonular: [] };

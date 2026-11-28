@@ -56,6 +56,7 @@ const q=new URLSearchParams(location.search);localStorage.setItem('studyai-theme
             if (request.method !== "OPTIONS") {
                 const { pathname } = u;
                 if (pathname === "/auth/profil") data = { kullanici };
+                else if (pathname.endsWith("/genel-bakis")) data = { genelHakimiyet: { yuzde: null } };
                 else if (pathname === "/yanlislarim") data = { sorular: senaryo === "bos" ? [] : senaryo === "sinir" ? cokSoru : sorular };
                 else if (pathname === "/yanlislarim/tekrar-testleri") {
                     assert.equal(request.method, "POST");

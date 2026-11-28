@@ -2,7 +2,7 @@ import Ders from "../models/Ders.js";
 import CalismaKarti from "../models/CalismaKarti.js";
 import KonuHaritasi from "../models/KonuHaritasi.js";
 import { konuKartSurumuGerekliMi } from "./dersKartPlanlama.mjs";
-import { gunlukTekrarlariGetir, tekrarPlaniOlustur, tekrarPlaniSifirla, tekrarSecenekleriyleKart } from "./aralikliTekrarService.js";
+import { bekleyenTekrarSayisiniHesapla, gunlukTekrarlariGetir, tekrarPlaniOlustur, tekrarPlaniSifirla, tekrarSecenekleriyleKart } from "./aralikliTekrarService.js";
 
 export class CalismaKartiHatasi extends Error {
     constructor(message, status = 422, kod = "KART_HATASI") {
@@ -24,21 +24,28 @@ const dersGetir = async (x, kullaniciId, dersId) => {
     if (!ders) throw new CalismaKartiHatasi("Ders bulunamadı.", 404, "DERS_BULUNAMADI");
     return ders;
 };
-export const calismaKartlariDurumunuGetir = async ({ kullaniciId, dersId }, d = {}) => {
-    const x = bagimliliklar(d);
-    const ders = await dersGetir(x, kullaniciId, dersId);
+const konuKartSistemiMi = (ders) => String(ders.kartDersSurumImzasi || "").startsWith("konu-v2:");
+
+const kartDurumunuBelirle = (ders, harita) => {
     const yeniSistem = Boolean(ders.kartDersSurumImzasi);
     const uretimSuruyor = Boolean(ders.kartDersOtomatikAktif || ders.kartUretimToken);
-    const konuSistemi=String(ders.kartDersSurumImzasi||"").startsWith("konu-v2:");
-    const harita=ders.kartDersTamamlandi&&!konuSistemi
-        ? await x.KonuHaritasiModel?.findOne({kullaniciId,dersId,durum:"hazir"}).select("parcaAtamaSurumu").lean() : null;
-    const yeniKonuKartlariGerekli=konuKartSurumuGerekliMi(ders,harita);
+    const yeniKonuKartlariGerekli = konuKartSurumuGerekliMi(ders, harita);
     const tamamlandi = yeniSistem && Boolean(ders.kartDersTamamlandi) &&
         !uretimSuruyor && !yeniKonuKartlariGerekli;
     // Yarım üretilmiş kartlar ve eski kartlar öğrencinin önüne düşmez.
     // Tamamlanma anında bütün ders kartları tek defada açılır.
     const kartlarGosterilsin = !uretimSuruyor && !ders.kartDersOtomatikHataKodu &&
         !yeniKonuKartlariGerekli && (!yeniSistem || tamamlandi);
+    return { yeniSistem, uretimSuruyor, yeniKonuKartlariGerekli, tamamlandi, kartlarGosterilsin };
+};
+
+export const calismaKartlariDurumunuGetir = async ({ kullaniciId, dersId }, d = {}) => {
+    const x = bagimliliklar(d);
+    const ders = await dersGetir(x, kullaniciId, dersId);
+    const harita = ders.kartDersTamamlandi && !konuKartSistemiMi(ders)
+        ? await x.KonuHaritasiModel?.findOne({ kullaniciId, dersId, durum: "hazir" }).select("parcaAtamaSurumu").lean() : null;
+    const { yeniSistem, uretimSuruyor, yeniKonuKartlariGerekli, tamamlandi, kartlarGosterilsin } =
+        kartDurumunuBelirle(ders, harita);
     const kartlar = kartlarGosterilsin
         ? await x.KartModel.find({ kullaniciId, dersId })
             .sort({ createdAt: 1, _id: 1 }).lean()
@@ -53,6 +60,20 @@ export const calismaKartlariDurumunuGetir = async ({ kullaniciId, dersId }, d = 
         toplamGrupSayisi: yeniSistem ? Number(ders.kartDersToplamGrupSayisi || 0) : 0,
         islenenGrupSayisi: yeniSistem
             ? (ders.kartDersIslenenGrupImzalari || []).length : 0,
+    };
+};
+
+export const dersKartIstatistikleriniGetir = async (filtre, ders, harita, simdi = new Date()) => {
+    const hazirHarita = ders.kartDersTamamlandi && !konuKartSistemiMi(ders) && harita?.durum === "hazir" ? harita : null;
+    const { kartlarGosterilsin } = kartDurumunuBelirle(ders, hazirHarita);
+    const kartlar = await CalismaKarti.find(filtre).select("goruldu yildizli sonrakiTekrarTarihi -_id").lean();
+    const gorunen = kartlarGosterilsin ? kartlar : [];
+    const gorulen = gorunen.filter(kart => kart.goruldu).length;
+    return {
+        toplam: gorunen.length, gorulen, gorulmeyen: gorunen.length - gorulen,
+        yildizli: gorunen.filter(kart => kart.yildizli).length,
+        gorulmeYuzdesi: gorunen.length ? gorulen * 100 / gorunen.length : null,
+        bekleyenTekrar: bekleyenTekrarSayisiniHesapla(kartlar, simdi)
     };
 };
 export const calismaKartlariniListele = async (girdi, d = {}) =>

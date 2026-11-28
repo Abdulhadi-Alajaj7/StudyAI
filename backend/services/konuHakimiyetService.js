@@ -5,6 +5,10 @@ const SON_SORU_SINIRI = 20;
 const EN_AZ_SORU = 5;
 const CEVAP_SECENEKLERI = new Set(["A", "B", "C", "D"]);
 
+export const hakimiyetDurumunuGetir = yuzde => yuzde === null ? "yeterli_veri_yok"
+    : yuzde < 50 ? "zayif"
+        : yuzde < 80 ? "gelistirilmeli" : "iyi";
+
 // Tekrar testleri eklendiğinde kaynak bilgisi burada kontrol edilerek
 // tekrar denemeleri pencereyi ve sayımları etkilemeden dışlanabilir.
 const hakimiyetSorusuMu = (soru) => (
@@ -15,6 +19,10 @@ const hakimiyetSorusuMu = (soru) => (
 export const konuHakimiyetiniGetir = async (dersId, kullaniciId) => {
     const filtre = { dersId, kullaniciId };
     const harita = await KonuHaritasi.findOne(filtre).select("anaKonular.altKonular.konuId").lean();
+    return haritadanKonuHakimiyetiniGetir(filtre, harita);
+};
+
+export const haritadanKonuHakimiyetiniGetir = async (filtre, harita) => {
     const sayimlar = new Map();
     for (const ana of harita?.anaKonular || []) {
         for (const { konuId } of ana.altKonular || []) {
@@ -64,9 +72,6 @@ export const konuHakimiyetiniGetir = async (dersId, kullaniciId) => {
     return [...sayimlar.values()].map((sayim) => {
         const { soruSayisi, dogruSayisi } = sayim;
         const yuzde = soruSayisi < EN_AZ_SORU ? null : dogruSayisi * 100 / soruSayisi;
-        const durum = yuzde === null ? "yeterli_veri_yok"
-            : yuzde < 50 ? "zayif"
-                : yuzde < 80 ? "gelistirilmeli" : "iyi";
-        return { ...sayim, yuzde, durum };
+        return { ...sayim, yuzde, durum: hakimiyetDurumunuGetir(yuzde) };
     });
 };

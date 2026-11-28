@@ -68,6 +68,7 @@ const q=new URLSearchParams(location.search);localStorage.setItem('studyai-theme
                 istekler.push({ method: request.method, path: u.pathname });
                 assert.equal(request.method, "GET", "Bu sayfa veri değiştirmemeli");
                 if (u.pathname === "/auth/profil") data = { kullanici };
+                else if (u.pathname.endsWith("/genel-bakis")) data = { genelHakimiyet: { yuzde: null } };
                 else if (u.pathname === `/dersler/${dersId}` || u.pathname === `/dersler/${digerId}`) {
                     data = { ders: u.pathname.includes(digerId) ? { ...ders, _id: digerId, dersAdi: "Sayısal Yöntemler" } : ders };
                 } else if (u.pathname === `/dersler/${dersId}/konu-haritasi` || u.pathname === `/dersler/${digerId}/konu-haritasi`) {
