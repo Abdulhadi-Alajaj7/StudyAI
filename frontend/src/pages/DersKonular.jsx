@@ -11,6 +11,7 @@ function DersKonular() {
     const { dersId } = useParams();
     const [veri, setVeri] = useState({ dersId: null, harita: null, materyaller: [], haritaHatasi: "", materyalHatasi: "" });
     const [kartVerisi, setKartVerisi] = useState({ dersId: null, sayilar: null });
+    const [hakimiyetVerisi, setHakimiyetVerisi] = useState(null);
     useEffect(() => {
         const c = new AbortController();
         Promise.allSettled([
@@ -43,9 +44,23 @@ function DersKonular() {
         void oku();
         return () => { c.abort(); clearTimeout(zamanlayici); };
     }, [dersId]);
+    useEffect(() => {
+        const c = new AbortController();
+        api.get(`/dersler/${encodeURIComponent(dersId)}/konu-hakimiyeti`, { withCredentials: true, signal: c.signal })
+            .then(({ data }) => {
+                if (!c.signal.aborted) {
+                    setHakimiyetVerisi({ dersId, altKonular: new Map(data.altKonular.map(konu => [konu.konuId, konu])) });
+                }
+            })
+            .catch(() => {
+                if (!c.signal.aborted) setHakimiyetVerisi(null);
+            });
+        return () => c.abort();
+    }, [dersId]);
     const yukleniyor = veri.dersId !== dersId;
     return <DersKonuHaritasi key={dersId} ders={ders} isDark={isDark} harita={yukleniyor ? null : veri.harita}
         kartSayilari={kartVerisi.dersId === dersId ? kartVerisi.sayilar : null}
+        konuHakimiyeti={hakimiyetVerisi?.dersId === dersId ? hakimiyetVerisi.altKonular : null}
         materyaller={yukleniyor ? [] : veri.materyaller} haritaHatasi={veri.haritaHatasi} materyalHatasi={veri.materyalHatasi} yukleniyor={yukleniyor} />;
 }
 

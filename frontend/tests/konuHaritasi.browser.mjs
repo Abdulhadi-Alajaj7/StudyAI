@@ -20,6 +20,12 @@ const harita = { durum: "hazir", toplamAltKonuSayisi: 999, anaKonular: [
         { konuId: "dugum", baslik: "Düğümler ve kenarlar" }, { konuId: "dolasim", baslik: "Graf üzerinde dolaşım" }] },
     { konuId: "ozet", baslik: "Konu özeti", altKonular: [] }
 ] };
+const altKonular = [
+    { konuId: "asimptotik", durum: "zayif", yuzde: 40, soruSayisi: 10 },
+    { konuId: "karmasiklik", durum: "gelistirilmeli", yuzde: 50, soruSayisi: 10 },
+    { konuId: "dugum", durum: "iyi", yuzde: 80, soruSayisi: 5 },
+    { konuId: "dolasim", durum: "yeterli_veri_yok", yuzde: null, soruSayisi: 4 }
+];
 const materyaller = ["pdf", "doc", "docx", "ppt", "pptx", "txt"].map((uzanti, i) => ({
     _id: String(i), orijinalDosyaAdi: `Algoritma notları ${i + 1}.${uzanti}`, dosyaAdi: `sunucu-${i}.${uzanti}`,
     dosyaTuru: uzanti, durum: "hazir", ...(i === 1 ? {} : { dosyaBoyutu: 1024 * (i + 1) })
@@ -73,6 +79,11 @@ const q=new URLSearchParams(location.search);localStorage.setItem('studyai-theme
                         altKonular: Array.from({ length: 8 }, (_, j) => ({ konuId: `alt-${i}-${j}`, baslik: "AltBaşlık".repeat(18) }))
                     })) } };
                     else data = { harita, guncelMi: true };
+                } else if (u.pathname === `/dersler/${dersId}/konu-hakimiyeti` || u.pathname === `/dersler/${digerId}/konu-hakimiyeti`) {
+                    if (senaryo === "hakimiyet-hatasi") { status = 503; data = { hata: "Analiz yüklenemedi." }; }
+                    else data = { altKonular: u.pathname.includes(digerId) ? [] : altKonular };
+                } else if (u.pathname === `/dersler/${dersId}/calisma-kartlari` || u.pathname === `/dersler/${digerId}/calisma-kartlari`) {
+                    data = { kartlar: [{ konuId: "asimptotik" }, { konuId: "asimptotik" }] };
                 } else if (u.pathname === `/materyaller/ders/${dersId}` || u.pathname === `/materyaller/ders/${digerId}`) {
                     if (senaryo === "materyal-hatasi") { status = 503; data = { hata: "Materyaller yüklenemedi." }; }
                     else data = { materyaller: senaryo === "bos" || u.pathname.includes(digerId) ? [] : senaryo === "uzun" ? [{ ...materyaller[0], orijinalDosyaAdi: "UzunDosyaAdı".repeat(24) + ".pdf" }] : materyaller };
@@ -100,6 +111,15 @@ const q=new URLSearchParams(location.search);localStorage.setItem('studyai-theme
     await cdp("Emulation.setDeviceMetricsOverride", { width: 1440, height: 1350, deviceScaleFactor: 1, mobile: false });
     await ac(sayfa); await hazir();
     await sayilariDogrula(3, 4);
+    await bekle("document.querySelectorAll('.konu-alt .konu-hakimiyet').length===4");
+    await bekle("document.querySelector('[aria-label=\"2 çalışma kartı\"]')");
+    assert.deepEqual(await evaluate("[...document.querySelectorAll('.konu-hakimiyet')].map(e=>[...e.children].map(s=>s.textContent))"), [
+        ["Zayıf", "%40", "10 soru"],
+        ["Geliştirilmeli", "%50", "10 soru"],
+        ["İyi", "%80", "5 soru"],
+        ["Yeterli Veri Yok", "4 soru"]
+    ]);
+    assert.equal(await evaluate("document.querySelectorAll('.konu-ana .konu-hakimiyet').length"), 0);
     const konuStili = await evaluate("(()=>{const e=document.querySelector('.konu-ana');return {zemin:getComputedStyle(e).backgroundColor,kenar:getComputedStyle(e).borderColor,baslik:getComputedStyle(document.querySelector('.konu-ana-baslik')).fontSize}})()");
     assert.equal(await evaluate("document.querySelector('.konu-ders-koku h3').textContent"), ders.dersAdi);
     assert.deepEqual(await evaluate("[...document.querySelectorAll('.konu-dosya-adi')].map(e=>e.textContent)"), materyaller.map(m => m.orijinalDosyaAdi));
@@ -135,6 +155,9 @@ const q=new URLSearchParams(location.search);localStorage.setItem('studyai-theme
     await writeFile(mobil, Buffer.from((await cdp("Page.captureScreenshot", { format: "png", captureBeyondViewport: true, clip: { x: 0, y: 0, width: 390, height: Math.ceil(cssContentSize.height), scale: 1 } })).data, "base64"));
     await ac(sayfa, "light"); await hazir(); await tasmiyor();
     assert.equal(await evaluate("document.querySelector('.ders-konu-sayfasi').dataset.tema"), "acik");
+    await bekle("document.querySelectorAll('.konu-hakimiyet').length===4");
+    assert.ok(await evaluate("[...document.querySelectorAll('.konu-alt,.konu-hakimiyet')].every(e=>e.scrollWidth<=e.clientWidth+1)"));
+    await tasmiyor();
     senaryo = "uzun"; await ac(sayfa); await bekle("document.querySelectorAll('.konu-alt').length===120"); await tasmiyor();
     await sayilariDogrula(15, 120);
     assert.ok(await evaluate("[...document.querySelectorAll('.konu-alt,.konu-ana-sec,.konu-materyal')].every(e=>e.scrollWidth<=e.clientWidth+1)"), "Uzun başlıklar ve dosya adları kendi kartında kırılmalı");
@@ -149,6 +172,12 @@ const q=new URLSearchParams(location.search);localStorage.setItem('studyai-theme
     senaryo = "materyal-hatasi"; await ac(sayfa); await bekle("document.querySelector('.konu-materyal-paneli [role=alert]')");
     assert.equal(await evaluate("document.querySelectorAll('.konu-dali').length"), 3);
     assert.equal(await evaluate("document.querySelector('.konu-materyal-bos')"), null, "API hatası boş liste gibi gösterilmemeli");
+    senaryo = "hakimiyet-hatasi";
+    const oncekiAnalizIstekleri = istekler.filter(i => i.path.endsWith("/konu-hakimiyeti")).length;
+    await ac(sayfa); await hazir();
+    await bekle("document.querySelector('[aria-label=\"2 çalışma kartı\"]')");
+    assert.ok(istekler.filter(i => i.path.endsWith("/konu-hakimiyeti")).length > oncekiAnalizIstekleri);
+    assert.equal(await evaluate("document.querySelectorAll('.konu-hakimiyet').length"), 0);
     senaryo = "normal"; await ac(`/dersler/${digerId}/konular`); await bekle("document.querySelector('.konu-ana-baslik')?.textContent==='Kök bulma'");
     assert.equal(await evaluate("document.querySelector('.konu-ders-koku h3').textContent"), "Sayısal Yöntemler");
     assert.equal(await evaluate("document.querySelectorAll('.konu-alt,.konu-materyal,[aria-pressed=true]').length"), 0, "Önceki dersin verisi veya seçimi kalmamalı");

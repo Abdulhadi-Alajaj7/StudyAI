@@ -16,6 +16,7 @@ import {
 import kimlikDogrula from "../middleware/auth.js";
 import { dersHazirlamayiBaslat, dersHazirlamaDurumu, haritaIcinOnayGerekli } from "../controllers/dersHazirlamaController.js";
 import { semantikArama } from "../controllers/semanticAramaController.js";
+import { dersKonuHakimiyetiniGetir } from "../controllers/konuHakimiyetController.js";
 
 const router = express.Router();
 
@@ -37,6 +38,7 @@ router.get("/:id/hazirlama", kimlikDogrula, dersHazirlamaDurumu);
 
 // Konu Haritası Endpoint'leri
 router.get("/:id/konu-haritasi", kimlikDogrula, konuHaritasiniGetir);
+router.get("/:id/konu-hakimiyeti", kimlikDogrula, dersKonuHakimiyetiniGetir);
 router.post("/:id/konu-haritasi", kimlikDogrula, haritaIcinOnayGerekli);
 
 // Yalnızca kullanıcının kendi dersindeki aktif materyal sürümlerinde arama yapar.

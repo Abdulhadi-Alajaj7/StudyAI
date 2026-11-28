@@ -2,7 +2,24 @@ import { useId, useState } from "react";
 import { ChevronDownIcon, CheckIcon, RectangleStackIcon } from "@heroicons/react/24/outline";
 import "./DersKonuHaritasi.css";
 
-function KonuDali({ ana, index, secili, onSec, kartSayilari }) {
+const hakimiyetEtiketleri = {
+    zayif: "Zayıf",
+    gelistirilmeli: "Geliştirilmeli",
+    iyi: "İyi",
+    yeterli_veri_yok: "Yeterli Veri Yok"
+};
+const yuzdeBicimi = new Intl.NumberFormat("tr-TR", { style: "percent", maximumFractionDigits: 1 });
+
+function HakimiyetDurumu({ analiz }) {
+    if (!analiz) return null;
+    return <span className="konu-hakimiyet" data-durum={analiz.durum}>
+        <span>{hakimiyetEtiketleri[analiz.durum]}</span>
+        {analiz.yuzde !== null && <span>{yuzdeBicimi.format(analiz.yuzde / 100)}</span>}
+        <span>{analiz.soruSayisi} soru</span>
+    </span>;
+}
+
+function KonuDali({ ana, index, secili, onSec, kartSayilari, konuHakimiyeti }) {
     const [acik, setAcik] = useState(true);
     const id = useId();
     const altKonular = ana.altKonular || [];
@@ -24,7 +41,9 @@ function KonuDali({ ana, index, secili, onSec, kartSayilari }) {
                 <button type="button" className={`konu-alt ${secili === alt.konuId ? "konu-secili" : ""}`}
                     aria-pressed={secili === alt.konuId} onClick={() => onSec(alt.konuId)}>
                     <span className="konu-nokta" aria-hidden="true" /><span className="konu-yazi"><span className="konu-alt-baslik">{alt.baslik}</span>
-                        {alt.aciklama && <span className="konu-aciklama">{alt.aciklama}</span>}</span>
+                        {alt.aciklama && <span className="konu-aciklama">{alt.aciklama}</span>}
+                        <HakimiyetDurumu analiz={konuHakimiyeti?.get(alt.konuId)} />
+                    </span>
 
                     {kartSayilari !== null && <span className="konu-kart-sayisi" aria-label={`${kartSayilari[alt.konuId] || 0} çalışma kartı`}>
                         <RectangleStackIcon aria-hidden="true" />
@@ -37,8 +56,8 @@ function KonuDali({ ana, index, secili, onSec, kartSayilari }) {
     </li>;
 }
 
-export default function KonuHaritasiListesi({ anaKonular, kartSayilari = null }) {
+export default function KonuHaritasiListesi({ anaKonular, kartSayilari = null, konuHakimiyeti = null }) {
     const [secili, setSecili] = useState(null);
     return <ol className="konu-dallar" aria-label="Ders konuları">{anaKonular.map((ana, i) =>
-        <KonuDali key={ana.konuId || ana._id || i} ana={ana} index={i} secili={secili} onSec={setSecili} kartSayilari={kartSayilari} />)}</ol>;
+        <KonuDali key={ana.konuId || ana._id || i} ana={ana} index={i} secili={secili} onSec={setSecili} kartSayilari={kartSayilari} konuHakimiyeti={konuHakimiyeti} />)}</ol>;
 }
