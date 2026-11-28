@@ -1,8 +1,9 @@
-import { BookOpenIcon, Square3Stack3DIcon, DocumentTextIcon, FolderOpenIcon } from "@heroicons/react/24/outline";
+import { BookOpenIcon, Square3Stack3DIcon, DocumentTextIcon, FolderOpenIcon, SparklesIcon } from "@heroicons/react/24/outline";
+import { Link } from "react-router-dom";
 import { materyalSunumu } from "../utils/konuHaritasiSunumu.mjs";
 import KonuHaritasiListesi from "./KonuHaritasiListesi.jsx";
 
-export default function DersKonuHaritasi({ ders, harita, materyaller, isDark, yukleniyor, haritaHatasi, materyalHatasi, kartSayilari = null, konuHakimiyeti = null }) {
+export default function DersKonuHaritasi({ ders, harita, materyaller, isDark, yukleniyor, haritaHatasi, materyalHatasi, kartSayilari = null, konuHakimiyeti = null, adaptifTestYolu }) {
     const anaKonular = harita?.anaKonular || [];
     const altKonuSayisi = anaKonular.reduce((toplam, ana) => toplam + (ana.altKonular?.length || 0), 0);
     const aciklama = harita?.durum === "olusturuluyor" ? "Konu haritası hazırlanıyor. Hazır olduğunda burada görüntülenecek."
@@ -13,7 +14,11 @@ export default function DersKonuHaritasi({ ders, harita, materyaller, isDark, yu
             {!yukleniyor && !haritaHatasi && <dl className="konu-sayilari" aria-label="Konu sayıları">
                 <div><dt>Ana Konu</dt><dd>{anaKonular.length}</dd></div>
                 <div><dt>Alt Konu</dt><dd>{altKonuSayisi}</dd></div>
-            </dl>}</header>
+            </dl>}
+            <Link to={adaptifTestYolu} className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold ${isDark ? "border-violet-400/40 text-violet-300 hover:bg-violet-400/10" : "border-violet-300 text-violet-700 hover:bg-violet-50"}`}>
+                <SparklesIcon className="size-4" aria-hidden="true" /> Adaptif Test
+            </Link>
+        </header>
         <div className="konu-sayfa-yerlesim">
             <div className="konu-harita-karti">
                 <div className="konu-harita-doku" aria-hidden="true" />

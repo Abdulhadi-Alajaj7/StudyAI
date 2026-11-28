@@ -7,6 +7,14 @@ const istekAyarlari = (signal) => ({
 });
 
 export const testlerApiOlustur = (istemci = api) => ({
+    adaptifOneriGetir(dersId, signal) {
+        return istemci.get(`/dersler/${kimlik(dersId)}/adaptif-test/oneri`, istekAyarlari(signal));
+    },
+
+    adaptifTestBaslat(dersId, signal) {
+        return istemci.post(`/dersler/${kimlik(dersId)}/adaptif-test/baslat`, {}, istekAyarlari(signal));
+    },
+
     materyalleriGetir(dersId, signal) {
         return istemci.get(
             `/materyaller/ders/${kimlik(dersId)}`,

@@ -16,6 +16,7 @@ import {
 import { useNavigate, useOutletContext, useParams } from "react-router-dom";
 
 import OzetSecimDropdown from "../components/OzetSecimDropdown.jsx";
+import AdaptifTestKarti from "../components/AdaptifTestKarti.jsx";
 import testlerApi from "../services/testlerApi.mjs";
 import {
     konuSecenekleriniOlustur,
@@ -49,6 +50,7 @@ const kapsamlar = [
 const gizliKapsamArayuzuGorunur = false;
 const anaKonuSoruSayilari = [10, 15, 20];
 const altKonuSoruSayilari = [5, 10];
+const testTuruEtiketi = (kaynak) => kaynak === "adaptif" ? "Adaptif Test" : kaynak === "tekrar" ? "Tekrar Testi" : "Normal Test";
 const zorluklar = [
     { deger: "kolay", etiket: "Kolay" },
     { deger: "orta", etiket: "Orta" },
@@ -748,6 +750,8 @@ function DersTestler() {
                 )}
             </section>
 
+            <AdaptifTestKarti key={dersId} dersId={dersId} isDark={isDark} />
+
             <section className={`overflow-hidden rounded-2xl border shadow-sm ${kart}`}>
                 <div className={`flex items-center gap-3 border-b px-4 py-4 sm:px-5 ${altKenarlik}`}>
                     <span className={`flex h-9 w-9 items-center justify-center rounded-xl ${
@@ -809,6 +813,8 @@ function DersTestler() {
                                             {hedef.baslik}
                                         </h3>
                                         <p className={`mt-1 flex flex-wrap gap-x-2 gap-y-1 text-[11px] ${metinIkincil}`}>
+                                            <span>{testTuruEtiketi(test.kaynak)}</span>
+                                            <span aria-hidden="true">•</span>
                                             <span>{hedef.kapsam}</span>
                                             <span aria-hidden="true">•</span>
                                             <span>{test.soruSayisi} soru</span>
@@ -914,7 +920,7 @@ function DersTestler() {
                                         }`}>
                                             <h3 className={`text-[13px] font-bold ${metinAna}`}>{hedef.baslik}</h3>
                                             <p className={`mt-1 text-[11px] ${metinIkincil}`}>
-                                                {hedef.kapsam} · {test.soruSayisi} soru · {tarihiBicimlendir(test.tamamlanmaTarihi)}
+                                                {testTuruEtiketi(test.kaynak)} · {hedef.kapsam} · {test.soruSayisi} soru · {tarihiBicimlendir(test.tamamlanmaTarihi)}
                                             </p>
                                             <div className="mt-4 grid grid-cols-3 gap-2 text-center text-[11px]">
                                                 <span className="rounded-lg bg-emerald-500/10 px-2 py-2 text-emerald-500">{test.sonuc?.dogruSayisi ?? "—"} Doğru</span>
@@ -965,7 +971,10 @@ function DersTestler() {
                                             key={String(test._id)}
                                             className={`grid grid-cols-[minmax(210px,1.5fr)_100px_110px_170px_150px_145px_100px] items-center gap-3 border-b px-4 py-3.5 text-[11px] last:border-b-0 ${altKenarlik}`}
                                         >
-                                            <span className={`truncate font-bold ${metinAna}`} title={hedef.baslik}>{hedef.baslik}</span>
+                                            <div className="min-w-0">
+                                                <span className={`block truncate font-bold ${metinAna}`} title={hedef.baslik}>{hedef.baslik}</span>
+                                                <span className={metinIkincil}>{testTuruEtiketi(test.kaynak)}</span>
+                                            </div>
                                             <span className={metinIkincil}>{hedef.kapsam}</span>
                                             <span className={metinAna}>{test.soruSayisi}</span>
                                             <span className={metinAna}>

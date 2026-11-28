@@ -253,7 +253,7 @@ const testSchema = new mongoose.Schema(
             default: "",
             immutable: true,
         },
-        kaynak: { type: String, enum: ["tekrar"], immutable: true },
+        kaynak: { type: String, enum: ["tekrar", "adaptif"], immutable: true },
         durum: {
             type: String,
             enum: ["hazirlandi", "devam_ediyor", "tamamlandi"],

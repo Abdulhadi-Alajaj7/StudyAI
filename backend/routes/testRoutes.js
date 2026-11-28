@@ -1,6 +1,8 @@
 import express from "express";
 import kimlikDogrula from "../middleware/auth.js";
 import {
+    adaptifTestBaslat,
+    adaptifTestOnerisi,
     cevabiKaydet,
     devamEdenTestleriListele,
     sonGoruntulenenSoruyuGuncelle,
@@ -17,6 +19,8 @@ const router = express.Router();
 
 router.use(kimlikDogrula);
 
+router.get("/:dersId/adaptif-test/oneri", adaptifTestOnerisi);
+router.post("/:dersId/adaptif-test/baslat", adaptifTestBaslat);
 router.post("/:dersId/testler", testOlustur);
 router.get("/:dersId/testler/devam-eden", devamEdenTestleriListele);
 router.get("/:dersId/testler/tamamlanan", tamamlananTestleriListele);

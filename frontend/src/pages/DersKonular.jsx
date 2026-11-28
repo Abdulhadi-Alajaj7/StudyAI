@@ -5,6 +5,7 @@ import kartApi from "../services/calismaKartlariApi.mjs";
 import { konuKartSayilariniHesapla } from "../utils/konuHaritasiSunumu.mjs";
 import DersKonuHaritasi from "../components/DersKonuHaritasi.jsx";
 import { kullaniciHataMesaji } from "../utils/kullaniciHatasi.mjs";
+import { dersDetayYolu } from "../utils/dersDetayYollari.mjs";
 
 function DersKonular() {
     const { isDark, ders } = useOutletContext();
@@ -59,6 +60,7 @@ function DersKonular() {
     }, [dersId]);
     const yukleniyor = veri.dersId !== dersId;
     return <DersKonuHaritasi key={dersId} ders={ders} isDark={isDark} harita={yukleniyor ? null : veri.harita}
+        adaptifTestYolu={`${dersDetayYolu(dersId, "testler")}#adaptif-test`}
         kartSayilari={kartVerisi.dersId === dersId ? kartVerisi.sayilar : null}
         konuHakimiyeti={hakimiyetVerisi?.dersId === dersId ? hakimiyetVerisi.altKonular : null}
         materyaller={yukleniyor ? [] : veri.materyaller} haritaHatasi={veri.haritaHatasi} materyalHatasi={veri.materyalHatasi} yukleniyor={yukleniyor} />;

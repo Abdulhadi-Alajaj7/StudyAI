@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { adaptifTestOlustur, adaptifTestOnerisiniGetir } from "../services/adaptifTestService.js";
 import {
     TestSistemiHatasi,
     cevabiKaydet as cevabiKaydetService,
@@ -193,6 +194,26 @@ const servisKimlikleri = (req) => ({
     kullaniciId: req.user._id,
     dersId: req.params.dersId,
     testId: req.params.testId,
+});
+
+const adaptifTestIslemi = (islem) => async (req, res) => {
+    if (!mongoose.Types.ObjectId.isValid(req.params.dersId)) {
+        return res.status(400).json({ hata: "Geçersiz ders kimliği.", kod: "GECERSIZ_DERS_ID" });
+    }
+    try {
+        return await islem(servisKimlikleri(req), res);
+    } catch (hata) {
+        return hataYaniti(res, hata);
+    }
+};
+
+export const adaptifTestOnerisi = adaptifTestIslemi(async (kimlikler, res) =>
+    res.status(200).json({ oneri: await adaptifTestOnerisiniGetir(kimlikler) })
+);
+
+export const adaptifTestBaslat = adaptifTestIslemi(async (kimlikler, res) => {
+    const test = await adaptifTestOlustur(kimlikler);
+    return res.status(201).json({ testId: test._id });
 });
 
 const kimlikDogrulamaYaniti = (req, res, soruId = null) => {

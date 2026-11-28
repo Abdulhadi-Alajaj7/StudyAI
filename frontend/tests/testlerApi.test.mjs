@@ -36,6 +36,19 @@ test("testler API istemcisi gerçek listeleme, oluşturma ve başlatma uçların
     assert.ok(cagrilar.every((cagri) => cagri.argumanlar.at(-1).withCredentials === true));
 });
 
+test("adaptif API öneriyi okur ve başlatmada konu ayarlarını istemciden göndermez", async () => {
+    const { istemci, cagrilar } = sahteIstemci();
+    const servis = testlerApiOlustur(istemci);
+    const { signal } = new AbortController();
+    await servis.adaptifOneriGetir("ders/1", signal);
+    await servis.adaptifTestBaslat("ders/1", signal);
+    const ayarlar = { withCredentials: true, signal };
+    assert.deepEqual(cagrilar, [
+        { metot: "get", argumanlar: ["/dersler/ders%2F1/adaptif-test/oneri", ayarlar] },
+        { metot: "post", argumanlar: ["/dersler/ders%2F1/adaptif-test/baslat", {}, ayarlar] },
+    ]);
+});
+
 test("test kapsam seçenekleri mevcut materyal ve konu endpointlerinden alınır", async () => {
     const { istemci, cagrilar } = sahteIstemci();
     const servis = testlerApiOlustur(istemci);

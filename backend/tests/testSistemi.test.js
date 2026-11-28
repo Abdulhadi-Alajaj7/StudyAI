@@ -895,6 +895,33 @@ test("denetim: eşzamanlı aynı test oluşturma tek üretim ve kayıt yapar", a
 });
 
 
+test("adaptif istekler birleştirilir, aynı ayarlardaki manuel test ayrı üretilir", async () => {
+    let cagrilar = 0, baslat, bitir;
+    const basladi = new Promise(resolve => { baslat = resolve; });
+    const bekleme = new Promise(resolve => { bitir = resolve; });
+    const { bagimliliklar } = uretimBagimliliklari({ geminiTestUret: async girdi => {
+        cagrilar++;
+        baslat();
+        await bekleme;
+        return { sorular: uretimSorulari(girdi) };
+    } });
+    const girdi = { kullaniciId, dersId, kapsamTuru: "konu", konuId: "sub-yigin", soruSayisi: 5, zorluk: "orta" };
+    const ilk = testOlustur({ ...girdi, kaynak: "adaptif" }, bagimliliklar);
+    await basladi;
+    const ikinci = testOlustur({ ...girdi, kaynak: "adaptif" }, bagimliliklar);
+    const manuel = testOlustur(girdi, bagimliliklar);
+    bitir();
+    const [a, b, normal] = await Promise.all([ilk, ikinci, manuel]);
+    assert.equal(cagrilar, 2);
+    assert.equal(String(a._id), String(b._id));
+    assert.notEqual(String(a._id), String(normal._id));
+    assert.equal(a.kaynak, "adaptif");
+    assert.equal(normal.kaynak, undefined);
+    assert.equal(a.sorular.length, 5);
+    assert.ok(a.sorular.every(s => s.konuId === "sub-yigin" && s.zorluk === "orta"));
+    await new TestModel(a).validate();
+});
+
 test("denetim: test üretimi hatasında single-flight kaydı temizlenir ve sonraki istek çalışır", async () => {
     let sayi = 0;
     const { bagimliliklar, kaydiGetir } = uretimBagimliliklari({ geminiTestUret: async (girdi) => {

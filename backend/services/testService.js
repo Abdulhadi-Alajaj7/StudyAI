@@ -18,6 +18,7 @@ const TEST_LISTE_ALANLARI = [
     "_id",
     "dersId",
     "kapsamTuru",
+    "kaynak",
     "materyalId",
     "konuId",
     "konuBasligi",
@@ -214,6 +215,7 @@ const hedefiDogrula = async ({
     kapsamTuru,
     materyalId,
     konuId,
+    kaynak,
 }, deps) => {
     const harita = await konuHaritasiniGetir({ kullaniciId, dersId }, deps);
     if (kapsamTuru === "materyal") {
@@ -246,7 +248,7 @@ const hedefiDogrula = async ({
             );
         }
         const konu = konulariDuzlestir(harita).find((aday) => aday.konuId === konuId);
-        if (!konu) {
+        if (!konu || (kaynak === "adaptif" && konu.konuTuru !== "alt")) {
             throw new TestSistemiHatasi(
                 "Seçilen konu bu dersin güncel konu haritasında bulunamadı.",
                 { status: 404, kod: "KONU_BULUNAMADI" }
@@ -478,6 +480,7 @@ const testOlusturTekIslem = async ({
     konuId = "",
     soruSayisi = 10,
     zorluk = "karisik",
+    kaynak,
 }, bagimliliklar = {}) => {
     const sonZaman = Date.now() + 112_000;
     const deps = bagimliliklariGetir(bagimliliklar);
@@ -511,6 +514,7 @@ const testOlusturTekIslem = async ({
             kapsamTuru,
             materyalId,
             konuId,
+            kaynak,
         }, deps);
         asama = "KAYNAK_HAZIRLAMA";
         const kaynakVerisi = await kaynaklariHazirla({
@@ -574,6 +578,7 @@ const testOlusturTekIslem = async ({
             kullaniciId,
             dersId,
             kapsamTuru,
+            ...(kaynak === "adaptif" ? { kaynak } : {}),
             materyalId: kapsamTuru === "materyal" ? materyalId : null,
             konuId: kapsamTuru === "konu" ? konuId : "",
             konuBasligi: hedef.konu?.baslik || "",
@@ -863,6 +868,7 @@ export const testOlustur = async (girdi, bagimliliklar = {}) => {
         String(girdi.kullaniciId), String(girdi.dersId), girdi.kapsamTuru,
         String(girdi.materyalId || ""), String(girdi.konuId || ""),
         girdi.soruSayisi ?? 10, girdi.zorluk ?? "karisik",
+        girdi.kaynak === "adaptif",
     ]);
     if (devamEdenTestler.has(anahtar)) return devamEdenTestler.get(anahtar);
     const islem = testOlusturTekIslem(girdi, bagimliliklar);
