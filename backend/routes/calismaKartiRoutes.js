@@ -1,9 +1,11 @@
 import express from "express";
 import kimlikDogrula from "../middleware/auth.js";
-import {kartlariGetir,kartlariOlustur,kartDurumunuGuncelle} from "../controllers/calismaKartiController.js";
+import {kartlariGetir,kartlariOlustur,kartDurumunuGuncelle,kartTekrarlariniGetir,kartTekrariniSifirla} from "../controllers/calismaKartiController.js";
 const router=express.Router();
 router.use(kimlikDogrula);
 router.get("/:dersId/calisma-kartlari",kartlariGetir);
 router.post("/:dersId/calisma-kartlari",kartlariOlustur);
 router.patch("/:dersId/calisma-kartlari/:kartId",kartDurumunuGuncelle);
+router.get("/:dersId/calisma-kartlari/tekrarlar",kartTekrarlariniGetir);
+router.patch("/:dersId/calisma-kartlari/:kartId/tekrar/sifirla",kartTekrariniSifirla);
 export default router;

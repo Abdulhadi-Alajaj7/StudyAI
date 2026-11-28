@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useOutletContext, useParams } from "react-router-dom";
+import { Link, useOutletContext, useParams } from "react-router-dom";
 import { RectangleStackIcon, ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon, ClockIcon, SparklesIcon, StarIcon } from "@heroicons/react/24/outline";
 import api from "../services/calismaKartlariApi.mjs";
 import { kullaniciHataMesaji } from "../utils/kullaniciHatasi.mjs";
+import { dersDetayYolu } from "../utils/dersDetayYollari.mjs";
+import CalismaKartiYuzleri from "../components/CalismaKartiYuzleri.jsx";
 
 const FILTRELER = [
   { id: "tum", ad: "Tüm Kartlar" },
@@ -30,10 +32,21 @@ function DersCalismaKartlari() {
   const [index, setIndex] = useState(0);
   const [cevapAcik, setCevapAcik] = useState(false);
   const [kaydediliyor, setKaydediliyor] = useState(false);
+  const kartYaziliyorRef = useRef(false);
+  const [tekrarBilgisi, setTekrarBilgisi] = useState(null);
+  const [tekrarYenile, setTekrarYenile] = useState(0);
   const islemRef = useRef(false);
   const panel = isDark ? "border-[#263653] bg-[#111D31]" : "border-[#E2E8F0] bg-white";
   const metin = isDark ? "text-[#F8FAFC]" : "text-[#0F172A]";
   const ikincil = isDark ? "text-[#92A7C5]" : "text-[#64748B]";
+
+  useEffect(() => {
+    const controller = new AbortController();
+    api.tekrarlariGetir(dersId, controller.signal)
+      .then(({ data }) => { if (!controller.signal.aborted) setTekrarBilgisi({ dersId, bekleyen: data.bekleyen }); })
+      .catch(() => { if (!controller.signal.aborted) setTekrarBilgisi({ dersId, hata: true }); });
+    return () => controller.abort();
+  }, [dersId, tekrarYenile, uretim.uretimSuruyor]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -158,17 +171,28 @@ function DersCalismaKartlari() {
     }
   };
   const durum = async (kart, degisiklik) => {
-    if (!kart || kaydediliyor) return false;
+    if (!kart || kartYaziliyorRef.current) return false;
+    kartYaziliyorRef.current = true;
     setKaydediliyor(true);
     setHata("");
     try {
-      const r = await api.durumuGuncelle(dersId, kart._id, degisiklik);
-      setKartlar(eski => eski.map(k => k._id === kart._id ? r.data.kart : k));
+      const girdi = degisiklik.zorluk ? { ...degisiklik, surum: kart.__v ?? 0 } : degisiklik;
+      const r = await api.durumuGuncelle(dersId, kart._id, girdi);
+      const { goruldu, yildizli } = r.data.kart;
+      setKartlar(eski => eski.map(k => k._id === kart._id
+        ? (degisiklik.zorluk ? r.data.kart : { ...k, goruldu, yildizli }) : k));
+      if (degisiklik.zorluk) setTekrarYenile(sayi => sayi + 1);
       return true;
     } catch (e) {
       setHata(kullaniciHataMesaji(e, "Kart güncellenemedi."));
+      if (e.response?.status === 409) {
+        const guncel = await api.listele(dersId).catch(() => null);
+        if (guncel) setKartlar(guncel.data.kartlar || []);
+        setTekrarYenile(sayi => sayi + 1);
+      }
       return false;
     } finally {
+      kartYaziliyorRef.current = false;
       setKaydediliyor(false);
     }
   };
@@ -198,14 +222,15 @@ function DersCalismaKartlari() {
         <div className="rounded-2xl bg-violet-500/15 p-3"><RectangleStackIcon className="h-7 w-7 text-violet-400" /></div>
         <div><h2 className="text-[25px] font-bold">Çalışma Kartları</h2><p className={`text-[13px] ${ikincil}`}>Konularını hatırla, bilgini pekiştir.</p></div>
       </div>
-      <div className={`flex w-full min-w-0 items-center gap-3 rounded-xl border px-5 py-3 ${panel}`}>
+      <Link to={dersDetayYolu(dersId, "tekrarlar")} className={`flex w-full min-w-0 items-center gap-3 rounded-xl border px-5 py-3 hover:border-violet-500/50 ${panel}`}>
         <ClockIcon className="h-5 w-5 shrink-0 text-violet-400" />
         <div className="min-w-0 flex-1">
           <p className="text-sm font-semibold">Bugünkü Tekrarlar</p>
-          <p className={`text-xs ${ikincil}`}>Tekrar planlaması henüz etkin değil.</p>
+          <p className={`text-xs ${ikincil}`}>{tekrarBilgisi?.dersId !== dersId ? "Tekrarlar yükleniyor..."
+            : tekrarBilgisi.hata ? "Tekrar sayısı yüklenemedi."
+              : tekrarBilgisi.bekleyen ? `${tekrarBilgisi.bekleyen} kart tekrar edilmeyi bekliyor.` : "Bugün tekrar edilecek kartın yok."}</p>
         </div>
-        <span className="shrink-0 text-[10px] font-bold text-sky-400">YAKINDA</span>
-      </div>
+      </Link>
     </div>
     <div className="grid grid-cols-2 gap-3 lg:grid-cols-4" role="group" aria-label="Kart filtreleri">
       {FILTRELER.map(({ id, ad }) => <button type="button" key={id} onClick={() => filtreDegistir(id)}
@@ -267,32 +292,8 @@ function DersCalismaKartlari() {
             {aktif.uretimYontemi === "genel" && <span className="ml-2 rounded-full border border-indigo-400/40 px-2 py-0.5 text-[11px] text-indigo-400">Genel bilgi</span>}</span>
           <span className="shrink-0">Kart {aktifIndex + 1} / {filtrelenmis.length}</span>
         </div>
-        <div className="relative" style={{ perspective: "1400px" }}>
-          <div className="relative h-[320px] sm:h-[380px] transition-transform duration-500 motion-reduce:transition-none"
-            style={{ transformStyle: "preserve-3d", transform: cevapAcik ? "rotateY(180deg)" : "rotateY(0deg)" }}>
-            {[false, true].map(arka => <div key={String(arka)}
-              className={`absolute inset-0 flex flex-col rounded-[20px] border p-6 sm:p-9 ${panel}`}
-              style={{ backfaceVisibility: "hidden", WebkitBackfaceVisibility: "hidden", transform: arka ? "rotateY(180deg)" : "none" }}
-              aria-hidden={cevapAcik !== arka}
-              inert={cevapAcik !== arka}>
-              <div className="flex items-start justify-between gap-3">
-                <span className={`max-w-[85%] truncate text-xs font-medium ${ikincil}`}>Ders Çalışma Kartı</span>
-                {!arka && <button type="button" disabled={kaydediliyor} onClick={() => durum(aktif, { yildizli: !aktif.yildizli })}
-                  aria-label={aktif.yildizli ? "Yıldızı kaldır" : "Yıldız ekle"}
-                  className={`rounded-lg p-1.5 ${aktif.yildizli ? "text-amber-400" : ikincil}`}>
-                  <StarIcon className="h-6 w-6" fill={aktif.yildizli ? "currentColor" : "none"} />
-                </button>}
-                {arka && <span className="text-xs font-bold tracking-[0.2em] text-emerald-400">CEVAP</span>}
-              </div>
-              <button type="button" tabIndex={cevapAcik === arka ? 0 : -1} onClick={e => { e.currentTarget.blur(); cevir(); }}
-                disabled={kaydediliyor} aria-label={arka ? "Soruyu görmek için kartı çevir" : "Cevabı görmek için kartı çevir"}
-                className="flex min-h-0 flex-1 flex-col items-center justify-center gap-5 overflow-y-auto rounded-xl px-2 py-4 text-center focus-visible:outline focus-visible:outline-2 focus-visible:outline-violet-400">
-                <span className="whitespace-pre-wrap break-words text-xl font-semibold leading-relaxed sm:text-2xl">{arka ? aktif.cevap : aktif.soru}</span>
-                <span className={`inline-flex items-center gap-2 text-xs ${ikincil}`}><ArrowPathIcon className="h-4 w-4" />{arka ? "Soruyu görmek için tıklayın" : "Cevabı görmek için tıklayın"}</span>
-              </button>
-            </div>)}
-          </div>
-        </div>
+        <CalismaKartiYuzleri aktif={aktif} cevapAcik={cevapAcik} kaydediliyor={kaydediliyor}
+          cevir={cevir} yildizDegistir={() => durum(aktif, { yildizli: !aktif.yildizli })} panel={panel} ikincil={ikincil} />
         <div className="flex items-center justify-between gap-4">
           <button type="button" disabled={aktifIndex === 0 || kaydediliyor} onClick={() => ilerle(-1)}
             className={`inline-flex items-center gap-2 rounded-xl border px-5 py-3 font-medium disabled:opacity-30 ${panel}`}><ChevronLeftIcon className="h-5 w-5" />Önceki</button>
@@ -307,7 +308,7 @@ function DersCalismaKartlari() {
               onClick={() => degerlendir(z.id)}
               className={`rounded-xl border px-2 py-3 text-sm font-semibold transition-colors disabled:opacity-50 sm:text-base ${z.renk} ${aktif.zorluk === z.id ? "ring-2 ring-current ring-offset-2 ring-offset-transparent" : ""}`}>{z.ad}</button>)}
           </div>
-          <p className={`mt-4 text-xs ${ikincil}`}>Değerlendirmeniz kaydedilir. Otomatik tekrar planlaması henüz etkin değildir.</p>
+          <p className={`mt-4 text-xs ${ikincil}`}>Değerlendirmeniz kartın sonraki tekrar tarihini belirler.</p>
         </div>}
         <p className={`break-all px-1 text-xs ${ikincil}`}>{aktif.uretimYontemi === "genel" ? "Bilgi türü: Genel akademik bilgi (ders dosyasında ayrıntı yok)" : `Kaynak: ${[...new Set((aktif.kaynaklar || []).map(k => k.dosyaAdi))].join(", ")}` }</p>
       </div>}

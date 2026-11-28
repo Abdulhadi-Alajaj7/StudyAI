@@ -3,6 +3,8 @@ import { kartOtomatikUretiminiBaslat } from "../services/kartOtomatikUretimServi
 import {
     calismaKartlariDurumunuGetir,
     calismaKartiDurumuGuncelle,
+    calismaKartiTekrarlariniGetir,
+    calismaKartiTekrariniSifirla,
 } from "../services/calismaKartiService.js";
 
 const gecerliId = (id) => mongoose.Types.ObjectId.isValid(id);
@@ -77,7 +79,28 @@ export const kartDurumunuGuncelle = async (req, res) => {
             goruldu: girdi.goruldu,
             yildizli: girdi.yildizli,
             zorluk: girdi.zorluk,
+            surum: girdi.surum,
         });
+        return res.json({ kart });
+    } catch (hata) {
+        return hataYaniti(res, hata);
+    }
+};
+
+export const kartTekrarlariniGetir = async (req, res) => {
+    if (!gecerliId(req.params.dersId)) return res.status(400).json({ hata: "Geçersiz ders kimliği." });
+    try {
+        return res.json(await calismaKartiTekrarlariniGetir({ kullaniciId: req.user._id, dersId: req.params.dersId }));
+    } catch (hata) {
+        return hataYaniti(res, hata);
+    }
+};
+
+export const kartTekrariniSifirla = async (req, res) => {
+    const { dersId, kartId } = req.params;
+    if (!gecerliId(dersId) || !gecerliId(kartId)) return res.status(400).json({ hata: "Geçersiz kimlik." });
+    try {
+        const kart = await calismaKartiTekrariniSifirla({ kullaniciId: req.user._id, dersId, kartId, surum: req.body?.surum });
         return res.json({ kart });
     } catch (hata) {
         return hataYaniti(res, hata);

@@ -2,6 +2,7 @@ import Ders from "../models/Ders.js";
 import CalismaKarti from "../models/CalismaKarti.js";
 import KonuHaritasi from "../models/KonuHaritasi.js";
 import { konuKartSurumuGerekliMi } from "./dersKartPlanlama.mjs";
+import { gunlukTekrarlariGetir, tekrarPlaniOlustur, tekrarPlaniSifirla } from "./aralikliTekrarService.js";
 
 export class CalismaKartiHatasi extends Error {
     constructor(message, status = 422, kod = "KART_HATASI") {
@@ -14,6 +15,7 @@ const bagimliliklar = (d = {}) => ({
     DersModel: d.DersModel || Ders,
     KartModel: d.KartModel || CalismaKarti,
     KonuHaritasiModel: d.KonuHaritasiModel || (d.DersModel ? null : KonuHaritasi),
+    simdi: d.simdi || (() => new Date()),
 });
 const dersGetir = async (x, kullaniciId, dersId) => {
     const ders = await x.DersModel.findOne({
@@ -56,20 +58,67 @@ export const calismaKartlariDurumunuGetir = async ({ kullaniciId, dersId }, d = 
 export const calismaKartlariniListele = async (girdi, d = {}) =>
     (await calismaKartlariDurumunuGetir(girdi, d)).kartlar;
 
+export const calismaKartiTekrarlariniGetir = async ({ kullaniciId, dersId }, d = {}) => {
+    const x = bagimliliklar(d);
+    await dersGetir(x, kullaniciId, dersId);
+    return gunlukTekrarlariGetir(x.KartModel, { kullaniciId, dersId }, x.simdi());
+};
+
+const surumFiltresi = (surum) => surum === 0
+    ? { $or: [{ __v: 0 }, { __v: { $exists: false } }] }
+    : { __v: surum };
+
+const tekrarSurumuDegisti = () => new CalismaKartiHatasi(
+    "Kartın tekrar planı değişti. Güncel kartı kontrol edip yeniden deneyin.", 409, "KART_TEKRAR_SURUMU_DEGISTI"
+);
+
+const tekrarDegisikliginiKaydet = async (x, filtre, surum, set) => {
+    const kart = await x.KartModel.findOneAndUpdate(
+        { ...filtre, ...surumFiltresi(surum) },
+        { $set: set, $inc: { __v: 1 } },
+        { new: true, runValidators: true }
+    ).lean();
+    if (kart) return kart;
+    if (!await x.KartModel.findOne(filtre).lean()) throw new CalismaKartiHatasi("Kart bulunamadı.", 404);
+    throw tekrarSurumuDegisti();
+};
+
+const tekrarSurumunuDogrula = (surum) => {
+    if (!Number.isSafeInteger(surum) || surum < 0) {
+        throw new CalismaKartiHatasi("Kartın tekrar sürümü geçersiz.", 400);
+    }
+};
+
+export const calismaKartiTekrariniSifirla = async ({ kullaniciId, dersId, kartId, surum }, d = {}) => {
+    tekrarSurumunuDogrula(surum);
+    const x = bagimliliklar(d);
+    await dersGetir(x, kullaniciId, dersId);
+    return tekrarDegisikliginiKaydet(x, { _id: kartId, kullaniciId, dersId }, surum, tekrarPlaniSifirla());
+};
+
 export const calismaKartiDurumuGuncelle = async ({
-    kullaniciId, dersId, kartId, goruldu, yildizli, zorluk,
+    kullaniciId, dersId, kartId, goruldu, yildizli, zorluk, surum,
 }, d = {}) => {
     const x = bagimliliklar(d);
     await dersGetir(x, kullaniciId, dersId);
     const set = {};
+    const filtre = { _id: kartId, kullaniciId, dersId };
     if (typeof goruldu === "boolean") set.goruldu = goruldu;
     if (typeof yildizli === "boolean") set.yildizli = yildizli;
-    if (["zor", "orta", "kolay"].includes(zorluk)) set.zorluk = zorluk;
+    if (["zor", "orta", "kolay"].includes(zorluk)) {
+        tekrarSurumunuDogrula(surum);
+        const mevcut = await x.KartModel.findOne(filtre).lean();
+        if (!mevcut) throw new CalismaKartiHatasi("Kart bulunamadı.", 404);
+        if ((mevcut.__v ?? 0) !== surum) throw tekrarSurumuDegisti();
+        return tekrarDegisikliginiKaydet(x, filtre, surum, {
+            ...set, ...tekrarPlaniOlustur(mevcut.tekrarSeviyesi, zorluk, x.simdi())
+        });
+    }
     if (!Object.keys(set).length) {
         throw new CalismaKartiHatasi("Geçersiz kart durumu.", 400);
     }
     const kart = await x.KartModel.findOneAndUpdate(
-        { _id: kartId, kullaniciId, dersId },
+        filtre,
         { $set: set },
         { new: true, runValidators: true }
     ).lean();

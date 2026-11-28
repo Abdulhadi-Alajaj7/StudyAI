@@ -52,6 +52,7 @@ const kur = ({ uret, kayitli = [], buyuk = false } = {}) => {
         KonuHaritasiModel: { findOne(f) { sorgular.push(f); return q(harita); } },
         KartModel: {
             find() { return q(() => [...kartlar]); },
+            findOne(f) { return q(kartlar.find(k => String(k._id) === String(f._id))); },
             async bulkWrite(ops) {
                 yazmaSayisi++;
                 let upsertedCount = 0;
@@ -67,7 +68,10 @@ const kur = ({ uret, kayitli = [], buyuk = false } = {}) => {
             },
             findOneAndUpdate(f, g) {
                 const kart = kartlar.find((k) => String(k._id) === String(f._id));
-                if (kart) Object.assign(kart, g.$set);
+                if (kart) {
+                    Object.assign(kart, g.$set);
+                    if (g.$inc?.__v) kart.__v = (kart.__v ?? 0) + g.$inc.__v;
+                }
                 return q(kart);
             },
         },
@@ -208,7 +212,7 @@ test("öğrenci kart durumunu güncelleyebilir", async () => {
     const x = kur();
     const sonuc = await dersGeneliKartlariOlustur(x.args, x.deps);
     const kartId = sonuc.kartlar[0]._id;
-    const yeni = await calismaKartiDurumuGuncelle({ ...x.args, kartId, goruldu: true, zorluk: "zor" }, x.deps);
+    const yeni = await calismaKartiDurumuGuncelle({ ...x.args, kartId, goruldu: true, zorluk: "zor", surum: 0 }, x.deps);
     assert.equal(yeni.goruldu, true);
     assert.equal(yeni.zorluk, "zor");
     await assert.rejects(calismaKartiDurumuGuncelle({ ...x.args, kartId, zorluk: "gecersiz" }, x.deps), { status: 400 });
