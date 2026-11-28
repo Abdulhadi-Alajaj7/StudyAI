@@ -1,29 +1,29 @@
-export const yuklemeHatasiniYanitaCevir = (
-    hata,
-    { maksimumDosyaSayisi, maksimumDosyaBoyutu, beklenenAlan = "dosyalar" }
-) => {
+import { DOSYA_BOYUT_SINIRLARI, MAKSIMUM_DOSYA_SAYISI } from "../config/materyalYuklemeSinirlari.js";
+
+export const yuklemeHatasiniYanitaCevir = (hata) => {
     const kod = hata?.code || "DOSYA_YUKLEME_HATASI";
-    const maksimumMB = Math.round(maksimumDosyaBoyutu / (1024 * 1024));
 
     if (kod === "LIMIT_FILE_SIZE") {
+        const sinirlar = Object.entries(DOSYA_BOYUT_SINIRLARI)
+            .map(([tur, sinir]) => `${tur.toUpperCase()} ${sinir.etiket}`).join(", ");
         return {
             kod,
-            mesaj: `Dosya izin verilen ${maksimumMB} MB boyut sınırını aşıyor.`
+            mesaj: `Dosya izin verilen boyut sınırını aşıyor. Dosya türüne göre sınırlar: ${sinirlar}.`
         };
     }
 
     if (kod === "LIMIT_FILE_COUNT") {
         return {
             kod,
-            mesaj: `Tek seferde en fazla ${maksimumDosyaSayisi} dosya yükleyebilirsiniz.`
+            mesaj: `Ders başına en fazla ${MAKSIMUM_DOSYA_SAYISI} materyal yükleyebilirsiniz.`
         };
     }
 
     if (kod === "LIMIT_UNEXPECTED_FILE") {
-        return hata?.field === beklenenAlan
+        return hata?.field === "dosyalar"
             ? {
                 kod: "DOSYA_SAYISI_ASILDI",
-                mesaj: `Tek seferde en fazla ${maksimumDosyaSayisi} dosya yükleyebilirsiniz.`
+                mesaj: `Ders başına en fazla ${MAKSIMUM_DOSYA_SAYISI} materyal yükleyebilirsiniz.`
             }
             : {
                 kod,

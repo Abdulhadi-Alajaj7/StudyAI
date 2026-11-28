@@ -2,15 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { yuklemeHatasiniYanitaCevir } from "../utils/yuklemeHatasi.js";
 
-const limitler = {
-    maksimumDosyaSayisi: 10,
-    maksimumDosyaBoyutu: 50 * 1024 * 1024
-};
-
 test("Multer beklenmeyen alan hatası teknik İngilizce mesaj göstermeden çevrilir", () => {
     const sonuc = yuklemeHatasiniYanitaCevir(
-        { code: "LIMIT_UNEXPECTED_FILE", field: "file", message: "Unexpected field" },
-        limitler
+        { code: "LIMIT_UNEXPECTED_FILE", field: "file", message: "Unexpected field" }
     );
 
     assert.equal(sonuc.kod, "LIMIT_UNEXPECTED_FILE");
@@ -18,20 +12,19 @@ test("Multer beklenmeyen alan hatası teknik İngilizce mesaj göstermeden çevr
     assert.doesNotMatch(sonuc.mesaj, /unexpected field/i);
 });
 
-test("Multer dosya sayısı aşımı mevcut 10 dosya sınırını bildirir", () => {
+test("Multer dosya sayısı aşımı ders başına 3 materyal sınırını bildirir", () => {
     const sonuc = yuklemeHatasiniYanitaCevir(
-        { code: "LIMIT_UNEXPECTED_FILE", field: "dosyalar" },
-        limitler
+        { code: "LIMIT_UNEXPECTED_FILE", field: "dosyalar" }
     );
 
     assert.equal(sonuc.kod, "DOSYA_SAYISI_ASILDI");
-    assert.match(sonuc.mesaj, /en fazla 10 dosya/i);
+    assert.match(sonuc.mesaj, /en fazla 3 materyal/i);
 });
 
 test("Multer boyut ve dosya türü hataları eyleme dönük Türkçe mesaj verir", () => {
-    const boyut = yuklemeHatasiniYanitaCevir({ code: "LIMIT_FILE_SIZE" }, limitler);
-    const tur = yuklemeHatasiniYanitaCevir({ code: "DESTEKLENMEYEN_DOSYA_TURU" }, limitler);
+    const boyut = yuklemeHatasiniYanitaCevir({ code: "LIMIT_FILE_SIZE" });
+    const tur = yuklemeHatasiniYanitaCevir({ code: "DESTEKLENMEYEN_DOSYA_TURU" });
 
-    assert.match(boyut.mesaj, /50 MB/);
+    assert.match(boyut.mesaj, /PDF 2 MB, PPTX 2 MB, DOCX 1 MB, TXT 50 KB/);
     assert.match(tur.mesaj, /PDF, DOCX, PPTX veya TXT/);
 });

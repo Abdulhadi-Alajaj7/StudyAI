@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useOutletContext, useNavigate, useLocation, useParams } from "react-router-dom";
 import api from "../api";
 import { kullaniciHataMesaji } from "../utils/kullaniciHatasi.mjs";
-import { materyalDosyalariniDogrula } from "../utils/materyalDosyalari.mjs";
+import { DOSYA_BOYUT_SINIRLARI, MAKSIMUM_DOSYA_SAYISI, materyalDosyalariniDogrula } from "../utils/materyalDosyalari.mjs";
 import DersOlusturmaAdimlari from "../components/DersOlusturmaAdimlari";
 import DersHazirlamaEkrani from "../components/DersHazirlamaEkrani";
 import { CloudArrowUpIcon, ArrowRightIcon, CpuChipIcon, DocumentIcon, TrashIcon, ArrowPathIcon } from "@heroicons/react/24/outline";
@@ -22,9 +22,10 @@ function MateryalEkle() {
     const uiPrefs = uiPrefsRef.current;
 
     const [materyaller, setMateryaller] = useState([]);
+    const [materyallerYuklendi, setMateryallerYuklendi] = useState(false);
     const [siliniyor, setSiliniyor] = useState(false);
     const silmeIstekRef = useRef(false);
-    const silmeSurumuRef = useRef(0);
+    const materyalSurumuRef = useRef(0);
     const [yukleniyor, setYukleniyor] = useState(false);
     const [hata, setHata] = useState("");
     const [bilgi, setBilgi] = useState("");
@@ -41,6 +42,9 @@ function MateryalEkle() {
     const [onayModalAcik, setOnayModalAcik] = useState(false);
     const [onaylaniyor, setOnaylaniyor] = useState(false);
     const hazirlaniyor = onaylaniyor || ders?.hazirlamaDurumu === "isleniyor";
+    const sinirDoldu = materyaller.length >= MAKSIMUM_DOSYA_SAYISI;
+    const dosyaSecimiKapali = yukleniyor || !durumYuklendi || !materyallerYuklendi ||
+        hazirlaniyor || siliniyor || sinirDoldu;
     const tumMateryallerHazir = materyaller.length > 0 &&
         materyaller.every(m => m.durum === "hazir" && m.aktifIslemeId);
     const devamButonuAktif = durumYuklendi && !hazirlaniyor && !siliniyor && !yukleniyor && tumMateryallerHazir;
@@ -82,11 +86,12 @@ function MateryalEkle() {
 
     const materyalleriGetir = useCallback(async () => {
         if (silmeIstekRef.current) return;
-        const sorguSurumu = silmeSurumuRef.current;
+        const sorguSurumu = materyalSurumuRef.current;
         try {
             const res = await api.get(`/materyaller/ders/${dersId}`, { withCredentials: true });
-            if (sorguSurumu === silmeSurumuRef.current && !silmeIstekRef.current) {
+            if (sorguSurumu === materyalSurumuRef.current && !silmeIstekRef.current) {
                 setMateryaller(res.data.materyaller || []);
+                setMateryallerYuklendi(true);
             }
         } catch (err) {
             console.error("Materyaller getirilemedi", err);
@@ -106,16 +111,16 @@ function MateryalEkle() {
     }, [dersGetir, materyalleriGetir]);
 
     const handleDosyaSec = () => {
-        if (durumYuklendi && !hazirlaniyor && !silmeIstekRef.current && !yuklemeDevamEdiyorRef.current) {
+        if (!dosyaSecimiKapali && !silmeIstekRef.current && !yuklemeDevamEdiyorRef.current) {
             fileInputRef.current?.click();
         }
     };
 
     const dosyalariYukle = async (dosyaListesi) => {
-        if (!durumYuklendi || hazirlaniyor || silmeIstekRef.current || yuklemeDevamEdiyorRef.current) return;
+        if (!durumYuklendi || !materyallerYuklendi || hazirlaniyor || silmeIstekRef.current || yuklemeDevamEdiyorRef.current) return;
 
         const { gecerliDosyalar, hatalar: dogrulamaHatalari } =
-            materyalDosyalariniDogrula(dosyaListesi);
+            materyalDosyalariniDogrula(dosyaListesi, materyaller.length);
         if (gecerliDosyalar.length === 0) {
             setBilgi("");
             setHata(dogrulamaHatalari.join("\n"));
@@ -136,9 +141,15 @@ function MateryalEkle() {
                 formData.append("dosyalar", dosya);
 
                 try {
-                    await api.post(`/materyaller/ders/${dersId}`, formData, {
+                    const res = await api.post(`/materyaller/ders/${dersId}`, formData, {
                         withCredentials: true
                     });
+                    const yeniMateryaller = res.data.materyaller;
+                    materyalSurumuRef.current++;
+                    setMateryaller(onceki => [
+                        ...yeniMateryaller,
+                        ...onceki.filter(m => !yeniMateryaller.some(yeni => yeni._id === m._id))
+                    ]);
                     basariliDosyalar.push(dosya.name);
                 } catch (err) {
                     basarisizDosyalar.push(
@@ -160,25 +171,26 @@ function MateryalEkle() {
         } finally {
             yuklemeDevamEdiyorRef.current = false;
             setYukleniyor(false);
-            if (fileInputRef.current) fileInputRef.current.value = "";
         }
     };
 
     const handleDosyaYukle = (e) => {
-        void dosyalariYukle(e.target.files);
+        const dosyalar = Array.from(e.target.files);
+        e.target.value = "";
+        void dosyalariYukle(dosyalar);
     };
 
     const handleDragEnter = (e) => {
         e.preventDefault();
         e.stopPropagation();
         suruklemeDerinligiRef.current += 1;
-        if (!yukleniyor) setSurukleniyor(true);
+        if (!dosyaSecimiKapali) setSurukleniyor(true);
     };
 
     const handleDragOver = (e) => {
         e.preventDefault();
         e.stopPropagation();
-        if (e.dataTransfer) e.dataTransfer.dropEffect = yukleniyor ? "none" : "copy";
+        if (e.dataTransfer) e.dataTransfer.dropEffect = dosyaSecimiKapali ? "none" : "copy";
     };
 
     const handleDragLeave = (e) => {
@@ -205,7 +217,7 @@ function MateryalEkle() {
         if (!durumYuklendi || hazirlaniyor || silmeIstekRef.current) return;
         if (!window.confirm("Bu materyali silmek istediğinize emin misiniz?")) return;
         silmeIstekRef.current = true;
-        silmeSurumuRef.current++;
+        materyalSurumuRef.current++;
         setSiliniyor(true);
         setHata("");
         try {
@@ -314,8 +326,8 @@ function MateryalEkle() {
                             onDragOver={handleDragOver}
                             onDragLeave={handleDragLeave}
                             onDrop={handleDrop}
-                            aria-disabled={yukleniyor || !durumYuklendi}
-                            className={`border-2 border-dashed rounded-2xl p-10 md:p-16 flex flex-col items-center justify-center text-center transition-all ${surukleniyor && !yukleniyor
+                            aria-disabled={dosyaSecimiKapali}
+                            className={`border-2 border-dashed rounded-2xl p-10 md:p-16 flex flex-col items-center justify-center text-center transition-all ${surukleniyor && !dosyaSecimiKapali
                                 ? 'border-[#4F46E5] bg-[#4F46E5]/10 scale-[1.01]'
                                 : isDark
                                     ? 'border-[#26334A] bg-[#0B1120]/50'
@@ -326,15 +338,19 @@ function MateryalEkle() {
                                 <CloudArrowUpIcon className="w-8 h-8 text-[#4F46E5]" />
                             </div>
 
-                            <h3 className={`text-[20px] md:text-[24px] font-bold ${textPrimary} mb-2`}>Dosyalarını buraya sürükle ve bırak</h3>
-                            <p className={`text-[15px] ${textSecondary} mb-8`}>veya bilgisayarından dosya seç</p>
+                            <h3 className={`text-[20px] md:text-[24px] font-bold ${textPrimary} mb-2`}>
+                                {sinirDoldu ? "Yükleme sınırı doldu" : "Dosyalarını buraya sürükle ve bırak"}
+                            </h3>
+                            <p className={`text-[15px] ${textSecondary} mb-8`}>
+                                {sinirDoldu ? "Yeni dosya yüklemek için mevcut bir materyali silin." : "veya bilgisayarından dosya seç"}
+                            </p>
 
                             <input
                                 type="file"
                                 multiple
                                 ref={fileInputRef}
                                 onChange={handleDosyaYukle}
-                                disabled={yukleniyor || !durumYuklendi}
+                                disabled={dosyaSecimiKapali}
                                 className="hidden"
                                 accept=".pdf,.docx,.pptx,.txt"
                             />
@@ -342,15 +358,15 @@ function MateryalEkle() {
                             <button
                                 type="button"
                                 onClick={handleDosyaSec}
-                                disabled={yukleniyor || !durumYuklendi}
-                                className={`px-8 py-3 rounded-xl font-medium border-2 border-[#4F46E5] text-[#4F46E5] hover:bg-[#4F46E5]/10 transition-colors mb-6 ${yukleniyor ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                disabled={dosyaSecimiKapali}
+                                className={`px-8 py-3 rounded-xl font-medium border-2 border-[#4F46E5] text-[#4F46E5] hover:bg-[#4F46E5]/10 transition-colors mb-6 ${dosyaSecimiKapali ? 'opacity-50 cursor-not-allowed' : ''}`}
                             >
                                 {yukleniyor ? 'Yükleniyor...' : 'Dosya Seç'}
                             </button>
 
                             <div className={`text-[13px] ${textSecondary}`}>
-                                <p>PDF, DOCX, PPTX ve TXT desteklenir. (Maks. 50 MB / dosya)</p>
-                                <p className="mt-1">Birden fazla dosyayı aynı anda yükleyebilirsiniz.</p>
+                                <p>{Object.entries(DOSYA_BOYUT_SINIRLARI).map(([tur, sinir]) => `${tur.toUpperCase()} ${sinir.etiket}`).join(" · ")}</p>
+                                <p className="mt-1">Ders başına en fazla {MAKSIMUM_DOSYA_SAYISI} materyal yükleyebilirsiniz.</p>
                             </div>
                         </div>
                     </div>
@@ -427,7 +443,7 @@ function MateryalEkle() {
             <div className={`p-6 md:p-8 rounded-2xl border ${cardBg}`}>
                 <div className="flex items-center justify-between mb-6">
                     <h3 className={`text-[20px] font-bold ${textPrimary}`}>Yüklenen Materyaller</h3>
-                    <span className={`px-3 py-1 rounded-lg text-sm font-medium ${isDark ? 'bg-[#10192C] text-[#A7B0C2]' : 'bg-[#F1F5F9] text-[#64748B]'}`}>{materyaller.length} Materyal</span>
+                    <span className={`px-3 py-1 rounded-lg text-sm font-medium ${isDark ? 'bg-[#10192C] text-[#A7B0C2]' : 'bg-[#F1F5F9] text-[#64748B]'}`}>{materyaller.length}/{MAKSIMUM_DOSYA_SAYISI} Materyal</span>
                 </div>
 
                 {materyaller.length === 0 ? (

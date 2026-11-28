@@ -2,6 +2,11 @@ import { test, beforeEach, mock } from "node:test";
 import assert from "node:assert/strict";
 import mongoose from "mongoose";
 
+mock.method(mongoose, "startSession", async () => ({
+    withTransaction: (islem) => islem(),
+    async endSession() {}
+}));
+
 const materyalId = new mongoose.Types.ObjectId();
 const dersId = new mongoose.Types.ObjectId();
 const kullaniciId = new mongoose.Types.ObjectId();

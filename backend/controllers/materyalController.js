@@ -13,6 +13,7 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import { dosyaIceriginiDogrula } from "../services/dosyaTuruDogrulamaService.js";
 import { sureOlc } from "../utils/islemSuresi.js";
+import { DOSYA_BOYUT_SINIRLARI, MAKSIMUM_DOSYA_SAYISI } from "../config/materyalYuklemeSinirlari.js";
 
 const metinCikarmaKullaniciMesaji = () => (
     "Dosya içeriğinden metin çıkarılamadı. Dosyanın bozuk olmadığını kontrol edip tekrar deneyin."
@@ -22,7 +23,7 @@ const metinCikarmaKullaniciMesaji = () => (
  * Ders onayıyla yarışmayan atomik materyal işlem kaydı.
  * Başarılı her kayıt, işlem tamamen bitince bir kez serbest bırakılmalıdır.
  */
-const materyalIslemiBaslat = async (dersId, kullaniciId) => {
+const materyalIslemiBaslat = async (dersId, kullaniciId, session) => {
     return Ders.findOneAndUpdate(
         {
             _id: dersId,
@@ -32,7 +33,7 @@ const materyalIslemiBaslat = async (dersId, kullaniciId) => {
             temizleniyor: { $ne: true }
         },
         { $inc: { aktifMateryalIslemSayisi: 1 }, $set: { hazirlamaAsamasi: "metinler" } },
-        { new: true }
+        { new: true, session }
     );
 };
 
@@ -161,8 +162,80 @@ export const materyalYukle = async (req, res) => {
             return res.status(400).json({ hata: "Dosya yüklenmedi." });
         }
 
-        const ders = await materyalIslemiBaslat(dersId, kullaniciId);
-        if (!ders) {
+        const session = await mongoose.startSession();
+        let sonuc;
+        try {
+            sonuc = await session.withTransaction(async () => {
+                // Sayım ve kayıt aynı ders belgesine yazan yüklemeler arasında sıralanır.
+                const ders = await materyalIslemiBaslat(dersId, kullaniciId, session);
+                if (!ders) return null;
+
+                const mevcutSayi = await Materyal.countDocuments({ dersId, kullaniciId }, { session });
+                const kalan = Math.max(0, MAKSIMUM_DOSYA_SAYISI - mevcutSayi);
+                if (req.files.length > kalan) {
+                    const mesaj = kalan === 0
+                        ? `Ders başına en fazla ${MAKSIMUM_DOSYA_SAYISI} materyal yükleyebilirsiniz. Yeni dosya yüklemek için mevcut bir materyali silin.`
+                        : `Ders başına en fazla ${MAKSIMUM_DOSYA_SAYISI} materyal yükleyebilirsiniz. En fazla ${kalan} dosya daha yükleyebilirsiniz.`;
+                    throw Object.assign(new Error(mesaj), { statusCode: 400, code: "DOSYA_SAYISI_ASILDI" });
+                }
+
+                const dogrulananDosyalar = [];
+                for (const file of req.files) {
+                    const dosyaTuru = path.extname(file.originalname).substring(1).toLowerCase();
+                    if (!Object.hasOwn(DOSYA_BOYUT_SINIRLARI, dosyaTuru)) {
+                        throw Object.assign(new Error("Sadece PDF, DOCX, PPTX ve TXT dosyaları desteklenir."), {
+                            statusCode: 400, code: "DESTEKLENMEYEN_DOSYA_TURU"
+                        });
+                    }
+                    const sinir = DOSYA_BOYUT_SINIRLARI[dosyaTuru];
+                    const dosyaIcerigi = await fs.readFile(file.path);
+                    if (dosyaIcerigi.length > sinir.bayt) {
+                        throw Object.assign(
+                            new Error(`${dosyaTuru.toUpperCase()} dosyaları en fazla ${sinir.etiket} olabilir.`),
+                            { statusCode: 400, code: "LIMIT_FILE_SIZE" }
+                        );
+                    }
+
+                    // Uzantı/MIME filtresine ek olarak gerçek içeriği kalıcı kayıttan önce doğrula.
+                    dosyaIceriginiDogrula(dosyaIcerigi, dosyaTuru);
+                    const dosyaHash = crypto.createHash("sha256").update(dosyaIcerigi).digest("hex");
+                    dogrulananDosyalar.push({ file, dosyaTuru, dosyaHash });
+                }
+
+                const yuklenenMateryaller = [];
+                const tekrarEdenDosyalar = [];
+                for (const { file, dosyaTuru, dosyaHash } of dogrulananDosyalar) {
+                    // Yinelenen içerikleri işlemi iptal eden bir indeks hatası oluşmadan atla.
+                    if (await Materyal.findOne({ dersId, dosyaHash }, "_id", { session })) {
+                        tekrarEdenDosyalar.push(file);
+                        continue;
+                    }
+
+                    const [yeniMateryal] = await Materyal.create([{
+                        kullaniciId,
+                        dersId,
+                        dosyaAdi: file.filename,
+                        orijinalDosyaAdi: file.originalname,
+                        dosyaYolu: file.path,
+                        dosyaTuru,
+                        mimeTuru: file.mimetype,
+                        dosyaBoyutu: file.size,
+                        dosyaHash,
+                        durum: "yuklendi"
+                    }], { session });
+                    yuklenenMateryaller.push(yeniMateryal);
+                }
+                return { yuklenenMateryaller, tekrarEdenDosyalar };
+            });
+            if (sonuc) {
+                islemKaydedildi = true;
+                basariliIds.push(...sonuc.yuklenenMateryaller.map(materyal => materyal._id));
+            }
+        } finally {
+            await session.endSession();
+        }
+
+        if (!sonuc) {
             const mevcut = await Ders.findOne({ _id: dersId, kullaniciId });
             return res.status(mevcut ? 409 : 404).json({
                 hata: mevcut
@@ -170,62 +243,11 @@ export const materyalYukle = async (req, res) => {
                     : "Ders bulunamadı veya yetkiniz yok."
             });
         }
-        islemKaydedildi = true;
 
-        const yuklenenMateryaller = [];
-        const tekrarEdenDosyalar = [];
-        const dogrulananDosyalar = [];
-
-        for (const file of req.files) {
-            const dosyaIcerigi = await fs.readFile(file.path);
-
-            const ext = path.extname(file.originalname).substring(1).toLowerCase();
-            const dosyaTuru =
-                ext === "docx" ? "docx" :
-                    ext === "pptx" ? "pptx" :
-                        ext === "txt" ? "txt" : "pdf";
-
-            // Uzantı/MIME filtresine ek olarak, diske yazılmış gerçek içeriği
-            // kalıcı Materyal kaydı oluşturmadan önce doğrula.
-            dosyaIceriginiDogrula(dosyaIcerigi, dosyaTuru);
-
-            const dosyaHash = crypto
-                .createHash("sha256")
-                .update(dosyaIcerigi)
-                .digest("hex");
-
-            dogrulananDosyalar.push({ file, dosyaTuru, dosyaHash });
-        }
-
-        // Toplu yüklemede tek bir geçersiz dosya varsa hiçbir kalıcı kayıt
-        // oluşturmamak için veritabanı yazılarına ancak tüm doğrulamalar geçince başla.
-        for (const { file, dosyaTuru, dosyaHash } of dogrulananDosyalar) {
-            try {
-                const yeniMateryal = await Materyal.create({
-                    kullaniciId,
-                    dersId,
-                    dosyaAdi: file.filename,
-                    orijinalDosyaAdi: file.originalname,
-                    dosyaYolu: file.path,
-                    dosyaTuru,
-                    mimeTuru: file.mimetype,
-                    dosyaBoyutu: file.size,
-                    dosyaHash,
-                    durum: "yuklendi"
-                });
-
-                basariliIds.push(yeniMateryal._id);
-                yuklenenMateryaller.push(yeniMateryal);
-
-            } catch (error) {
-                if (error.code === 11000) {
-                    tekrarEdenDosyalar.push(file.originalname);
-                    await fs.unlink(file.path).catch(() => { });
-                    continue;
-                }
-
-                throw error;
-            }
+        const { yuklenenMateryaller } = sonuc;
+        const tekrarEdenDosyalar = sonuc.tekrarEdenDosyalar.map(file => file.originalname);
+        for (const file of sonuc.tekrarEdenDosyalar) {
+            await fs.unlink(file.path).catch(() => { });
         }
         if (basariliIds.length === 0) {
             return res.status(409).json({

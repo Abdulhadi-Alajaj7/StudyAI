@@ -2,12 +2,11 @@ import multer from "multer";
 import path from "path";
 import fs from "fs";
 import { fileURLToPath } from "url";
+import { MAKSIMUM_DOSYA_BOYUTU } from "./materyalYuklemeSinirlari.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const uploadDir = path.join(__dirname, "..", "uploads", "materyaller");
-export const MAKSIMUM_DOSYA_BOYUTU = 50 * 1024 * 1024;
-export const MAKSIMUM_DOSYA_SAYISI = 10;
 
 if (!fs.existsSync(uploadDir)) {
     fs.mkdirSync(uploadDir, { recursive: true });
@@ -49,7 +48,8 @@ const fileFilter = (req, file, cb) => {
 const upload = multer({
     storage,
     fileFilter,
-    limits: { fileSize: MAKSIMUM_DOSYA_BOYUTU },
+    // Multer sınıra ulaşıldığında hata verir. Tam sınırdaki dosya kabul edilir.
+    limits: { fileSize: MAKSIMUM_DOSYA_BOYUTU + 1 },
 });
 
 export default upload;

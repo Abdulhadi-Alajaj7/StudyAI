@@ -70,6 +70,7 @@ const model = liste => ({
         return { matchedCount: doc ? 1 : 0 };
     }),
     async create(doc) {
+        if (Array.isArray(doc)) return Promise.all(doc.map(veri => this.create(veri)));
         const yeni = { _id: new mongoose.Types.ObjectId(), ...kopya(doc) };
         liste().push(yeni);
         return kopya(yeni);
@@ -173,7 +174,7 @@ beforeEach(() => {
     embeddingHatasi = null; haritaHatasi = null; bekleyenEmbedding = null; silinenDosyalar = [];
 });
 
-test("beş dosya yüklenip ikisi silinir: onaysız sıfır Gemini; onayda yalnız kalan üç kaynak işlenir", async () => {
+test("materyal silinip yeniden yüklenir: onaysız sıfır Gemini; onayda yalnız kalan üç kaynak işlenir", async () => {
     const dizin = await mkdtemp(path.join(os.tmpdir(), "studyai-hazirlama-"));
     try {
         const files = [];
@@ -183,16 +184,22 @@ test("beş dosya yüklenip ikisi silinir: onaysız sıfır Gemini; onayda yalnı
             files.push({ path: dosya, originalname: `${i}.txt`, filename: `${i}.txt`, mimetype: "text/plain", size: 20 });
         }
         const yanit = res();
-        await materyalYukle({ ...req(), files }, yanit);
+        await materyalYukle({ ...req(), files: files.slice(0, 3) }, yanit);
         assert.equal(yanit.statusCode, 201);
         for (let i = 0; dersler[0].aktifMateryalIslemSayisi && i < 100; i++) await new Promise(r => setTimeout(r, 1));
         assert.equal(dersler[0].aktifMateryalIslemSayisi, 0);
-        assert.equal(materyaller.length, 5);
+        assert.equal(materyaller.length, 3);
         for (const m of materyaller.slice(0, 2)) {
             const silRes = res();
             await materyalSil({ ...req(), params: { id: String(m._id) } }, silRes);
             assert.equal(silRes.statusCode, 200);
         }
+        const yenidenYukle = res();
+        await materyalYukle({ ...req(), files: files.slice(3) }, yenidenYukle);
+        assert.equal(yenidenYukle.statusCode, 201);
+        for (let i = 0; dersler[0].aktifMateryalIslemSayisi && i < 100; i++) await new Promise(r => setTimeout(r, 1));
+        assert.equal(dersler[0].aktifMateryalIslemSayisi, 0);
+        assert.equal(materyaller.length, 3);
         assert.equal(embeddingCagrilari.length, 0);
         assert.equal(haritaCagrilari, 0);
         const kalan = materyaller.map(m => String(m._id));
