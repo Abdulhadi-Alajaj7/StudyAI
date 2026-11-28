@@ -1,5 +1,5 @@
 import { useId, useState } from "react";
-import { ChevronDownIcon, CheckIcon, RectangleStackIcon } from "@heroicons/react/24/outline";
+import { ChevronDownIcon, CheckIcon, DocumentTextIcon, InformationCircleIcon, RectangleStackIcon } from "@heroicons/react/24/outline";
 import "./DersKonuHaritasi.css";
 
 const hakimiyetEtiketleri = {
@@ -13,9 +13,19 @@ const yuzdeBicimi = new Intl.NumberFormat("tr-TR", { style: "percent", maximumFr
 function HakimiyetDurumu({ analiz }) {
     if (!analiz) return null;
     return <span className="konu-hakimiyet" data-durum={analiz.durum}>
-        <span>{hakimiyetEtiketleri[analiz.durum]}</span>
-        {analiz.yuzde !== null && <span>{yuzdeBicimi.format(analiz.yuzde / 100)}</span>}
-        <span>{analiz.soruSayisi} soru</span>
+        {analiz.durum === "yeterli_veri_yok" ? <>
+            <span className="konu-hakimiyet-seviye">{hakimiyetEtiketleri[analiz.durum]}</span>
+            <span className="konu-hakimiyet-bilgi"><InformationCircleIcon aria-hidden="true" />
+                Hâkimiyet seviyeni belirlemek için en az 5 soru çözmelisin.
+            </span>
+        </> : <>
+            <span className="konu-hakimiyet-baslik">Konu Hâkimiyeti</span>
+            <span className="konu-hakimiyet-satir">
+                <span className="konu-hakimiyet-cubuk" aria-hidden="true"><span style={{ width: `${analiz.yuzde}%` }} /></span>
+                <span>{yuzdeBicimi.format(analiz.yuzde / 100)}</span>
+                <span className="konu-hakimiyet-seviye">{hakimiyetEtiketleri[analiz.durum]}</span>
+            </span>
+        </>}
     </span>;
 }
 
@@ -37,21 +47,30 @@ function KonuDali({ ana, index, secili, onSec, kartSayilari, konuHakimiyeti }) {
             </button>}
         </div>
         {!!altKonular.length && <ol id={id} hidden={!acik} className="konu-altlar">
-            {altKonular.map((alt, i) => <li key={alt.konuId || alt._id || i} className="konu-alt-dali">
-                <button type="button" className={`konu-alt ${secili === alt.konuId ? "konu-secili" : ""}`}
-                    aria-pressed={secili === alt.konuId} onClick={() => onSec(alt.konuId)}>
-                    <span className="konu-nokta" aria-hidden="true" /><span className="konu-yazi"><span className="konu-alt-baslik">{alt.baslik}</span>
-                        {alt.aciklama && <span className="konu-aciklama">{alt.aciklama}</span>}
-                        <HakimiyetDurumu analiz={konuHakimiyeti?.get(alt.konuId)} />
-                    </span>
+            {altKonular.map((alt, i) => {
+                const analiz = konuHakimiyeti?.get(alt.konuId);
+                return <li key={alt.konuId || alt._id || i} className="konu-alt-dali">
+                    <button type="button" className={`konu-alt ${secili === alt.konuId ? "konu-secili" : ""}`}
+                        aria-pressed={secili === alt.konuId} onClick={() => onSec(alt.konuId)}>
+                        <span className="konu-nokta" aria-hidden="true" /><span className="konu-yazi"><span className="konu-alt-baslik">{alt.baslik}</span>
+                            {alt.aciklama && <span className="konu-aciklama">{alt.aciklama}</span>}
+                            <HakimiyetDurumu analiz={analiz} />
+                        </span>
 
-                    {kartSayilari !== null && <span className="konu-kart-sayisi" aria-label={`${kartSayilari[alt.konuId] || 0} çalışma kartı`}>
-                        <RectangleStackIcon aria-hidden="true" />
-                        <span>{kartSayilari[alt.konuId] || 0} kart</span>
-                    </span>}
-                    {secili === alt.konuId && <CheckIcon className="konu-secim-simgesi" aria-hidden="true" />}
-                </button>
-            </li>)}
+                        {(kartSayilari !== null || analiz) && <span className="konu-alt-sayilari">
+                            {kartSayilari !== null && <span className="konu-kart-sayisi" aria-label={`${kartSayilari[alt.konuId] || 0} çalışma kartı`}>
+                                <RectangleStackIcon aria-hidden="true" />
+                                <span>{kartSayilari[alt.konuId] || 0} kart</span>
+                            </span>}
+                            {analiz && <span className="konu-soru-sayisi">
+                                <DocumentTextIcon aria-hidden="true" />
+                                <span>{analiz.soruSayisi} soru</span>
+                            </span>}
+                        </span>}
+                        {secili === alt.konuId && <CheckIcon className="konu-secim-simgesi" aria-hidden="true" />}
+                    </button>
+                </li>;
+            })}
         </ol>}
     </li>;
 }

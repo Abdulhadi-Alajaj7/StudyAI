@@ -102,16 +102,33 @@
 @media (prefers-reduced-motion: reduce) { .ders-konu-sayfasi *, .ders-konu-sayfasi *::before { transition: none; } }
 
 /* Konu başına çalışma kartı göstergesi */
-.konu-kart-sayisi { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; align-self: center; margin-left: auto; padding: 5px 9px; border: 1px solid color-mix(in srgb, var(--vurgu) 35%, transparent); border-radius: 999px; background: color-mix(in srgb, var(--vurgu) 11%, transparent); color: var(--vurgu); font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.konu-alt .konu-kart-sayisi { gap: 5px; font-size: 11px; padding: 5px 9px; }
-.konu-kart-sayisi > svg { width: 14px; height: 14px; flex-shrink: 0; }
+.konu-kart-sayisi, .konu-soru-sayisi { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; align-self: center; margin-left: auto; padding: 5px 9px; border: 1px solid color-mix(in srgb, var(--vurgu) 35%, transparent); border-radius: 999px; background: color-mix(in srgb, var(--vurgu) 11%, transparent); color: var(--vurgu); font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.konu-alt .konu-kart-sayisi, .konu-alt .konu-soru-sayisi { gap: 5px; font-size: 11px; padding: 5px 9px; }
+.konu-kart-sayisi > svg, .konu-soru-sayisi > svg { width: 14px; height: 14px; flex-shrink: 0; }
 .ders-konu-sayfasi[data-tema="acik"] .konu-kart-sayisi { color: color-mix(in srgb, var(--vurgu) 55%, #0f172a); }
-@media (max-width: 600px) { .konu-alt .konu-kart-sayisi { gap: 3px; padding: 4px 6px; font-size: 10px; } .konu-kart-sayisi > svg { width: 12px; height: 12px; } }
+@media (max-width: 600px) { .konu-alt .konu-kart-sayisi, .konu-alt .konu-soru-sayisi { gap: 3px; padding: 4px 6px; font-size: 10px; } .konu-kart-sayisi > svg, .konu-soru-sayisi > svg { width: 12px; height: 12px; } }
 
-.konu-hakimiyet { display: flex; flex-wrap: wrap; gap: 2px 6px; width: fit-content; max-width: 100%; margin-top: 5px; padding: 3px 7px; border: 1px solid color-mix(in srgb, currentColor 30%, transparent); border-radius: 8px; color: var(--hakimiyet-renk, var(--konu-ikincil)); font-size: 11px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.konu-alt-sayilari { display: grid; align-self: center; flex-shrink: 0; gap: 5px; margin-left: auto; }
+.konu-alt-sayilari > span { margin-left: 0; }
+.konu-soru-sayisi { --vurgu: #69baf6; }
+[data-tema="acik"] .konu-soru-sayisi { color: #17578a; }
+
+.konu-hakimiyet { display: block; margin-top: 7px; color: var(--hakimiyet-renk, #a7b0c2); font-size: 11px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.konu-hakimiyet-baslik { display: block; margin-bottom: 3px; color: var(--konu-ikincil); }
+.konu-hakimiyet-satir { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 7px; }
+.konu-hakimiyet-cubuk { flex: .8 0 0; min-width: 28.8px; height: 5px; border-radius: 999px; background: #26334a; overflow: hidden; }
+.konu-hakimiyet-cubuk > span { display: block; height: 100%; border-radius: inherit; background: currentColor; }
+.konu-hakimiyet-seviye { display: inline-block; max-width: 100%; padding: 2px 6px; border-radius: 8px; background: color-mix(in srgb, currentColor 12%, transparent); overflow-wrap: anywhere; }
+.konu-hakimiyet-bilgi { display: flex; align-items: flex-start; gap: 4px; width: fit-content; max-width: 100%; margin-top: 4px; padding: 3px 6px; border: 1px solid color-mix(in srgb, currentColor 40%, transparent); border-radius: 8px; color: #FBBF24; overflow-wrap: anywhere; }
+.konu-hakimiyet-bilgi > svg { flex-shrink: 0; width: 13px; height: 13px; margin-top: 1px; }
 .konu-hakimiyet[data-durum="zayif"] { --hakimiyet-renk: #fca5a5; }
 .konu-hakimiyet[data-durum="gelistirilmeli"] { --hakimiyet-renk: #fdba74; }
 .konu-hakimiyet[data-durum="iyi"] { --hakimiyet-renk: #86efac; }
-[data-tema="acik"] .konu-hakimiyet[data-durum="zayif"] { --hakimiyet-renk: #b91c1c; }
-[data-tema="acik"] .konu-hakimiyet[data-durum="gelistirilmeli"] { --hakimiyet-renk: #9a3412; }
-[data-tema="acik"] .konu-hakimiyet[data-durum="iyi"] { --hakimiyet-renk: #166534; }
+
+[data-tema="acik"] .konu-hakimiyet[data-durum="iyi"] { --hakimiyet-renk: #15803D; --hakimiyet-dolgu: #4ADE80; --hakimiyet-etiket-zemin: #DCFCE7; }
+[data-tema="acik"] .konu-hakimiyet[data-durum="gelistirilmeli"] { --hakimiyet-renk: #B45309; --hakimiyet-dolgu: #FBBF24; --hakimiyet-etiket-zemin: #FEF3C7; }
+[data-tema="acik"] .konu-hakimiyet[data-durum="zayif"] { --hakimiyet-renk: #DC2626; --hakimiyet-dolgu: #F87171; --hakimiyet-etiket-zemin: #FEE2E2; }
+[data-tema="acik"] .konu-hakimiyet-cubuk { background: #E2E8F0; }
+[data-tema="acik"] .konu-hakimiyet-cubuk > span { background: var(--hakimiyet-dolgu); }
+[data-tema="acik"] .konu-hakimiyet-satir .konu-hakimiyet-seviye { background: var(--hakimiyet-etiket-zemin); }
+[data-tema="acik"] .konu-hakimiyet-bilgi { color: #A16207; background: #FFFBEB; border-color: #FDE68A; }

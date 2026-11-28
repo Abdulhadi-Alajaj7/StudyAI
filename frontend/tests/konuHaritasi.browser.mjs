@@ -113,12 +113,20 @@ const q=new URLSearchParams(location.search);localStorage.setItem('studyai-theme
     await sayilariDogrula(3, 4);
     await bekle("document.querySelectorAll('.konu-alt .konu-hakimiyet').length===4");
     await bekle("document.querySelector('[aria-label=\"2 çalışma kartı\"]')");
-    assert.deepEqual(await evaluate("[...document.querySelectorAll('.konu-hakimiyet')].map(e=>[...e.children].map(s=>s.textContent))"), [
-        ["Zayıf", "%40", "10 soru"],
-        ["Geliştirilmeli", "%50", "10 soru"],
-        ["İyi", "%80", "5 soru"],
-        ["Yeterli Veri Yok", "4 soru"]
+    assert.deepEqual(await evaluate("[...document.querySelectorAll('.konu-hakimiyet-satir')].map(e=>[e.children[0].firstElementChild.style.width,e.children[1].textContent,e.children[2].textContent])"), [
+        ["40%", "%40", "Zayıf"],
+        ["50%", "%50", "Geliştirilmeli"],
+        ["80%", "%80", "İyi"]
     ]);
+    assert.deepEqual(await evaluate("[...document.querySelectorAll('.konu-soru-sayisi')].map(e=>e.textContent)"), ["10 soru", "10 soru", "5 soru", "4 soru"]);
+    assert.ok(await evaluate("[...document.querySelectorAll('.konu-alt-sayilari')].every(e=>{const [kart,soru]=e.children;return kart.offsetLeft===soru.offsetLeft && kart.offsetTop<soru.offsetTop})"));
+    assert.equal(await evaluate("document.querySelector('[data-durum=yeterli_veri_yok] .konu-hakimiyet-seviye').textContent"), "Yeterli Veri Yok");
+    assert.equal(await evaluate("document.querySelector('.konu-hakimiyet-bilgi').textContent.trim()"), "Hâkimiyet seviyeni belirlemek için en az 5 soru çözmelisin.");
+    assert.equal(await evaluate("getComputedStyle(document.querySelector('.konu-hakimiyet-bilgi')).color"), "rgb(251, 191, 36)");
+    const hakimiyetRenkleri = () => evaluate("[...document.querySelectorAll('.konu-hakimiyet-satir > span,.konu-hakimiyet-cubuk > span,.konu-hakimiyet-seviye,.konu-hakimiyet-bilgi')].map(e=>{const s=getComputedStyle(e);return [s.color,s.backgroundColor,s.borderColor]})");
+    const koyuHakimiyetRenkleri = await hakimiyetRenkleri();
+    const cubukOrani = () => evaluate("(()=>{const e=document.querySelector('.konu-hakimiyet-cubuk'),genislik=e.getBoundingClientRect().width;e.style.flex='1 0 36px';e.style.minWidth='0';const eski=e.getBoundingClientRect().width;e.removeAttribute('style');return genislik/eski})()");
+    assert.ok(Math.abs(await cubukOrani() - .8) < .01);
     assert.equal(await evaluate("document.querySelectorAll('.konu-ana .konu-hakimiyet').length"), 0);
     const konuStili = await evaluate("(()=>{const e=document.querySelector('.konu-ana');return {zemin:getComputedStyle(e).backgroundColor,kenar:getComputedStyle(e).borderColor,baslik:getComputedStyle(document.querySelector('.konu-ana-baslik')).fontSize}})()");
     assert.equal(await evaluate("document.querySelector('.konu-ders-koku h3').textContent"), ders.dersAdi);
@@ -156,6 +164,8 @@ const q=new URLSearchParams(location.search);localStorage.setItem('studyai-theme
     await ac(sayfa, "light"); await hazir(); await tasmiyor();
     assert.equal(await evaluate("document.querySelector('.ders-konu-sayfasi').dataset.tema"), "acik");
     await bekle("document.querySelectorAll('.konu-hakimiyet').length===4");
+    assert.deepEqual(await hakimiyetRenkleri(), koyuHakimiyetRenkleri);
+    assert.ok(Math.abs(await cubukOrani() - .8) < .01);
     assert.ok(await evaluate("[...document.querySelectorAll('.konu-alt,.konu-hakimiyet')].every(e=>e.scrollWidth<=e.clientWidth+1)"));
     await tasmiyor();
     senaryo = "uzun"; await ac(sayfa); await bekle("document.querySelectorAll('.konu-alt').length===120"); await tasmiyor();
@@ -178,6 +188,7 @@ const q=new URLSearchParams(location.search);localStorage.setItem('studyai-theme
     await bekle("document.querySelector('[aria-label=\"2 çalışma kartı\"]')");
     assert.ok(istekler.filter(i => i.path.endsWith("/konu-hakimiyeti")).length > oncekiAnalizIstekleri);
     assert.equal(await evaluate("document.querySelectorAll('.konu-hakimiyet').length"), 0);
+    assert.equal(await evaluate("document.querySelectorAll('.konu-soru-sayisi').length"), 0);
     senaryo = "normal"; await ac(`/dersler/${digerId}/konular`); await bekle("document.querySelector('.konu-ana-baslik')?.textContent==='Kök bulma'");
     assert.equal(await evaluate("document.querySelector('.konu-ders-koku h3').textContent"), "Sayısal Yöntemler");
     assert.equal(await evaluate("document.querySelectorAll('.konu-alt,.konu-materyal,[aria-pressed=true]').length"), 0, "Önceki dersin verisi veya seçimi kalmamalı");
